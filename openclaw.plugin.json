@@ -1650,6 +1650,49 @@
             "description": "Maximum number of auto-capture extractions allowed per hour"
           }
         }
+      },
+      "clawloreV2": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Default-off ClawLore V2 runtime request. Shadow activation still requires a separate verified readiness receipt and operator approval.",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": ["disabled", "shadow"],
+            "default": "disabled",
+            "description": "Request no V2 runtime registration or one read-only shadow observer. This field alone never authorizes activation."
+          },
+          "contextEngine": {
+            "type": "string",
+            "enum": ["compatibility", "native-opt-in"],
+            "default": "compatibility",
+            "description": "Compatibility remains the only activatable mode in the fixture-host slice; native-opt-in fails closed."
+          },
+          "tokenBudget": {
+            "type": "integer",
+            "minimum": 32,
+            "maximum": 32768,
+            "default": 512
+          },
+          "maxLatencyMs": {
+            "type": "integer",
+            "minimum": 25,
+            "maximum": 5000,
+            "default": 750,
+            "description": "Maximum time the read-only observer may delay the host hook. Timeout never mutates or blocks the prompt result."
+          },
+          "traceFile": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Optional redacted JSONL receipt path. Raw memory text and principal identifiers are not written."
+          },
+          "maxTraceBytes": {
+            "type": "integer",
+            "minimum": 16384,
+            "maximum": 100000000,
+            "default": 5000000
+          }
+        }
       }
     },
     "required": [
@@ -1657,6 +1700,32 @@
     ]
   },
   "uiHints": {
+    "clawloreV2.mode": {
+      "label": "ClawLore V2 Runtime",
+      "help": "Default disabled. Shadow still requires a separate readiness receipt and operator approval before any hook is registered.",
+      "advanced": true
+    },
+    "clawloreV2.contextEngine": {
+      "label": "ClawLore Context Engine",
+      "help": "Compatibility is the only activatable choice in this release slice. Native opt-in fails closed.",
+      "advanced": true
+    },
+    "clawloreV2.tokenBudget": {
+      "label": "ClawLore Shadow Token Budget",
+      "advanced": true
+    },
+    "clawloreV2.maxLatencyMs": {
+      "label": "ClawLore Shadow Latency Limit",
+      "advanced": true
+    },
+    "clawloreV2.traceFile": {
+      "label": "ClawLore Redacted Trace File",
+      "advanced": true
+    },
+    "clawloreV2.maxTraceBytes": {
+      "label": "ClawLore Trace Rotation Bytes",
+      "advanced": true
+    },
     "embedding.provider": {
       "label": "Embedding Provider",
       "placeholder": "openai-compatible",
