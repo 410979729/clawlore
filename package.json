@@ -31,6 +31,7 @@
     "smoke:clawlore-address-v2": "node scripts/clawlore-memory-address-v2-smoke.mjs",
     "smoke:clawlore-context-pack-v1": "node scripts/clawlore-context-pack-v1-smoke.mjs",
     "smoke:clawlore-legacy-shadow": "node scripts/clawlore-legacy-shadow-smoke.mjs",
+    "smoke:clawlore-security-hardening": "node scripts/clawlore-security-hardening-smoke.mjs",
     "smoke:vector-repair": "node scripts/smoke-vector-repair.mjs",
     "release:gate": "SCOPE_RECALL_ALLOW_NESTED_GIT_ROOT=1 node scripts/release-gate.mjs"
   },

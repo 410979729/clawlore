@@ -78,6 +78,35 @@ test("Experience Kernel registers discoverable scope_recall tools", async () => 
   assert.equal(tools.get("scope_recall_forgetting_run").name, "scope_recall_forgetting_run");
 });
 
+test("Experience Kernel default Agent surface contains only read-only guidance tools", async () => {
+  const tools = new Map();
+  const api = {
+    registerTool(factory, metadata) {
+      const tool = factory({ agentId: "audit-agent" });
+      tools.set(metadata?.name ?? tool.name, tool);
+    },
+  };
+  registerExperienceTools(api, {
+    retriever: {},
+    store: {},
+    scopeManager: {
+      getDefaultScope: (agentId) => `agent:${agentId}`,
+      getScopeFilter: (agentId) => [`agent:${agentId}`, "global"],
+      isAccessible: (scope, agentId) => scope === `agent:${agentId}` || scope === "global",
+    },
+    embedder: {},
+    db: async () => null,
+  });
+  assert.deepEqual(
+    [...tools.keys()].sort(),
+    [
+      "scope_recall_experience_preflight",
+      "scope_recall_playbook_inspect",
+      "scope_recall_playbook_search",
+    ],
+  );
+});
+
 test("Experience Kernel tools fail closed without runtime agent context", async () => {
   const tools = createExperienceToolMap({});
   const result = await tools.get("scope_recall_playbook_search").execute("call-1", { query: "deploy" });

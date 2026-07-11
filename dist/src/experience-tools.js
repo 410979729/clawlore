@@ -1403,9 +1403,9 @@ export function registerExperienceTools(api, context, options = {}) {
     registerPlaybookSearchTool(apiWithMetadata, context);
     registerPlaybookInspectTool(apiWithMetadata, context);
     registerExperiencePreflightTool(apiWithMetadata, context);
-    registerExperienceStatsTool(apiWithMetadata, context);
-    registerExperienceReplayTool(apiWithMetadata, context);
     if (options.enableManagementTools === true) {
+        registerExperienceStatsTool(apiWithMetadata, context);
+        registerExperienceReplayTool(apiWithMetadata, context);
         registerEpisodeCreateTool(apiWithMetadata, context);
         registerEpisodeCompleteTool(apiWithMetadata, context);
         registerPlaybookCreateTool(apiWithMetadata, context);

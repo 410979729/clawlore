@@ -51,6 +51,28 @@
       "scope_recall_playbook_review"
     ]
   },
+  "configContracts": {
+    "secretInputs": {
+      "paths": [
+        {
+          "path": "embedding.apiKey",
+          "expected": "string"
+        },
+        {
+          "path": "embedding.apiKey.*",
+          "expected": "string"
+        },
+        {
+          "path": "retrieval.rerankApiKey",
+          "expected": "string"
+        },
+        {
+          "path": "llm.apiKey",
+          "expected": "string"
+        }
+      ]
+    }
+  },
   "toolMetadata": {
     "memory_store_secret_index": {
       "configSignals": [
@@ -244,13 +266,33 @@
       "discoverable": true
     },
     "scope_recall_experience_stats": {
-      "discoverable": true
+      "discoverable": false,
+      "configSignals": [
+        {
+          "rootPath": "plugins.entries.scope-recall-openclaw.config",
+          "mode": {
+            "path": "enableManagementTools",
+            "default": "false",
+            "allowed": ["true"]
+          }
+        }
+      ]
     },
     "scope_recall_experience_replay": {
-      "discoverable": true
+      "discoverable": false,
+      "configSignals": [
+        {
+          "rootPath": "plugins.entries.scope-recall-openclaw.config",
+          "mode": {
+            "path": "enableManagementTools",
+            "default": "false",
+            "allowed": ["true"]
+          }
+        }
+      ]
     },
     "scope_recall_episode_create": {
-      "discoverable": true,
+      "discoverable": false,
       "configSignals": [
         {
           "rootPath": "plugins.entries.scope-recall-openclaw.config",
@@ -265,7 +307,7 @@
       ]
     },
     "scope_recall_episode_complete": {
-      "discoverable": true,
+      "discoverable": false,
       "configSignals": [
         {
           "rootPath": "plugins.entries.scope-recall-openclaw.config",
@@ -280,7 +322,7 @@
       ]
     },
     "scope_recall_playbook_create": {
-      "discoverable": true,
+      "discoverable": false,
       "configSignals": [
         {
           "rootPath": "plugins.entries.scope-recall-openclaw.config",
@@ -295,7 +337,7 @@
       ]
     },
     "scope_recall_playbook_feedback": {
-      "discoverable": true,
+      "discoverable": false,
       "configSignals": [
         {
           "rootPath": "plugins.entries.scope-recall-openclaw.config",
@@ -310,7 +352,7 @@
       ]
     },
     "scope_recall_playbook_review": {
-      "discoverable": true,
+      "discoverable": false,
       "configSignals": [
         {
           "rootPath": "plugins.entries.scope-recall-openclaw.config",
@@ -325,7 +367,7 @@
       ]
     },
     "scope_recall_experience_promote": {
-      "discoverable": true,
+      "discoverable": false,
       "configSignals": [
         {
           "rootPath": "plugins.entries.scope-recall-openclaw.config",
@@ -340,7 +382,7 @@
       ]
     },
     "scope_recall_forgetting_report": {
-      "discoverable": true,
+      "discoverable": false,
       "configSignals": [
         {
           "rootPath": "plugins.entries.scope-recall-openclaw.config",
@@ -355,7 +397,7 @@
       ]
     },
     "scope_recall_forgetting_run": {
-      "discoverable": true,
+      "discoverable": false,
       "configSignals": [
         {
           "rootPath": "plugins.entries.scope-recall-openclaw.config",
@@ -370,7 +412,7 @@
       ]
     },
     "scope_recall_governance_cleanup_report": {
-      "discoverable": true,
+      "discoverable": false,
       "configSignals": [
         {
           "rootPath": "plugins.entries.scope-recall-openclaw.config",
@@ -385,7 +427,7 @@
       ]
     },
     "scope_recall_governance_cleanup_run": {
-      "discoverable": true,
+      "discoverable": false,
       "configSignals": [
         {
           "rootPath": "plugins.entries.scope-recall-openclaw.config",
@@ -400,7 +442,7 @@
       ]
     },
     "scope_recall_memory_candidate_promotion_report": {
-      "discoverable": true,
+      "discoverable": false,
       "configSignals": [
         {
           "rootPath": "plugins.entries.scope-recall-openclaw.config",
@@ -415,7 +457,7 @@
       ]
     },
     "scope_recall_memory_candidate_promotion_run": {
-      "discoverable": true,
+      "discoverable": false,
       "configSignals": [
         {
           "rootPath": "plugins.entries.scope-recall-openclaw.config",
@@ -430,7 +472,7 @@
       ]
     },
     "scope_recall_graph_hygiene_report": {
-      "discoverable": true,
+      "discoverable": false,
       "configSignals": [
         {
           "rootPath": "plugins.entries.scope-recall-openclaw.config",
@@ -445,7 +487,7 @@
       ]
     },
     "scope_recall_graph_hygiene_run": {
-      "discoverable": true,
+      "discoverable": false,
       "configSignals": [
         {
           "rootPath": "plugins.entries.scope-recall-openclaw.config",
@@ -460,7 +502,7 @@
       ]
     },
     "scope_recall_journal_recovery_report": {
-      "discoverable": true,
+      "discoverable": false,
       "configSignals": [
         {
           "rootPath": "plugins.entries.scope-recall-openclaw.config",
@@ -475,7 +517,7 @@
       ]
     },
     "scope_recall_journal_recovery_run": {
-      "discoverable": true,
+      "discoverable": false,
       "configSignals": [
         {
           "rootPath": "plugins.entries.scope-recall-openclaw.config",
@@ -490,7 +532,7 @@
       ]
     },
     "scope_recall_digest_report": {
-      "discoverable": true,
+      "discoverable": false,
       "configSignals": [
         {
           "rootPath": "plugins.entries.scope-recall-openclaw.config",
@@ -505,7 +547,7 @@
       ]
     },
     "scope_recall_digest_run": {
-      "discoverable": true,
+      "discoverable": false,
       "configSignals": [
         {
           "rootPath": "plugins.entries.scope-recall-openclaw.config",
@@ -520,7 +562,7 @@
       ]
     },
     "scope_recall_digest_recovery": {
-      "discoverable": true,
+      "discoverable": false,
       "configSignals": [
         {
           "rootPath": "plugins.entries.scope-recall-openclaw.config",
@@ -535,7 +577,7 @@
       ]
     },
     "scope_recall_operator_dashboard": {
-      "discoverable": true,
+      "discoverable": false,
       "configSignals": [
         {
           "rootPath": "plugins.entries.scope-recall-openclaw.config",
@@ -575,15 +617,57 @@
                 "minLength": 1
               },
               {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["source", "provider", "id"],
+                "properties": {
+                  "source": {
+                    "type": "string",
+                    "enum": ["env", "file", "exec"]
+                  },
+                  "provider": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              {
                 "type": "array",
                 "items": {
-                  "type": "string",
-                  "minLength": 1
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["source", "provider", "id"],
+                      "properties": {
+                        "source": {
+                          "type": "string",
+                          "enum": ["env", "file", "exec"]
+                        },
+                        "provider": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    }
+                  ]
                 },
                 "minItems": 1
               }
             ],
-            "description": "Single API key or array of keys for hosted embedding providers. Hosted providers receive memory text for embedding; use local-hash/local-debug or a local endpoint for sensitive deployments."
+            "description": "Single API key/SecretRef or array for hosted embedding providers. Hosted providers receive memory text for embedding; use local-hash/local-debug or a local endpoint for sensitive deployments."
           },
           "model": {
             "type": "string"
@@ -641,7 +725,12 @@
       "enableManagementTools": {
         "type": "boolean",
         "default": false,
-        "description": "Expose operator tools such as memory_list, memory_stats, memory_compact, and self-improvement review/extract actions."
+        "description": "Enable operator services for CLI/UI use. Agent discovery additionally requires allowAgentOperatorTools."
+      },
+      "allowAgentOperatorTools": {
+        "type": "boolean",
+        "default": false,
+        "description": "Second explicit gate required before operator tools may enter the Agent tool surface."
       },
       "secretIndexToolsEnabled": {
         "type": "boolean",
@@ -1004,7 +1093,19 @@
             "default": "cross-encoder"
           },
           "rerankApiKey": {
-            "type": "string",
+            "oneOf": [
+              { "type": "string", "minLength": 1 },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["source", "provider", "id"],
+                "properties": {
+                  "source": { "type": "string", "enum": ["env", "file", "exec"] },
+                  "provider": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$" },
+                  "id": { "type": "string", "minLength": 1 }
+                }
+              }
+            ],
             "description": "API key for reranker service (enables cross-encoder reranking)"
           },
           "rerankModel": {
@@ -1375,7 +1476,19 @@
             "description": "LLM authentication mode. oauth uses the local Codex/ChatGPT login cache instead of llm.apiKey."
           },
           "apiKey": {
-            "type": "string"
+            "oneOf": [
+              { "type": "string", "minLength": 1 },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["source", "provider", "id"],
+                "properties": {
+                  "source": { "type": "string", "enum": ["env", "file", "exec"] },
+                  "provider": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$" },
+                  "id": { "type": "string", "minLength": 1 }
+                }
+              }
+            ]
           },
           "model": {
             "type": "string",
@@ -1459,7 +1572,13 @@
           "enabled": {
             "type": "boolean",
             "default": false,
-            "description": "Enable automatic compaction at gateway startup (respects cooldownHours)"
+            "description": "Enable compaction policy. Gateway startup remains non-destructive."
+          },
+          "startupMode": {
+            "type": "string",
+            "enum": ["off", "dry-run"],
+            "default": "off",
+            "description": "Optional read-only compaction preview at Gateway startup; apply is never allowed here."
           },
           "minAgeDays": {
             "type": "integer",

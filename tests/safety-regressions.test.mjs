@@ -352,12 +352,14 @@ test("manifest declares all owned tools and marks management tools with config a
     "scope_recall_playbook_search",
     "scope_recall_playbook_inspect",
     "scope_recall_experience_preflight",
-    "scope_recall_experience_stats",
-    "scope_recall_experience_replay",
   ]);
   for (const toolName of EXPERIENCE_TOOL_NAMES) {
     assert.ok(manifest.contracts.tools.includes(toolName), `${toolName} contract missing`);
-    assert.ok(manifest.toolMetadata[toolName]?.discoverable, `${toolName} metadata missing`);
+    assert.equal(
+      manifest.toolMetadata[toolName]?.discoverable,
+      alwaysAvailableExperienceTools.has(toolName),
+      `${toolName} discovery posture`,
+    );
     if (!alwaysAvailableExperienceTools.has(toolName)) {
       const signal = manifest.toolMetadata[toolName].configSignals?.[0];
       assert.equal(signal?.rootPath, "plugins.entries.scope-recall-openclaw.config", toolName);
@@ -365,6 +367,34 @@ test("manifest declares all owned tools and marks management tools with config a
       assert.deepEqual(signal?.mode?.allowed, ["true"], toolName);
     }
   }
+
+  assert.deepEqual(
+    manifest.configContracts.secretInputs.paths.map((entry) => entry.path),
+    ["embedding.apiKey", "embedding.apiKey.*", "retrieval.rerankApiKey", "llm.apiKey"],
+  );
+  assert.ok(
+    manifest.configSchema.properties.embedding.properties.apiKey.oneOf.some(
+      (entry) => entry.type === "object",
+    ),
+  );
+  assert.equal(
+    manifest.configSchema.properties.allowAgentOperatorTools.default,
+    false,
+  );
+  assert.deepEqual(
+    manifest.configSchema.properties.memoryCompaction.properties.startupMode.enum,
+    ["off", "dry-run"],
+  );
+});
+
+test("legacy plaintext backup and destructive startup compaction are disabled", () => {
+  const entry = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(entry, /backup timers armed/);
+  assert.match(entry, /legacy plaintext autoBackup is disabled/);
+  assert.match(entry, /startupMode === "dry-run"/);
+  assert.match(entry, /dryRun: true/);
+  assert.doesNotMatch(entry, /recordCompactionRun\(compactionStateFile\)/);
+  assert.match(entry, /config\.allowAgentOperatorTools === true/);
 });
 
 test("vector repair CLI is dry-run-first and SQLite stores use busy timeout", () => {

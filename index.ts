@@ -39,7 +39,6 @@ import { parseClawteamScopes, applyClawteamScopes } from "./src/clawteam-scope.j
 import {
   runCompaction,
   shouldRunCompaction,
-  recordCompactionRun,
   type CompactionConfig,
 } from "./src/memory-compactor.js";
 import { runWithReflectionTransientRetryOnce } from "./src/reflection-retry.js";
@@ -214,6 +213,7 @@ interface PluginConfig {
     agentAccess?: Record<string, string[]>;
   };
   enableManagementTools?: boolean;
+  allowAgentOperatorTools?: boolean;
   secretIndexToolsEnabled?: boolean;
   sessionStrategy?: SessionStrategy;
   sessionMemory?: { enabled?: boolean; messageCount?: number };
@@ -241,6 +241,7 @@ interface PluginConfig {
   admissionControl?: AdmissionControlConfig;
   memoryCompaction?: {
     enabled?: boolean;
+    startupMode?: "off" | "dry-run";
     minAgeDays?: number;
     similarityThreshold?: number;
     minClusterSize?: number;
@@ -2201,6 +2202,9 @@ const scopeRecallOpenClawPlugin = {
     // Register Tools
     // ========================================================================
 
+    const agentOperatorToolsEnabled =
+      config.enableManagementTools === true && config.allowAgentOperatorTools === true;
+
     registerAllMemoryTools(
       api,
       {
@@ -2214,13 +2218,13 @@ const scopeRecallOpenClawPlugin = {
         workspaceBoundary: config.workspaceBoundary,
       },
       {
-        enableManagementTools: config.enableManagementTools,
+        enableManagementTools: agentOperatorToolsEnabled,
         enableSelfImprovementTools: config.selfImprovement?.enabled === true,
         secretIndexToolsEnabled: config.secretIndexToolsEnabled === true,
       }
     );
 
-    if (config.enableManagementTools || config.taskExperienceCapture?.enabled === true) {
+    if (agentOperatorToolsEnabled || config.taskExperienceCapture?.enabled === true) {
       registerExperienceTools(
         api,
         {
@@ -2235,7 +2239,7 @@ const scopeRecallOpenClawPlugin = {
           db: () => store.getSqlTruthDb(),
         },
         {
-          enableManagementTools: config.enableManagementTools,
+          enableManagementTools: agentOperatorToolsEnabled,
         },
       );
       logReg("scope-recall-openclaw: Experience Kernel tools registered");
@@ -2248,8 +2252,12 @@ const scopeRecallOpenClawPlugin = {
         });
     }
 
-    // Auto-compaction at gateway_start (if enabled, respects cooldown)
-    if (config.memoryCompaction?.enabled) {
+    // Startup compaction is never destructive. Legacy `enabled: true` alone no
+    // longer opts a deployment into mutation during Gateway startup.
+    if (
+      config.memoryCompaction?.enabled === true
+      && config.memoryCompaction.startupMode === "dry-run"
+    ) {
       api.on("gateway_start", () => {
         const compactionStateFile = join(
           dirname(resolvedDbPath),
@@ -2261,18 +2269,17 @@ const scopeRecallOpenClawPlugin = {
           similarityThreshold: config.memoryCompaction!.similarityThreshold ?? 0.88,
           minClusterSize: config.memoryCompaction!.minClusterSize ?? 2,
           maxMemoriesToScan: config.memoryCompaction!.maxMemoriesToScan ?? 200,
-          dryRun: false,
+          dryRun: true,
           cooldownHours: config.memoryCompaction!.cooldownHours ?? 24,
         };
 
         shouldRunCompaction(compactionStateFile, compactionCfg.cooldownHours)
           .then(async (should) => {
             if (!should) return;
-            await recordCompactionRun(compactionStateFile);
             const result = await runCompaction(store, embedder, compactionCfg, undefined, api.logger);
             if (result.clustersFound > 0) {
               api.logger.info(
-                `memory-compactor [auto]: compacted ${result.memoriesDeleted} → ${result.memoriesCreated} entries`,
+                `memory-compactor [startup dry-run]: ${result.clustersFound} candidate clusters; no data changed`,
               );
             }
           })
@@ -3982,55 +3989,8 @@ const scopeRecallOpenClawPlugin = {
     // Auto-Backup (daily JSONL export)
     // ========================================================================
 
-    let backupTimer: ReturnType<typeof setInterval> | null = null;
     let startupChecksTimer: ReturnType<typeof setTimeout> | null = null;
     let legacyScanTimer: ReturnType<typeof setTimeout> | null = null;
-    let initialBackupTimer: ReturnType<typeof setTimeout> | null = null;
-    const BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
-
-    async function runBackup() {
-      try {
-        const backupDir = join(dirname(resolvedDbPath), "backups");
-        await mkdir(backupDir, { recursive: true });
-
-        const allMemories = await store.list(undefined, undefined, 10000, 0);
-        if (allMemories.length === 0) return;
-
-        const dateStr = new Date().toISOString().split("T")[0];
-        const backupFile = join(backupDir, `memory-backup-${dateStr}.jsonl`);
-
-        const lines = allMemories.map((m) =>
-          JSON.stringify({
-            id: m.id,
-            text: m.text,
-            category: m.category,
-            scope: m.scope,
-            importance: m.importance,
-            timestamp: m.timestamp,
-            metadata: m.metadata,
-          }),
-        );
-
-        await writeFile(backupFile, lines.join("\n") + "\n");
-
-        // Keep only last 7 backups
-        const files = (await readdir(backupDir))
-          .filter((f) => f.startsWith("memory-backup-") && f.endsWith(".jsonl"))
-          .sort();
-        if (files.length > 7) {
-          const { unlink } = await import("node:fs/promises");
-          for (const old of files.slice(0, files.length - 7)) {
-            await unlink(join(backupDir, old)).catch(() => { });
-          }
-        }
-
-        api.logger.info(
-          `scope-recall-openclaw: backup completed (${allMemories.length} entries → ${backupFile})`,
-        );
-      } catch (err) {
-        api.logger.warn(`scope-recall-openclaw: backup failed: ${String(err)}`);
-      }
-    }
 
     // ========================================================================
     // Service Registration
@@ -4123,12 +4083,11 @@ const scopeRecallOpenClawPlugin = {
         }, 5_000);
 
         if (config.autoBackup === true) {
-          // Run initial backup after a short delay, then schedule daily.
-          initialBackupTimer = setTimeout(() => void runBackup(), 60_000); // 1 min after start
-          backupTimer = setInterval(() => void runBackup(), BACKUP_INTERVAL_MS);
-          api.logger.info("scope-recall-openclaw: backup timers armed (initial: 60000ms, interval: 86400000ms)");
+          api.logger.warn(
+            "scope-recall-openclaw: legacy plaintext autoBackup is disabled; use the ClawLore snapshot/export operator flow",
+          );
         } else {
-          api.logger.info("scope-recall-openclaw: automatic JSONL backups disabled (set autoBackup=true to enable)");
+          api.logger.info("scope-recall-openclaw: legacy plaintext JSONL backups disabled");
         }
       },
       stop: async () => {
@@ -4139,14 +4098,6 @@ const scopeRecallOpenClawPlugin = {
         if (legacyScanTimer) {
           clearTimeout(legacyScanTimer);
           legacyScanTimer = null;
-        }
-        if (initialBackupTimer) {
-          clearTimeout(initialBackupTimer);
-          initialBackupTimer = null;
-        }
-        if (backupTimer) {
-          clearInterval(backupTimer);
-          backupTimer = null;
         }
         api.logger.info("scope-recall-openclaw: stopped");
       },
@@ -4316,6 +4267,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
     extractMaxChars: parsePositiveInt(cfg.extractMaxChars) ?? 8000,
     scopes: typeof cfg.scopes === "object" && cfg.scopes !== null ? cfg.scopes as any : undefined,
     enableManagementTools: cfg.enableManagementTools === true,
+    allowAgentOperatorTools: cfg.allowAgentOperatorTools === true,
     sessionStrategy,
     selfImprovement: typeof cfg.selfImprovement === "object" && cfg.selfImprovement !== null
       ? {
@@ -4408,6 +4360,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
       if (!raw) return undefined;
       return {
         enabled: raw.enabled === true,
+        startupMode: raw.startupMode === "dry-run" ? "dry-run" : "off",
         minAgeDays: parsePositiveInt(raw.minAgeDays) ?? 7,
         similarityThreshold:
           typeof raw.similarityThreshold === "number"
