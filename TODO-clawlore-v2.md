@@ -53,7 +53,7 @@ Updated: 2026-07-11
 ## Next slice candidates
 
 - [x] Add online SQLite snapshot backup, restore-to-new-location verification, and rollback drill.
-- [ ] Add additive v2 migration apply/rollback against copied fixtures; never the live database.
+- [x] Add additive v2 migration apply/rollback against copied fixtures; never the live database.
 - [ ] Adapt legacy auto-capture/reflection/digest/task-experience triggers to one candidate journal.
 - [ ] Add correction/forget projection convergence receipts and operator inspection.
 - [ ] Add encrypted archive wrapping and key-provider integration around verified snapshots.
@@ -70,6 +70,18 @@ Updated: 2026-07-11
 - [x] Verify checksum, schema, integrity, foreign keys, and truth-table counts.
 - [x] Restore only to a new location and remove failed restore destinations.
 - [x] Reject tampered snapshots before restore.
+
+## Phase 2C — Legacy migration drill
+
+- [x] Require a read-only migration plan and stable digest before apply.
+- [x] Require explicit approval and a destination that does not exist.
+- [x] Preserve manual/user-confirmed rows as active only when identity resolves.
+- [x] Preserve ambiguous/auto-extracted rows as unverified candidates.
+- [x] Preserve archived/rejected/superseded legacy rows as non-active.
+- [x] Record legacy classification, scope, identity review, and verification debt
+      as source evidence.
+- [x] Write a 0600 migration marker and require its id/digest for rollback.
+- [x] Prove the legacy SQLite hash is unchanged before/after preview, apply, and rollback.
 
 ## Phase 0 verification
 
@@ -124,6 +136,15 @@ Updated: 2026-07-11
 - `npm run typecheck`, build, vector-repair smoke, golden recall, and release
   gate: PASS.
 - Release gate pack scan: 275 files.
+- Golden recall: 1.0; forbidden violations 0; prompt-budget exceeded 0.
+- Live extension/config/database/hooks/ContextEngine/Gateway: unchanged.
+
+## Phase 2C verification
+
+- Migration apply/rollback tests: 2/2 PASS.
+- Full plugin tests: 125/125 PASS.
+- Typecheck/build/vector-repair/golden recall/release gate: PASS.
+- Release gate pack scan: 279 files.
 - Golden recall: 1.0; forbidden violations 0; prompt-budget exceeded 0.
 - Live extension/config/database/hooks/ContextEngine/Gateway: unchanged.
 

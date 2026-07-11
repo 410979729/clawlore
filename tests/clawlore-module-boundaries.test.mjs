@@ -11,7 +11,7 @@ const allowed = {
   storage: new Set(["storage", "application", "domain"]),
   workers: new Set(["workers", "application", "domain"]),
   adapters: new Set(["adapters", "application", "domain"]),
-  migration: new Set(["migration", "application", "domain"]),
+  migration: new Set(["migration", "application", "domain", "storage"]),
   operator: new Set(["operator", "application", "domain", "storage", "migration"]),
   eval: new Set(["eval", "application", "adapters", "domain"]),
 };

@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
-function classify(metadata) {
+export function classifyLegacySourceV2(metadata) {
     const source = String(metadata.source ?? metadata.source_type ?? "").toLowerCase();
     if (source.includes("manual") || source.includes("user"))
         return "explicit_manual";
@@ -31,7 +31,7 @@ export function previewLegacyMigrationV2(sqlitePath) {
             catch {
                 invalidMetadataRows += 1;
             }
-            const kind = classify(metadata);
+            const kind = classifyLegacySourceV2(metadata);
             classifications[kind] = (classifications[kind] ?? 0) + 1;
             const verification = String(metadata.verification ?? metadata.verification_status ?? "");
             if (!verification || kind === "unknown_legacy")
