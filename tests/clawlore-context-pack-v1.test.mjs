@@ -110,9 +110,11 @@ test("shadow adapter resolves sender and completes policy preflight before retri
   const result = await runCompatibilityContextShadow({
     traceId: "trace-shadow-direct",
     availableTokens: 32,
+    queryText: "preferred language",
     identity: fixture.directIdentity,
-    retrieveCandidates: async (boundary) => {
+    retrieveCandidates: async ({ boundary, queryText }) => {
       order.push("retrieve");
+      assert.equal(queryText, "preferred language");
       assert.equal(boundary.principalId, fixture.expectedDirectPrincipal);
       assert.equal(boundary.visibility, "private");
       return [candidate("direct-memory")];
@@ -137,8 +139,9 @@ test("group shadow boundary binds conversation and thread", async () => {
   const result = await runCompatibilityContextShadow({
     traceId: "trace-shadow-group",
     availableTokens: 32,
+    queryText: "group memory",
     identity: fixture.groupIdentity,
-    retrieveCandidates: async (boundary) => {
+    retrieveCandidates: async ({ boundary }) => {
       assert.equal(boundary.visibility, "conversation");
       assert.equal(boundary.conversationId, "group-9");
       assert.equal(boundary.threadId, "topic-3");
@@ -159,6 +162,7 @@ test("unresolved sender fails closed before candidate retrieval", async () => {
   const result = await runCompatibilityContextShadow({
     traceId: "trace-shadow-unresolved",
     availableTokens: 32,
+    queryText: "must not retrieve",
     identity: {
       tenantId: "local",
       agentId: "main",
@@ -174,4 +178,22 @@ test("unresolved sender fails closed before candidate retrieval", async () => {
   assert.equal(retrievalCalls, 0);
   assert.equal(result.trace[0].stage, "identity");
   assert.equal(result.trace[0].outcome, "skip");
+});
+
+test("resolved identity without a query skips retrieval", async () => {
+  let retrievalCalls = 0;
+  const result = await runCompatibilityContextShadow({
+    traceId: "trace-shadow-no-query",
+    availableTokens: 32,
+    identity: fixture.directIdentity,
+    retrieveCandidates: async () => { retrievalCalls += 1; return []; },
+  });
+  assert.equal(result.identity.status, "resolved");
+  assert.equal(result.retrievalInvoked, false);
+  assert.equal(retrievalCalls, 0);
+  assert.deepEqual(result.trace.at(-1), {
+    stage: "candidate_retrieval",
+    outcome: "skip",
+    detail: "query_unavailable",
+  });
 });

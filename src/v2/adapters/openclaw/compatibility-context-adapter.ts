@@ -27,11 +27,17 @@ export interface CompatibilityRetrievalBoundaryV1 {
   taskId?: string;
 }
 
+export interface CompatibilityRetrievalRequestV1 {
+  boundary: CompatibilityRetrievalBoundaryV1;
+  queryText: string;
+}
+
 export interface CompatibilityContextShadowInput {
   traceId: string;
   availableTokens: number;
+  queryText?: string;
   identity: IdentityResolverInput;
-  retrieveCandidates(boundary: CompatibilityRetrievalBoundaryV1): Promise<ContextCandidateV1[]>;
+  retrieveCandidates(request: CompatibilityRetrievalRequestV1): Promise<ContextCandidateV1[]>;
 }
 
 export interface CompatibilityContextShadowResult {
@@ -105,7 +111,20 @@ export async function runCompatibilityContextShadow(
   trace.push({ stage: "policy_preflight", outcome: "pass", detail: preflight.reasonCode });
 
   const boundary = retrievalBoundary(identity.address);
-  const candidates = await input.retrieveCandidates(boundary);
+  const queryText = typeof input.queryText === "string" ? input.queryText.trim() : "";
+  if (!queryText) {
+    trace.push({ stage: "candidate_retrieval", outcome: "skip", detail: "query_unavailable" });
+    return {
+      schemaVersion: 1,
+      mode: "shadow",
+      identity,
+      preflight,
+      retrievalBoundary: boundary,
+      retrievalInvoked: false,
+      trace,
+    };
+  }
+  const candidates = await input.retrieveCandidates({ boundary, queryText });
   trace.push({ stage: "candidate_retrieval", outcome: "pass", detail: `${candidates.length}_candidates` });
 
   const pack = composeContextPack({

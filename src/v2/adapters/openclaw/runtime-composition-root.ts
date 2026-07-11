@@ -8,7 +8,7 @@ import {
   type ContextEngineNegotiationV2,
 } from "./context-engine-skeleton.js";
 import type {
-  CompatibilityRetrievalBoundaryV1,
+  CompatibilityRetrievalRequestV1,
 } from "./compatibility-context-adapter.js";
 import {
   JsonlRuntimeShadowTraceSink,
@@ -26,6 +26,8 @@ export interface ClawLoreRuntimeConfigV1 {
   maxLatencyMs: number;
   traceFile?: string;
   maxTraceBytes: number;
+  maxQueryChars: number;
+  candidateLimit: number;
 }
 
 export interface RuntimeRolloutApprovalV1 {
@@ -68,7 +70,7 @@ export interface RuntimeCompositionDependenciesV1 {
   tenantId: string;
   agentId: string;
   workspaceId?: string;
-  retrieveCandidates(boundary: CompatibilityRetrievalBoundaryV1): Promise<ContextCandidateV1[]>;
+  retrieveCandidates(request: CompatibilityRetrievalRequestV1): Promise<ContextCandidateV1[]>;
   traceSink?: RuntimeShadowTraceSink;
   now?: () => Date;
   onObserverError?(code: "shadow_observer_failed" | "shadow_observer_timeout"): void;
@@ -98,7 +100,26 @@ export function normalizeClawLoreRuntimeConfigV1(value: unknown): ClawLoreRuntim
       ? raw.traceFile.trim()
       : undefined,
     maxTraceBytes: boundedInteger(raw.maxTraceBytes, 5_000_000, 16_384, 100_000_000),
+    maxQueryChars: boundedInteger(raw.maxQueryChars, 4_000, 256, 12_000),
+    candidateLimit: boundedInteger(raw.candidateLimit, 6, 1, 20),
   };
+}
+
+function shadowQueryText(
+  event: Record<string, unknown>,
+  context: Record<string, unknown>,
+  maxChars: number,
+): string {
+  const candidates = [
+    event.userPrompt,
+    event.prompt,
+    event.text,
+    event.content,
+    context.userPrompt,
+    context.prompt,
+  ];
+  const value = candidates.find((candidate) => typeof candidate === "string" && candidate.trim());
+  return typeof value === "string" ? value.trim().slice(0, maxChars) : "";
 }
 
 function validApproval(
@@ -237,6 +258,7 @@ export function composeClawLoreRuntimeV1(input: {
         input: {
           traceId: opaqueTraceId(sequence, event, context),
           availableTokens: numericBudget(event, context, input.config.tokenBudget),
+          queryText: shadowQueryText(event, context, input.config.maxQueryChars),
           identity: {
             tenantId: input.dependencies.tenantId,
             agentId: typeof context.agentId === "string" && context.agentId.trim()

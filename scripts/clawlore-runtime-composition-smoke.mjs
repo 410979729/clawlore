@@ -29,7 +29,7 @@ const commonDependencies = {
   tenantId: "local",
   agentId: "main",
   workspaceId: "fixture-workspace",
-  retrieveCandidates: async (boundary) => [{
+  retrieveCandidates: async ({ boundary }) => [{
     id: "fixture-memory",
     section: "profile",
     text: "fixture-only memory",

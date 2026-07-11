@@ -17,8 +17,9 @@ const runtime = {
 const result = await runCompatibilityContextShadow({
   traceId: "context-pack-v1-smoke",
   availableTokens: 64,
+  queryText: "concise answer preference",
   identity: { tenantId: "local", agentId: "main", runtimeContext: runtime },
-  retrieveCandidates: async (boundary) => {
+  retrieveCandidates: async ({ boundary }) => {
     retrievalCalls += 1;
     return [{
       id: "memory-smoke-1",

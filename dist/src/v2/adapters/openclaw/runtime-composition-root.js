@@ -24,7 +24,21 @@ export function normalizeClawLoreRuntimeConfigV1(value) {
             ? raw.traceFile.trim()
             : undefined,
         maxTraceBytes: boundedInteger(raw.maxTraceBytes, 5_000_000, 16_384, 100_000_000),
+        maxQueryChars: boundedInteger(raw.maxQueryChars, 4_000, 256, 12_000),
+        candidateLimit: boundedInteger(raw.candidateLimit, 6, 1, 20),
     };
+}
+function shadowQueryText(event, context, maxChars) {
+    const candidates = [
+        event.userPrompt,
+        event.prompt,
+        event.text,
+        event.content,
+        context.userPrompt,
+        context.prompt,
+    ];
+    const value = candidates.find((candidate) => typeof candidate === "string" && candidate.trim());
+    return typeof value === "string" ? value.trim().slice(0, maxChars) : "";
 }
 function validApproval(approval, readiness) {
     if (!approval || !readiness)
@@ -142,6 +156,7 @@ export function composeClawLoreRuntimeV1(input) {
                 input: {
                     traceId: opaqueTraceId(sequence, event, context),
                     availableTokens: numericBudget(event, context, input.config.tokenBudget),
+                    queryText: shadowQueryText(event, context, input.config.maxQueryChars),
                     identity: {
                         tenantId: input.dependencies.tenantId,
                         agentId: typeof context.agentId === "string" && context.agentId.trim()

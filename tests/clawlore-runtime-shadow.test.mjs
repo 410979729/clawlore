@@ -33,6 +33,7 @@ test("runtime shadow is default-off and never calls retrieval", async () => {
     input: {
       traceId: "shadow-disabled",
       availableTokens: 32,
+      queryText: "disabled query",
       identity,
       retrieveCandidates: async () => { calls += 1; return []; },
     },
@@ -52,8 +53,9 @@ test("runtime shadow trace excludes raw principal and memory text", async () => 
       input: {
         traceId: "shadow-enabled",
         availableTokens: 32,
+        queryText: "private preference",
         identity,
-        retrieveCandidates: async (boundary) => [{
+        retrieveCandidates: async ({ boundary }) => [{
           id: "memory-1",
           section: "profile",
           text: "private raw memory text",

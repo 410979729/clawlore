@@ -76,7 +76,7 @@ function dependencies(overrides = {}) {
     tenantId: "local",
     agentId: "main",
     workspaceId: "workspace-1",
-    retrieveCandidates: async (boundary) => [{
+    retrieveCandidates: async ({ boundary }) => [{
       id: "memory-1",
       section: "profile",
       text: "Use Simplified Chinese by default",
@@ -158,9 +158,10 @@ test("approved fixture shadow registers one observer and never mutates prompt or
     host,
     dependencies: dependencies({
       traceSink: sink,
-      retrieveCandidates: async (boundary) => {
+      retrieveCandidates: async (request) => {
         retrievalCalls += 1;
-        return dependencies().retrieveCandidates(boundary);
+        assert.equal(request.queryText, "private prompt must not enter the trace");
+        return dependencies().retrieveCandidates(request);
       },
       now: () => new Date("2026-07-12T03:02:00.000Z"),
     }),
@@ -233,7 +234,7 @@ test("shadow observer fails open when retrieval times out or trace persistence f
   });
   const startedAt = Date.now();
   const timeoutResults = await timeoutHost.emitBeforePrompt(
-    { id: "timeout-message" },
+    { id: "timeout-message", prompt: "timeout retrieval query" },
     { agentId: "main", senderId: "user-1", platform: "telegram", chatType: "direct" },
   );
   assert.deepEqual(timeoutResults, [undefined]);
@@ -252,7 +253,7 @@ test("shadow observer fails open when retrieval times out or trace persistence f
     approval: approval(),
   });
   const sinkResults = await sinkHost.emitBeforePrompt(
-    { id: "sink-message" },
+    { id: "sink-message", prompt: "sink failure query" },
     { agentId: "main", senderId: "user-1", platform: "telegram", chatType: "direct" },
   );
   assert.deepEqual(sinkResults, [undefined]);

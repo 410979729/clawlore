@@ -1691,6 +1691,29 @@
             "minimum": 16384,
             "maximum": 100000000,
             "default": 5000000
+          },
+          "maxQueryChars": {
+            "type": "integer",
+            "minimum": 256,
+            "maximum": 12000,
+            "default": 4000,
+            "description": "Maximum query characters visible to the read-only shadow retriever. Query text is never written to the shadow receipt."
+          },
+          "candidateLimit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "default": 6
+          },
+          "readinessFile": {
+            "type": "string",
+            "minLength": 1,
+            "description": "0600 JSON release-readiness receipt. Shadow mode remains blocked when missing or invalid."
+          },
+          "approvalFile": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Separate 0600 operator approval JSON whose rollout id must match the readiness receipt."
           }
         }
       }
@@ -1724,6 +1747,22 @@
     },
     "clawloreV2.maxTraceBytes": {
       "label": "ClawLore Trace Rotation Bytes",
+      "advanced": true
+    },
+    "clawloreV2.maxQueryChars": {
+      "label": "ClawLore Shadow Query Limit",
+      "advanced": true
+    },
+    "clawloreV2.candidateLimit": {
+      "label": "ClawLore Shadow Candidate Limit",
+      "advanced": true
+    },
+    "clawloreV2.readinessFile": {
+      "label": "ClawLore Readiness Receipt",
+      "advanced": true
+    },
+    "clawloreV2.approvalFile": {
+      "label": "ClawLore Operator Approval",
       "advanced": true
     },
     "embedding.provider": {

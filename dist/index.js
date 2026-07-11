@@ -59,6 +59,9 @@ import { analyzeIntent, applyCategoryBoost } from "./src/intent-analyzer.js";
 import { createTaskEpisode, ensureExperienceSchema, recordTaskExperienceCaptureEvent, } from "./src/experience-store.js";
 import { recordAutoRecallTrace, } from "./src/auto-recall-ledger.js";
 import { evaluateRecallScopePolicy } from "./src/scope-policy.js";
+import { composeClawLoreRuntimeV1, normalizeClawLoreRuntimeConfigV1, } from "./src/v2/adapters/openclaw/runtime-composition-root.js";
+import { loadRuntimeRolloutControlsV1 } from "./src/v2/adapters/openclaw/runtime-rollout-control.js";
+import { createLegacyShadowCandidateRetrieverV1 } from "./src/v2/adapters/openclaw/legacy-shadow-retrieval.js";
 // ============================================================================
 // Default Configuration
 // ============================================================================
@@ -1502,6 +1505,45 @@ const scopeRecallOpenClawPlugin = {
             }
             return results;
         }
+        const clawloreRuntimeConfig = normalizeClawLoreRuntimeConfigV1(config.clawloreV2);
+        const rolloutControls = clawloreRuntimeConfig.mode === "shadow"
+            ? loadRuntimeRolloutControlsV1({
+                readinessFile: config.clawloreV2?.readinessFile
+                    ? api.resolvePath(config.clawloreV2.readinessFile)
+                    : undefined,
+                approvalFile: config.clawloreV2?.approvalFile
+                    ? api.resolvePath(config.clawloreV2.approvalFile)
+                    : undefined,
+            })
+            : { readiness: undefined, approval: undefined, errors: [] };
+        if (rolloutControls.errors.length > 0) {
+            api.logger.warn(`clawlore-v2: shadow rollout controls blocked: ${rolloutControls.errors.join(",")}`);
+        }
+        const clawloreRuntimeReceipt = composeClawLoreRuntimeV1({
+            config: clawloreRuntimeConfig,
+            host: {
+                on(event, handler, options) {
+                    api.on(event, handler, options);
+                },
+            },
+            dependencies: {
+                tenantId: "local",
+                agentId: "main",
+                workspaceId: "tianji-main-workspace",
+                retrieveCandidates: createLegacyShadowCandidateRetrieverV1({
+                    workspaceId: "tianji-main-workspace",
+                    candidateLimit: clawloreRuntimeConfig.candidateLimit,
+                    resolveScopeFilter: (agentId) => resolveScopeFilter(scopeManager, agentId),
+                    retrieve: async (input) => filterUserMdExclusiveRecallResults(await retrieveWithRetry(input), config.workspaceBoundary),
+                }),
+                onObserverError(code) {
+                    api.logger.warn(`clawlore-v2: read-only shadow observer ${code}`);
+                },
+            },
+            readiness: rolloutControls.readiness,
+            approval: rolloutControls.approval,
+        });
+        api.logger.info(`clawlore-v2: runtime status=${clawloreRuntimeReceipt.status} mode=${clawloreRuntimeReceipt.requestedMode} hooks=${clawloreRuntimeReceipt.registeredHooks.length} writes=${clawloreRuntimeReceipt.writeEnabled} promptMutation=${clawloreRuntimeReceipt.promptMutationEnabled} contextEngine=${clawloreRuntimeReceipt.contextEngineRegistered} blocks=${clawloreRuntimeReceipt.blockingReasons.join(",") || "none"}`);
         async function runRecallLifecycle(results, scopeFilter) {
             const now = Date.now();
             const lifecycleEntries = new Map();
@@ -3564,6 +3606,25 @@ export function parsePluginConfig(value) {
                 maxCapsuleChars: parseIntBetween(raw.maxCapsuleChars, 800, 8_000) ?? DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG.maxCapsuleChars,
                 minConfidence: parseNumberBetween(raw.minConfidence, 0, 1) ?? DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG.minConfidence,
                 dedupeThreshold: parseNumberBetween(raw.dedupeThreshold, 0, 1) ?? DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG.dedupeThreshold,
+            };
+        })(),
+        clawloreV2: (() => {
+            const raw = typeof cfg.clawloreV2 === "object" && cfg.clawloreV2 !== null
+                ? cfg.clawloreV2
+                : null;
+            if (!raw)
+                return undefined;
+            return {
+                mode: raw.mode === "shadow" ? "shadow" : "disabled",
+                contextEngine: raw.contextEngine === "native-opt-in" ? "native-opt-in" : "compatibility",
+                tokenBudget: parseIntBetween(raw.tokenBudget, 32, 32_768) ?? 512,
+                maxLatencyMs: parseIntBetween(raw.maxLatencyMs, 25, 5_000) ?? 750,
+                traceFile: asNonEmptyString(raw.traceFile),
+                maxTraceBytes: parseIntBetween(raw.maxTraceBytes, 16_384, 100_000_000) ?? 5_000_000,
+                maxQueryChars: parseIntBetween(raw.maxQueryChars, 256, 12_000) ?? 4_000,
+                candidateLimit: parseIntBetween(raw.candidateLimit, 1, 20) ?? 6,
+                readinessFile: asNonEmptyString(raw.readinessFile),
+                approvalFile: asNonEmptyString(raw.approvalFile),
             };
         })(),
     };
