@@ -17,6 +17,7 @@ import { filterUserMdExclusiveRecallResults, isUserMdExclusiveMemory, } from "./
 import { enrichContentWithArtifactAnchors, mergeArtifactMetadata } from "./artifacts.js";
 import { buildSecretIndex } from "./secret-index.js";
 import { buildGovernanceReviewCandidates, recordConflictReviewRelations, } from "./conflict-governance.js";
+import { buildRuntimeScopeMetadata } from "./runtime-scope-metadata.js";
 // ============================================================================
 // Types
 // ============================================================================
@@ -682,6 +683,14 @@ export function registerMemoryStoreTool(api, context) {
                     }
                     const safeImportance = clamp01(importance, 0.7);
                     const vector = await runtimeContext.embedder.embedPassage(sanitizedText);
+                    const runtimeScopeMetadata = buildRuntimeScopeMetadata({
+                        agentId,
+                        staticContext: toolCtx,
+                        runtimeContext: runtimeCtx,
+                        scope: targetScope,
+                        scopeFilter: [targetScope],
+                        workspaceDir: resolveWorkspaceDir(runtimeCtx, runtimeContext.workspaceDir),
+                    });
                     // Check for duplicates using raw vector similarity (bypasses importance/recency weighting)
                     // Fail-open by design: dedup must never block a legitimate memory write.
                     // excludeInactive: superseded historical records must not block new writes.
@@ -722,6 +731,7 @@ export function registerMemoryStoreTool(api, context) {
                             category: category,
                             importance: safeImportance,
                         }, {
+                            ...runtimeScopeMetadata,
                             l0_abstract: sanitizedText,
                             l1_overview: `- ${sanitizedText}`,
                             l2_content: sanitizedText,
@@ -824,6 +834,14 @@ export function registerMemoryStoreSecretIndexTool(api, context) {
                     const { content: text, metadata: secretMetadata } = buildSecretIndex(raw);
                     const vector = await runtimeContext.embedder.embedPassage(text);
                     const importance = clamp01(secretMetadata.importance, 0.82);
+                    const runtimeScopeMetadata = buildRuntimeScopeMetadata({
+                        agentId,
+                        staticContext: toolCtx,
+                        runtimeContext: runtimeCtx,
+                        scope: targetScope,
+                        scopeFilter: [targetScope],
+                        workspaceDir: resolveWorkspaceDir(runtimeCtx, runtimeContext.workspaceDir),
+                    });
                     const entry = await runtimeContext.store.store({
                         text,
                         vector,
@@ -832,6 +850,7 @@ export function registerMemoryStoreSecretIndexTool(api, context) {
                         scope: targetScope,
                         metadata: stringifySmartMetadata(buildSmartMetadata({ text, category: "fact", importance }, {
                             ...secretMetadata,
+                            ...runtimeScopeMetadata,
                             l0_abstract: text.split("\n").slice(0, 4).join("; "),
                             l1_overview: text,
                             l2_content: text,
@@ -2098,7 +2117,9 @@ export function registerAllMemoryTools(api, context, options = {}) {
     // Core tools (always enabled)
     registerMemoryRecallTool(api, context);
     registerMemoryStoreTool(api, context);
-    registerMemoryStoreSecretIndexTool(api, context);
+    if (options.secretIndexToolsEnabled === true) {
+        registerMemoryStoreSecretIndexTool(api, context);
+    }
     registerMemoryForgetTool(api, context);
     registerMemoryUpdateTool(api, context);
     // Management tools (optional)

@@ -36,6 +36,7 @@ function normalizeSource(value) {
     switch (value) {
         case "manual":
         case "auto-capture":
+        case "task-experience":
         case "reflection":
         case "session-summary":
         case "legacy":
@@ -53,6 +54,17 @@ function normalizeLayer(value) {
             return value;
         default:
             return "working";
+    }
+}
+function normalizeFreshnessStatus(value) {
+    switch (value) {
+        case "fresh":
+        case "stale":
+        case "unknown":
+        case "live_check_needed":
+            return value;
+        default:
+            return undefined;
     }
 }
 function deriveDefaultLayer(source, memoryCategory, state) {
@@ -167,6 +179,14 @@ export function parseSmartMetadata(rawMetadata, entry = {}) {
     const l2 = normalizeText(parsed.l2_content, text);
     const validFrom = normalizeTimestamp(parsed.valid_from, timestamp);
     const invalidatedAt = normalizeOptionalTimestamp(parsed.invalidated_at);
+    const observedAt = normalizeOptionalTimestamp(parsed.observed_at);
+    const validUntil = normalizeOptionalTimestamp(parsed.valid_until);
+    const explicitFreshnessStatus = normalizeFreshnessStatus(parsed.freshness_status);
+    const freshnessStatus = explicitFreshnessStatus ??
+        (validUntil && validUntil <= Date.now() ? "stale" : observedAt ? "fresh" : undefined);
+    const liveCheckNeeded = parsed.live_check_needed === true ||
+        freshnessStatus === "live_check_needed" ||
+        freshnessStatus === "stale";
     const fallbackSource = parsed.type === "session-summary"
         ? "session-summary"
         : parsed.type === "memory-reflection" || parsed.type === "memory-reflection-item"
@@ -190,6 +210,13 @@ export function parseSmartMetadata(rawMetadata, entry = {}) {
         last_accessed_at: clampCount(parsed.last_accessed_at, timestamp),
         valid_from: validFrom,
         invalidated_at: invalidatedAt && invalidatedAt >= validFrom ? invalidatedAt : undefined,
+        observed_at: observedAt,
+        valid_until: validUntil,
+        freshness_status: freshnessStatus,
+        live_check_needed: liveCheckNeeded || undefined,
+        source_confidence: parsed.source_confidence === undefined
+            ? undefined
+            : clamp01(parsed.source_confidence, 0.7),
         fact_key: normalizeOptionalString(parsed.fact_key) ??
             deriveFactKey(typeof parsed.memory_category === "string"
                 ? parsed.memory_category
@@ -224,6 +251,19 @@ export function buildSmartMetadata(entry, patch = {}) {
     const invalidatedAt = patch.invalidated_at === undefined
         ? base.invalidated_at
         : normalizeOptionalTimestamp(patch.invalidated_at);
+    const observedAt = patch.observed_at === undefined
+        ? base.observed_at
+        : normalizeOptionalTimestamp(patch.observed_at);
+    const validUntil = patch.valid_until === undefined
+        ? base.valid_until
+        : normalizeOptionalTimestamp(patch.valid_until);
+    const explicitFreshnessStatus = normalizeFreshnessStatus(patch.freshness_status ?? base.freshness_status);
+    const freshnessStatus = explicitFreshnessStatus ??
+        (validUntil && validUntil <= Date.now() ? "stale" : observedAt ? "fresh" : undefined);
+    const liveCheckNeeded = patch.live_check_needed === true ||
+        (patch.live_check_needed === undefined && base.live_check_needed === true) ||
+        freshnessStatus === "live_check_needed" ||
+        freshnessStatus === "stale";
     return {
         ...base,
         ...patch,
@@ -237,6 +277,13 @@ export function buildSmartMetadata(entry, patch = {}) {
         last_accessed_at: clampCount(patch.last_accessed_at, base.last_accessed_at || entry.timestamp || Date.now()),
         valid_from: validFrom,
         invalidated_at: invalidatedAt && invalidatedAt >= validFrom ? invalidatedAt : undefined,
+        observed_at: observedAt,
+        valid_until: validUntil,
+        freshness_status: freshnessStatus,
+        live_check_needed: liveCheckNeeded || undefined,
+        source_confidence: patch.source_confidence === undefined
+            ? base.source_confidence
+            : clamp01(patch.source_confidence, base.source_confidence ?? 0.7),
         fact_key: normalizeOptionalString(patch.fact_key) ??
             base.fact_key ??
             deriveFactKey(nextCategory, l0Abstract),

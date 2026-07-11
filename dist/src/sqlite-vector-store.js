@@ -60,6 +60,7 @@ export class SqliteBruteForceVectorStore {
         const { DatabaseSync } = require("node:sqlite");
         mkdirSync(dirname(this.sqlitePath), { recursive: true });
         this.db = new DatabaseSync(this.sqlitePath);
+        runSql(this.db, "PRAGMA busy_timeout = 10000");
         runSql(this.db, "PRAGMA journal_mode = WAL");
         runSql(this.db, "PRAGMA synchronous = NORMAL");
         this.ensureSchema();

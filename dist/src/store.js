@@ -331,7 +331,8 @@ export class MemoryStore {
             // SQL is the authority once present. Startup may import rows from the
             // older LanceDB-only store, but must never delete SQL rows just because
             // the companion vector table is stale or missing them.
-            truth.reconcile(entries ?? [], { deleteMissing: false });
+            const missingEntries = (entries ?? []).filter((entry) => !truth.getById(entry.id));
+            truth.reconcile(missingEntries, { deleteMissing: false });
             this.sqlTruthStore = truth;
             console.log(`scope-recall-openclaw: SQL truth companion ready (${truth.count()} rows -> ${truth.path})`);
         }
@@ -400,9 +401,11 @@ export class MemoryStore {
                 await this.table.delete(`id = '${escapeSqlLiteral(id)}'`);
             }
             this.vectorCompanionError = null;
+            return true;
         }
         catch (err) {
             this.markVectorCompanionNeedsRepair(operation, err);
+            return false;
         }
     }
     resolveSqlEntry(id, scopeFilter) {
@@ -817,6 +820,12 @@ export class MemoryStore {
             .sort((a, b) => b.score - a.score || b.entry.timestamp - a.entry.timestamp)
             .slice(0, limit);
     }
+    async deleteVectorCompanion(id, operation = "delete-vector-companion") {
+        await this.ensureInitialized();
+        return this.runWithFileLock(async () => {
+            return this.deleteVectorCompanionById(id, operation);
+        });
+    }
     async delete(id, scopeFilter) {
         await this.ensureInitialized();
         if (isExplicitDenyAllScopeFilter(scopeFilter)) {
@@ -1150,6 +1159,16 @@ export class MemoryStore {
     get hasFtsSupport() {
         return this.ftsIndexCreated || this.sqlTruthStore !== null;
     }
+    /**
+     * Get the underlying SQL truth store database for Experience Kernel operations.
+     * @internal
+     */
+    async getSqlTruthDb() {
+        await this.ensureInitialized();
+        if (!this.sqlTruthStore)
+            return null;
+        return this.sqlTruthStore.getDb();
+    }
     /** Last FTS error for diagnostics */
     _lastFtsError = null;
     get lastFtsError() {
@@ -1267,14 +1286,20 @@ export class MemoryStore {
             ? undefined
             : clampInt(options.limit, 1, 1_000_000);
         const dryRun = options.dryRun === true;
-        const entries = this.listSqlTruthEntries(limit);
+        const fullRebuild = options.fullRebuild === true;
+        const truthEntries = this.listSqlTruthEntries(limit);
         const vectorIdsBefore = await this.listVectorIds();
-        const truthIds = new Set(entries.map((entry) => entry.id));
+        const vectorIdSet = new Set(vectorIdsBefore);
+        const truthIds = new Set(truthEntries.map((entry) => entry.id));
+        const entries = fullRebuild
+            ? truthEntries
+            : truthEntries.filter((entry) => !vectorIdSet.has(entry.id));
         const staleVectorIds = limit === undefined
             ? vectorIdsBefore.filter((id) => !truthIds.has(id))
             : [];
         const result = {
             dryRun,
+            fullRebuild,
             truthCount: this.sqlTruthStore.count(),
             vectorRowsBefore: vectorIdsBefore.length,
             staleVectorRowsDeleted: dryRun ? staleVectorIds.length : 0,
@@ -1301,7 +1326,7 @@ export class MemoryStore {
                 for (const entry of rebuiltEntries) {
                     await this.deleteVectorCompanionById(entry.id, "repair-delete-old-vector");
                     await this.addVectorCompanion(entry, "repair-add-vector");
-                    result.rebuilt += rebuiltEntries.length;
+                    result.rebuilt++;
                 }
             }
             if (result.errors.length > 0 || result.rebuilt !== entries.length) {
