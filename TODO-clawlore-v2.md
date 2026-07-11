@@ -132,6 +132,15 @@ Updated: 2026-07-12
 - [x] Add promoted/quarantined/superseded playbook lineage and negative-feedback quarantine.
 - [x] Add replay quality gates for scope, tools, prerequisites, steps, verification, and disabled steps.
 
+## Phase 6A — Compatibility and release readiness
+
+- [x] Freeze package, manifest, config root, CLI aliases, data path, and source metadata compatibility.
+- [x] Define stable release-readiness and rollout-preview response schemas.
+- [x] Require mode-specific evidence for shadow, V2 write, and cutover previews.
+- [x] Keep every non-disabled rollout subject to separate operator approval.
+- [x] Make shadow read-only and require snapshot/migration/rollback/hash gates before writes or cutover.
+- [x] Add recursively redacted support-bundle output for credentials, authorization, private keys, and local paths.
+
 ## Phase 0 verification
 
 - Focused Memory Address V2 tests: 8/8 PASS.
@@ -249,6 +258,17 @@ Updated: 2026-07-12
   the storage adapter was aligned with the existing runtime-load boundary.
 - Review then found active snapshots after child completion and missing evidence
   ownership checks; finalization is now atomic and ownership is enforced.
+- Live extension/config/database/hooks/ContextEngine/Gateway: unchanged.
+
+## Phase 6A verification
+
+- Release-readiness/support-bundle tests: 3/3 PASS.
+- Full plugin tests: 139/139 PASS.
+- Typecheck/build/module-boundary/vector-repair/golden recall/release gate: PASS.
+- Release gate pack scan: 319 files.
+- Golden recall: 1.0; forbidden violations 0; prompt-budget exceeded 0.
+- The first compatibility test assumed a nonexistent `cli.commands` manifest
+  node; it was corrected to the actual top-level `commandAliases` contract.
 - Live extension/config/database/hooks/ContextEngine/Gateway: unchanged.
 
 ## Boundaries
