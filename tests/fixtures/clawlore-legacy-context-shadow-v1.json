@@ -1,0 +1,79 @@
+{
+  "traceId": "legacy-shadow-fixture-v1",
+  "availableTokens": 512,
+  "defaults": {
+    "tenantId": "local",
+    "agentId": "main",
+    "workspaceId": "workspace-main",
+    "actorAddress": {
+      "schemaVersion": 2,
+      "tenantId": "local",
+      "principalId": "telegram:default:user-1",
+      "agentId": "main",
+      "workspaceId": "workspace-main",
+      "platform": "telegram",
+      "accountId": "default",
+      "conversationId": "user-1",
+      "visibility": "private",
+      "retention": "working"
+    }
+  },
+  "bundle": {
+    "autoRecall": [
+      {
+        "id": "legacy-preference-1",
+        "text": "用户偏好简洁但有证据的回答。",
+        "scope": "agent:main",
+        "category": "preference",
+        "score": 0.93,
+        "confidence": 0.96,
+        "estimatedTokens": 12,
+        "metadata": {
+          "platform": "telegram",
+          "account_id": "default",
+          "sender_id": "user-1",
+          "agent_id": "main",
+          "state": "confirmed",
+          "memory_category": "preferences",
+          "verification_status": "user_confirmed",
+          "freshness_status": "fresh",
+          "source": "manual",
+          "l0_abstract": "偏好：回答简洁且有证据。"
+        }
+      },
+      {
+        "id": "legacy-playbook-1",
+        "text": "修改配置后执行语法检查、健康检查和日志核对。",
+        "scope": "agent:main",
+        "category": "other",
+        "kind": "playbook",
+        "score": 0.88,
+        "confidence": 0.9,
+        "estimatedTokens": 16,
+        "metadata": {
+          "platform": "telegram",
+          "account_id": "default",
+          "sender_id": "user-1",
+          "agent_id": "main",
+          "state": "confirmed",
+          "memory_category": "patterns",
+          "verification_status": "tool_verified",
+          "freshness_status": "fresh",
+          "source": "task-experience"
+        }
+      }
+    ],
+    "inheritedRules": [
+      "修改关键配置前必须先备份。"
+    ],
+    "derivedFocus": [
+      "当前任务先做只读 shadow 对比。"
+    ],
+    "errorSignals": [
+      {
+        "toolName": "apply_patch",
+        "summary": "成功结果被上层错误摘要误标为失败。"
+      }
+    ]
+  }
+}

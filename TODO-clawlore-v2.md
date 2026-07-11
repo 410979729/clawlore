@@ -22,13 +22,21 @@ Updated: 2026-07-11
 - [x] Add fixtures, focused tests, JSON smoke, and a dated run report.
 - [x] Run typecheck, full regression, build, old/new smokes, golden recall, and release gate.
 
+## Phase 1B — Legacy source shadow comparison
+
+- [x] Adapt the three current prompt producers into read-only composer sources.
+- [x] Add deterministic legacy-vs-ContextPack shadow comparison fixtures/traces.
+- [x] Preserve legacy identity debt and reject ambiguous private rows.
+- [x] Demote reflection rules to untrusted data and require reviewed playbooks.
+- [x] Add six focused tests and a machine-readable JSON smoke.
+- [x] Run full regression, typecheck, build, old/new smokes, golden recall, and release gate.
+
 ## Next slice candidates
 
-- [ ] Adapt the three current prompt producers into read-only composer sources.
-- [ ] Add deterministic legacy-vs-ContextPack shadow comparison fixtures/traces.
-- [ ] Design additive v2 SQLite tables and migration preview against a fixture.
 - [ ] Audit 1.x SecretRef support, plaintext backup, startup compaction, and
       management-tool discovery as a separate hardening patch.
+- [ ] Design a default-off runtime shadow flag and trace sink without replacing hooks.
+- [ ] Design additive v2 SQLite tables and migration preview against a fixture.
 
 ## Phase 0 verification
 
@@ -50,6 +58,18 @@ Updated: 2026-07-11
 - Address V2 and vector-repair smokes: PASS.
 - Golden recall: recall 1.0; forbidden violations 0.
 - `npm run release:gate`: PASS; pack scan 234 files.
+- Live extension/config/database/hooks/ContextEngine/Gateway: unchanged.
+
+## Phase 1B verification
+
+- Focused legacy-source/comparison tests: 6/6 PASS.
+- Full plugin tests: 108/108 PASS.
+- `npm run typecheck` and `npm run build`: PASS.
+- Legacy shadow smoke: PASS; 3 hook outputs -> 1 ContextPack; deterministic.
+- Safe fixture candidate preservation: 5/5; unexplained rejection 0.
+- Address V2, ContextPack V1, and vector-repair smokes: PASS.
+- Golden recall: recall 1.0; forbidden violations 0.
+- `npm run release:gate`: PASS; pack scan 243 files.
 - Live extension/config/database/hooks/ContextEngine/Gateway: unchanged.
 
 ## Boundaries

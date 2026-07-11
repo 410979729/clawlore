@@ -9,6 +9,7 @@ This directory is the design truth for the staged transition from
 - `migration-plan.md`: additive migration, shadow comparison, cutover, and rollback.
 - `first-vertical-slice.md`: executable Memory Address V2 slice and acceptance gates.
 - `second-vertical-slice.md`: ContextPack V1 and compatibility shadow spine.
+- `third-vertical-slice.md`: legacy source adapters and deterministic comparison.
 - `eval/`: dated executable verification reports.
 - `adr/`: accepted architecture decisions for Phase 0.
 
