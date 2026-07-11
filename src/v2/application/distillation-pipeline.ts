@@ -6,12 +6,15 @@ import type { TruthStoreV2Port } from "./ports/truth-store.js";
 
 export interface TurnEnvelopeV2 {
   eventId: string;
+  trigger?: "explicit" | "auto_capture" | "reflection" | "digest" | "task_experience";
+  sourceIds?: string[];
   address: MemoryAddressV2;
   userText: string;
   assistantText?: string;
   explicitRemember?: boolean;
   toolVerified?: boolean;
   toolReceiptIds?: string[];
+  forceCandidate?: boolean;
   observedAt: string;
 }
 
@@ -29,6 +32,7 @@ export interface DistillationExtractorV2 {
 export interface DistillationJournalReceiptV2 {
   schemaVersion: 2;
   eventId: string;
+  trigger: NonNullable<TurnEnvelopeV2["trigger"]>;
   payloadHash: string;
   proposalCount: number;
   admittedCount: number;
@@ -64,6 +68,8 @@ function payloadHash(event: TurnEnvelopeV2): string {
   return createHash("sha256")
     .update(JSON.stringify({
       eventId: event.eventId,
+      trigger: event.trigger ?? "explicit",
+      sourceIds: event.sourceIds ?? [],
       address: memoryAddressKey(event.address),
       userText: event.userText,
       assistantText: event.assistantText ?? "",
@@ -87,6 +93,9 @@ function admission(proposal: DistillationProposalV2, event: TurnEnvelopeV2): {
     return { allowed: true, reason: "explicit_user_remember", lifecycle: "active", verification: "user_confirmed" };
   }
   if (event.toolVerified === true && proposal.sourceRole === "tool" && (event.toolReceiptIds?.length ?? 0) > 0) {
+    if (event.forceCandidate === true) {
+      return { allowed: true, reason: "candidate_review_required", lifecycle: "candidate", verification: "tool_verified" };
+    }
     return { allowed: true, reason: "tool_receipt_verified", lifecycle: "active", verification: "tool_verified" };
   }
   return { allowed: true, reason: "candidate_review_required", lifecycle: "candidate", verification: "unverified" };
@@ -104,7 +113,8 @@ export class UnifiedDistillationPipelineV2 {
   async process(event: TurnEnvelopeV2): Promise<DistillationJournalReceiptV2> {
     if (await this.journal.has(event.eventId)) {
       return {
-        schemaVersion: 2, eventId: event.eventId, payloadHash: payloadHash(event), proposalCount: 0,
+        schemaVersion: 2, eventId: event.eventId, trigger: event.trigger ?? "explicit",
+        payloadHash: payloadHash(event), proposalCount: 0,
         admittedCount: 0, rejectedCount: 0, duplicateCount: 0, itemIds: [],
         rejectionReasons: ["idempotent_event_already_processed"], createdAt: event.observedAt,
       };
@@ -130,7 +140,11 @@ export class UnifiedDistillationPipelineV2 {
           sourceType: proposal.sourceRole === "tool" ? "tool" : "extractor",
           sourceId: event.eventId,
           observedAt: event.observedAt,
-          evidence: proposal.sourceRole === "tool" ? { toolReceiptIds: event.toolReceiptIds ?? [] } : undefined,
+          evidence: {
+            trigger: event.trigger ?? "explicit",
+            sourceIds: event.sourceIds ?? [],
+            ...(proposal.sourceRole === "tool" ? { toolReceiptIds: event.toolReceiptIds ?? [] } : {}),
+          },
         },
         actor: `principal:${event.address.principalId}`,
         reason: decision.reason,
@@ -138,7 +152,7 @@ export class UnifiedDistillationPipelineV2 {
       itemIds.push(receipt.itemId);
     }
     const receipt: DistillationJournalReceiptV2 = {
-      schemaVersion: 2, eventId: event.eventId, payloadHash: payloadHash(event),
+      schemaVersion: 2, eventId: event.eventId, trigger: event.trigger ?? "explicit", payloadHash: payloadHash(event),
       proposalCount: proposals.length, admittedCount: itemIds.length, rejectedCount: rejected,
       duplicateCount: duplicates, itemIds, rejectionReasons: [...new Set(rejectionReasons)].sort(),
       createdAt: event.observedAt,

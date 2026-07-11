@@ -54,7 +54,7 @@ Updated: 2026-07-11
 
 - [x] Add online SQLite snapshot backup, restore-to-new-location verification, and rollback drill.
 - [x] Add additive v2 migration apply/rollback against copied fixtures; never the live database.
-- [ ] Adapt legacy auto-capture/reflection/digest/task-experience triggers to one candidate journal.
+- [x] Adapt legacy auto-capture/reflection/digest/task-experience triggers to one candidate journal.
 - [x] Add correction/forget projection convergence receipts and operator inspection.
 - [x] Add encrypted archive wrapping and key-provider integration around verified snapshots.
 
@@ -99,6 +99,14 @@ Updated: 2026-07-11
 - [x] Distinguish pending, retrying, processed, and missing states.
 - [x] Claim convergence only when all expected projections are processed.
 - [x] Prove correction retry and forget deletion convergence in fixtures.
+
+## Phase 3A — Unified legacy trigger journal
+
+- [x] Adapt auto-capture, reflection, digest, and task experience to one event contract.
+- [x] Generate deterministic ids and preserve explicit provenance ids.
+- [x] Prevent trigger adapters from writing any store directly.
+- [x] Route all automatic events through one journal, admission, and outbox path.
+- [x] Keep all automatic outputs candidate-only, including tool-verified episodes.
 
 ## Phase 0 verification
 
@@ -182,6 +190,15 @@ Updated: 2026-07-11
 - Full plugin tests: 130/130 PASS.
 - Typecheck/build/module-boundary/vector-repair/golden recall/release gate: PASS.
 - Release gate pack scan: 287 files.
+- Golden recall: 1.0; forbidden violations 0; prompt-budget exceeded 0.
+- Live extension/config/database/hooks/ContextEngine/Gateway: unchanged.
+
+## Phase 3A verification
+
+- Unified legacy-trigger tests: 2/2 PASS.
+- Full plugin tests: 132/132 PASS.
+- Typecheck/build/module-boundary/vector-repair/golden recall/release gate: PASS.
+- Release gate pack scan: 291 files.
 - Golden recall: 1.0; forbidden violations 0; prompt-budget exceeded 0.
 - Live extension/config/database/hooks/ContextEngine/Gateway: unchanged.
 
