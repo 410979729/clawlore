@@ -40,6 +40,16 @@ no package dependency change was needed.
 - No live extension or OpenClaw configuration was edited.
 - No ContextEngine slot was selected and Gateway was not restarted.
 
+## Environment note
+
+Post-run state hygiene audit reported 52 pre-existing findings outside the
+workspace project: historical session reset/deleted residues, two root-level
+OpenClaw configuration backups, and foreign canonical docs inside Codex plugin
+caches. None was created or modified by this slice. They were left untouched
+because cleanup is a separate state-governance task. The generated project
+`node_modules` tree was removed after verification; committed `dist` output and
+the run report were retained as build and audit artifacts.
+
 ## Next recommended slice
 
 Define ContextPack V1 and a pure compatibility Context Composer, then add a
