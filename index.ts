@@ -58,6 +58,7 @@ import { buildReflectionMappedMetadata } from "./src/reflection-mapped-metadata.
 import { parseReflectionMetadata } from "./src/reflection-metadata.js";
 import { isNoise } from "./src/noise-filter.js";
 import { normalizeAutoCaptureText } from "./src/auto-capture-cleanup.js";
+import { cleanUserRecallQuery, selectAutoRecallQuery } from "./src/auto-recall-query.js";
 import { evaluateCaptureSafety } from "./src/capture-safety.js";
 
 // Import smart extraction & lifecycle components
@@ -69,11 +70,22 @@ import { createDecayEngine, DEFAULT_DECAY_CONFIG } from "./src/decay-engine.js";
 import { createTierManager, DEFAULT_TIER_CONFIG } from "./src/tier-manager.js";
 import { createMemoryUpgrader } from "./src/memory-upgrader.js";
 import {
+  agentEndEventAllowsTaskExperience,
+  buildTaskExperienceEpisodeDraft,
+  captureTaskExperience,
+  DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG,
+  extractTaskExperienceTranscript,
+  isReusableTaskExperience,
+  type TaskExperienceCaptureConfig,
+} from "./src/task-experience.js";
+import { registerExperienceTools } from "./src/experience-tools.js";
+import {
   buildSmartMetadata,
   parseSmartMetadata,
   stringifySmartMetadata,
   toLifecycleMemory,
 } from "./src/smart-metadata.js";
+import { buildRuntimeScopeMetadata } from "./src/runtime-scope-metadata.js";
 import {
   filterUserMdExclusiveRecallResults,
   isUserMdExclusiveMemory,
@@ -86,6 +98,17 @@ import {
   type AdmissionRejectionAuditEntry,
 } from "./src/admission-control.js";
 import { analyzeIntent, applyCategoryBoost } from "./src/intent-analyzer.js";
+import {
+  createTaskEpisode,
+  ensureExperienceSchema,
+  recordTaskExperienceCaptureEvent,
+} from "./src/experience-store.js";
+import {
+  recordAutoRecallTrace,
+  type AutoRecallMemoryRefInput,
+  type AutoRecallFilterStatus,
+} from "./src/auto-recall-ledger.js";
+import { evaluateRecallScopePolicy } from "./src/scope-policy.js";
 
 // ============================================================================
 // Configuration & Types
@@ -113,9 +136,11 @@ interface PluginConfig {
   autoRecallMinLength?: number;
   autoRecallMinRepeated?: number;
   autoRecallTimeoutMs?: number;
+  autoRecallQueryMaxChars?: number;
   autoRecallMaxItems?: number;
   autoRecallMaxChars?: number;
   autoRecallPerItemMaxChars?: number;
+  autoRecallAllowCrossScope?: boolean;
   /** Hard per-turn injection cap (safety valve). Overrides autoRecallMaxItems if lower. Default: 10. */
   maxRecallPerTurn?: number;
   recallMode?: "full" | "summary" | "adaptive" | "off";
@@ -189,6 +214,7 @@ interface PluginConfig {
     agentAccess?: Record<string, string[]>;
   };
   enableManagementTools?: boolean;
+  secretIndexToolsEnabled?: boolean;
   sessionStrategy?: SessionStrategy;
   sessionMemory?: { enabled?: boolean; messageCount?: number };
   selfImprovement?: {
@@ -229,6 +255,7 @@ interface PluginConfig {
     skipLowValue?: boolean;
     maxExtractionsPerHour?: number;
   };
+  taskExperienceCapture?: TaskExperienceCaptureConfig;
 }
 
 type ReflectionThinkLevel = "off" | "minimal" | "low" | "medium" | "high";
@@ -294,6 +321,21 @@ function parsePositiveInt(value: unknown): number | undefined {
     if (Number.isFinite(n) && n > 0) return Math.floor(n);
   }
   return undefined;
+}
+
+function parseNumberBetween(value: unknown, min: number, max: number): number | undefined {
+  const n = typeof value === "number"
+    ? value
+    : typeof value === "string" && value.trim()
+      ? Number(resolveConfigString(value.trim()))
+      : NaN;
+  if (!Number.isFinite(n)) return undefined;
+  return Math.min(max, Math.max(min, n));
+}
+
+function parseIntBetween(value: unknown, min: number, max: number): number | undefined {
+  const n = parseNumberBetween(value, min, max);
+  return n === undefined ? undefined : Math.floor(n);
 }
 
 function clampInt(value: number, min: number, max: number): number {
@@ -393,7 +435,7 @@ const DEFAULT_REFLECTION_SESSION_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_REFLECTION_MAX_TRACKED_SESSIONS = 200;
 const DEFAULT_REFLECTION_ERROR_SCAN_MAX_CHARS = 8_000;
 const REFLECTION_FALLBACK_MARKER = "(fallback) Reflection generation failed; storing minimal pointer only.";
-const DIAG_BUILD_TAG = "scope-recall-openclaw-diag-20260308-0058";
+const DIAG_BUILD_TAG_PREFIX = "scope-recall-openclaw";
 
 type ReflectionErrorSignal = {
   at: number;
@@ -1360,7 +1402,9 @@ function createMdMirrorWriter(
 ): MdMirrorWriter | null {
   if (config.mdMirror?.enabled !== true) return null;
 
-  const fallbackDir = api.resolvePath(config.mdMirror.dir || "memory-md");
+  const fallbackDir = config.mdMirror.dir
+    ? api.resolvePath(config.mdMirror.dir)
+    : join(dirname(api.resolvePath(config.dbPath || getDefaultDbPath())), "memory-md");
   const workspaceMap = resolveAgentWorkspaceMap(api);
 
   if (Object.keys(workspaceMap).length > 0) {
@@ -1432,18 +1476,22 @@ function createAdmissionRejectionAuditWriter(
 // ============================================================================
 
 function getPluginVersion(): string {
-  try {
-    const pkgUrl = new URL("./package.json", import.meta.url);
-    const pkg = JSON.parse(readFileSync(pkgUrl, "utf8")) as {
-      version?: string;
-    };
-    return pkg.version || "unknown";
-  } catch {
-    return "unknown";
+  for (const relativePath of ["./package.json", "../package.json"]) {
+    try {
+      const pkgUrl = new URL(relativePath, import.meta.url);
+      const pkg = JSON.parse(readFileSync(pkgUrl, "utf8")) as {
+        version?: string;
+      };
+      if (pkg.version) return pkg.version;
+    } catch {
+      // Try the next location. Source loads from index.ts; runtime loads from dist/index.js.
+    }
   }
+  return "unknown";
 }
 
 const pluginVersion = getPluginVersion();
+const diagnosticBuildTag = `${DIAG_BUILD_TAG_PREFIX}-${pluginVersion}`;
 
 const DEFAULT_HOST_MEMORY_WORKSPACE_DIR = join(homedir(), ".openclaw", "workspace");
 
@@ -1616,6 +1664,7 @@ const buildCompatMemoryPromptSection = ({ availableTools, citationsMode }: { ava
 const scopeRecallOpenClawPlugin = {
   id: "scope-recall-openclaw",
   name: "Scope Recall for OpenClaw",
+  version: pluginVersion,
   description:
     "Scoped long-term memory for OpenClaw with SQLite truth, hybrid recall, rebuildable vectors, safe capture, and native-free fallbacks",
   kind: "memory" as const,
@@ -1791,6 +1840,7 @@ const scopeRecallOpenClawPlugin = {
 
     // Initialize smart extraction
     let smartExtractor: SmartExtractor | null = null;
+    let llmClientForExtraction: ReturnType<typeof createLlmClient> | null = null;
     if (config.smartExtraction === true) {
       try {
         const llmAuth = config.llm?.auth || "api-key";
@@ -1823,6 +1873,7 @@ const scopeRecallOpenClawPlugin = {
           log: (msg: string) => api.logger.debug(msg),
         } as Parameters<typeof createLlmClient>[0];
         const llmClient = createLlmClient(assignOpenAiClientCredential(llmClientConfig, llmApiKey));
+        llmClientForExtraction = llmClient;
 
         // Initialize embedding-based noise prototype bank (async, non-blocking)
         const noiseBank = new NoisePrototypeBank(
@@ -2107,7 +2158,7 @@ const scopeRecallOpenClawPlugin = {
     logReg(
       `scope-recall-openclaw@${pluginVersion}: plugin registered (db: ${resolvedDbPath}, model: ${embeddingModel}, vectorBackend: ${config.vectorBackend || "lancedb"}, smartExtraction: ${smartExtractor ? 'ON' : 'OFF'})`
     );
-    logReg(`scope-recall-openclaw: diagnostic build tag loaded (${DIAG_BUILD_TAG})`);
+    logReg(`scope-recall-openclaw: diagnostic build tag loaded (${diagnosticBuildTag})`);
 
     api.on("message_received", (event: any, ctx: any) => {
       const conversationKey = buildAutoCaptureConversationKeyFromIngress(
@@ -2165,8 +2216,37 @@ const scopeRecallOpenClawPlugin = {
       {
         enableManagementTools: config.enableManagementTools,
         enableSelfImprovementTools: config.selfImprovement?.enabled === true,
+        secretIndexToolsEnabled: config.secretIndexToolsEnabled === true,
       }
     );
+
+    if (config.enableManagementTools || config.taskExperienceCapture?.enabled === true) {
+      registerExperienceTools(
+        api,
+        {
+          retriever,
+          store,
+          scopeManager,
+          embedder,
+          agentId: undefined,
+          workspaceDir: getDefaultWorkspaceDir(),
+          mdMirror,
+          workspaceBoundary: config.workspaceBoundary,
+          db: () => store.getSqlTruthDb(),
+        },
+        {
+          enableManagementTools: config.enableManagementTools,
+        },
+      );
+      logReg("scope-recall-openclaw: Experience Kernel tools registered");
+      void store.getSqlTruthDb()
+        .then((db) => {
+          if (db) ensureExperienceSchema(db);
+        })
+        .catch((err) => {
+          api.logger.warn(`scope-recall-openclaw: Experience Kernel schema initialization failed: ${String(err)}`);
+        });
+    }
 
     // Auto-compaction at gateway_start (if enabled, respects cooldown)
     if (config.memoryCompaction?.enabled) {
@@ -2220,10 +2300,10 @@ const scopeRecallOpenClawPlugin = {
         // Both message_received and before_prompt_build have channelId in ctx,
         // so use it as the shared cache key for raw user message gating.
         const cacheKey = ctx?.channelId || ctx?.conversationId || "default";
-        const raw = typeof event.content === "string" ? event.content.trim() : "";
+        const raw = typeof event.content === "string" ? event.content : "";
         // Strip leading bot mentions (@BotName or <@id>) so gating sees the
         // actual user intent, not the mention prefix.
-        const text = raw.replace(/^(?:@\S+\s*|<@!?\d+>\s*)+/, "").trim();
+        const text = cleanUserRecallQuery(raw);
         if (text) lastRawUserMessage.set(cacheKey, text);
       });
 
@@ -2235,10 +2315,15 @@ const scopeRecallOpenClawPlugin = {
         // Use cached raw user message for gating (short-message skip, greeting
         // detection, etc.).  Fall back to event.prompt if no cached message is
         // available (e.g. first message or non-channel triggers).
-        const cacheKey = ctx?.channelId || sessionId;
-        const gatingText = lastRawUserMessage.get(cacheKey) || event.prompt || "";
+        const cacheKey = ctx?.channelId || ctx?.conversationId || sessionId;
+        const recallQuerySelection = selectAutoRecallQuery({
+          cachedUserMessage: lastRawUserMessage.get(cacheKey),
+          eventPrompt: event.prompt,
+          maxChars: config.autoRecallQueryMaxChars ?? 4_000,
+        });
+        const gatingText = recallQuerySelection.query || event.prompt || "";
         if (
-          !event.prompt ||
+          !recallQuerySelection.query ||
           shouldSkipRetrieval(gatingText, config.autoRecallMinLength)
         ) {
           return;
@@ -2258,21 +2343,92 @@ const scopeRecallOpenClawPlugin = {
             throw new Error("retrieval aborted");
           }
         };
+        const traceAgentId = resolveHookAgentId(ctx?.agentId, (event as any).sessionKey);
+        const traceCurrentScope = isSystemBypassId(traceAgentId)
+          ? config.scopes?.default ?? "global"
+          : scopeManager.getDefaultScope(traceAgentId);
+        const rankReasonsForTrace = (result: any): string[] => {
+          const sources = result?.sources || {};
+          const reasons: string[] = [];
+          if (sources.vector) reasons.push(`vector_rank=${sources.vector.rank ?? "unknown"}`);
+          if (sources.bm25) reasons.push(`bm25_rank=${sources.bm25.rank ?? "unknown"}`);
+          if (sources.fused) reasons.push("rrf_fusion");
+          if (sources.reranked) reasons.push("reranked");
+          if (sources.relation?.reasons?.length) {
+            reasons.push(...sources.relation.reasons.slice(0, 3));
+          }
+          return reasons;
+        };
+        const makeTraceRefs = (
+          results: any[],
+          statusById: Map<string, { status: AutoRecallFilterStatus; reason?: string }>,
+        ): AutoRecallMemoryRefInput[] => results.map((result) => {
+          const id = String(result?.entry?.id ?? "");
+          const status = statusById.get(id) ?? { status: "candidate" as const };
+          return {
+            memory_id: id,
+            scope: String(result?.entry?.scope ?? ""),
+            category: String(result?.entry?.category ?? ""),
+            score: typeof result?.score === "number" ? result.score : undefined,
+            rank_reasons: rankReasonsForTrace(result),
+            filter_status: status.status,
+            filter_reason: status.reason,
+          };
+        });
+        const writeAutoRecallTrace = (params: {
+          decision: "injected" | "skipped" | "failed";
+          reason?: string;
+          result_count?: number;
+          injected_count?: number;
+          suppressed_count?: number;
+          memory_refs?: AutoRecallMemoryRefInput[];
+          metadata?: Record<string, unknown>;
+        }) => {
+          void (async () => {
+            try {
+              const db = await store.getSqlTruthDb();
+              if (!db) {
+                api.logger.debug?.("scope-recall-openclaw: skipped auto-recall trace ledger because SQL truth DB is unavailable");
+                return;
+              }
+              recordAutoRecallTrace(db, {
+                scope_id: traceCurrentScope,
+                session_id: sessionId,
+                agent_id: traceAgentId,
+                channel: String(ctx?.channelId || ctx?.conversationId || ""),
+                query_source: recallQuerySelection.source,
+                query: recallQuerySelection.query,
+                current_scope: traceCurrentScope,
+                decision: params.decision,
+                reason: params.reason,
+                result_count: params.result_count,
+                injected_count: params.injected_count,
+                suppressed_count: params.suppressed_count,
+                memory_refs: params.memory_refs,
+                metadata: {
+                  recall_mode: recallMode,
+                  ...params.metadata,
+                },
+              });
+            } catch (err) {
+              api.logger.warn(`scope-recall-openclaw: auto-recall trace ledger write failed: ${String(err)}`);
+            }
+          })();
+        };
         const recallWork = async (): Promise<{ prependContext: string; ephemeral?: boolean } | undefined> => {
           throwIfRecallAborted();
           // Determine agent ID and accessible scopes
-          const agentId = resolveHookAgentId(ctx?.agentId, (event as any).sessionKey);
+          const agentId = traceAgentId;
           const accessibleScopes = resolveScopeFilter(scopeManager, agentId);
 
-          // FR-04: Truncate long prompts (e.g. file attachments) before embedding.
-          // Auto-recall only needs the user's intent, not full attachment text.
-          const MAX_RECALL_QUERY_LENGTH = 1_000;
-          let recallQuery = event.prompt;
-          if (recallQuery.length > MAX_RECALL_QUERY_LENGTH) {
-            const originalLength = recallQuery.length;
-            recallQuery = recallQuery.slice(0, MAX_RECALL_QUERY_LENGTH);
+          // FR-04: Embed the current user's clean request, not the assembled
+          // system/history/context prompt. This avoids polluting recall with
+          // unrelated instructions and keeps long attachment prompts bounded.
+          const recallQuery = recallQuerySelection.query;
+          if (!recallQuery) return;
+          if (recallQuerySelection.truncated) {
             api.logger.info(
-              `scope-recall-openclaw: auto-recall query truncated from ${originalLength} to ${MAX_RECALL_QUERY_LENGTH} chars`
+              `scope-recall-openclaw: auto-recall query truncated from ${recallQuerySelection.originalLength} to ${recallQuery.length} chars source=${recallQuerySelection.source}`
             );
           }
 
@@ -2299,9 +2455,17 @@ const scopeRecallOpenClawPlugin = {
             source: "auto-recall",
             signal: recallAbort.signal,
           }), config.workspaceBoundary);
+          const traceStatusById = new Map<string, { status: AutoRecallFilterStatus; reason?: string }>();
 
           throwIfRecallAborted();
           if (results.length === 0) {
+            writeAutoRecallTrace({
+              decision: "skipped",
+              reason: "no_results",
+              result_count: 0,
+              injected_count: 0,
+              suppressed_count: 0,
+            });
             return;
           }
 
@@ -2326,6 +2490,10 @@ const scopeRecallOpenClawPlugin = {
                 api.logger.debug?.(
                   `scope-recall-openclaw: skipping redundant memory ${r.entry.id.slice(0, 8)} (last seen at turn ${lastTurn}, current turn ${currentTurn}, min ${minRepeated})`,
                 );
+                traceStatusById.set(r.entry.id, {
+                  status: "dedup_filtered",
+                  reason: "recently_injected",
+                });
               }
               if (isRedundant) dedupFilteredCount++;
               return !isRedundant;
@@ -2337,6 +2505,15 @@ const scopeRecallOpenClawPlugin = {
                   `scope-recall-openclaw: all ${results.length} memories were filtered out due to redundancy policy`,
                 );
               }
+              writeAutoRecallTrace({
+                decision: "skipped",
+                reason: "redundancy_policy",
+                result_count: results.length,
+                injected_count: 0,
+                suppressed_count: results.length,
+                memory_refs: makeTraceRefs(results, traceStatusById),
+                metadata: { dedup_filtered: dedupFilteredCount },
+              });
               return;
             }
 
@@ -2345,18 +2522,44 @@ const scopeRecallOpenClawPlugin = {
 
           let stateFilteredCount = 0;
           let suppressedFilteredCount = 0;
+          let crossScopeFilteredCount = 0;
           const governanceEligible = finalResults.filter((r) => {
             const meta = parseSmartMetadata(r.entry.metadata, r.entry);
             if (meta.state !== "confirmed") {
               stateFilteredCount++;
+              traceStatusById.set(r.entry.id, {
+                status: "governance_filtered",
+                reason: "state_not_confirmed",
+              });
               return false;
             }
             if (meta.memory_layer === "archive" || meta.memory_layer === "reflection") {
               stateFilteredCount++;
+              traceStatusById.set(r.entry.id, {
+                status: "governance_filtered",
+                reason: `memory_layer_${meta.memory_layer}`,
+              });
               return false;
             }
             if (meta.suppressed_until_turn > 0 && currentTurn <= meta.suppressed_until_turn) {
               suppressedFilteredCount++;
+              traceStatusById.set(r.entry.id, {
+                status: "suppressed",
+                reason: "suppressed_until_turn",
+              });
+              return false;
+            }
+            const scopeDecision = evaluateRecallScopePolicy({
+              current_scope: traceCurrentScope,
+              candidate_scope: r.entry.scope,
+              allow_cross_scope: config.autoRecallAllowCrossScope === true,
+            });
+            if (!scopeDecision.injectable) {
+              crossScopeFilteredCount++;
+              traceStatusById.set(r.entry.id, {
+                status: "suppressed",
+                reason: scopeDecision.label,
+              });
               return false;
             }
             return true;
@@ -2364,8 +2567,22 @@ const scopeRecallOpenClawPlugin = {
 
           if (governanceEligible.length === 0) {
             api.logger.info?.(
-              `scope-recall-openclaw: auto-recall skipped after governance filters (hits=${results.length}, dedupFiltered=${dedupFilteredCount}, stateFiltered=${stateFilteredCount}, suppressedFiltered=${suppressedFilteredCount})`,
+              `scope-recall-openclaw: auto-recall skipped after governance filters (hits=${results.length}, dedupFiltered=${dedupFilteredCount}, stateFiltered=${stateFilteredCount}, suppressedFiltered=${suppressedFilteredCount}, crossScopeFiltered=${crossScopeFilteredCount})`,
             );
+            writeAutoRecallTrace({
+              decision: "skipped",
+              reason: "governance_filters",
+              result_count: results.length,
+              injected_count: 0,
+              suppressed_count: results.length,
+              memory_refs: makeTraceRefs(results, traceStatusById),
+              metadata: {
+                dedup_filtered: dedupFilteredCount,
+                state_filtered: stateFilteredCount,
+                suppressed_filtered: suppressedFilteredCount,
+                cross_scope_filtered: crossScopeFilteredCount,
+              },
+            });
             return;
           }
 
@@ -2386,13 +2603,19 @@ const scopeRecallOpenClawPlugin = {
             const displayCategory = metaObj.memory_category || r.entry.category;
             const displayTier = metaObj.tier || "";
             const tierPrefix = displayTier ? `[${displayTier.charAt(0).toUpperCase()}]` : "";
+            const reusableTaskExperience = isReusableTaskExperience(r.entry);
             // Select content tier based on recallMode/intent depth
-            const contentText = recallMode === "summary"
+            const contentText = reusableTaskExperience
+              ? (metaObj.l2_content || r.entry.text)
+              : recallMode === "summary"
               ? (metaObj.l0_abstract || r.entry.text)
               : intent?.depth === "full"
                 ? (r.entry.text) // full text for deep queries
                 : (metaObj.l0_abstract || r.entry.text); // L0/L1 default
-            const summary = sanitizeForContext(contentText).slice(0, effectivePerItemMaxChars);
+            const itemMaxChars = reusableTaskExperience
+              ? Math.min(1_600, autoRecallMaxChars, Math.max(effectivePerItemMaxChars, 1_200))
+              : effectivePerItemMaxChars;
+            const summary = sanitizeForContext(contentText).slice(0, itemMaxChars);
             return {
               id: r.entry.id,
               prefix: `${tierPrefix}[${displayCategory}:${r.entry.scope}]`,
@@ -2440,6 +2663,29 @@ const scopeRecallOpenClawPlugin = {
             api.logger.info?.(
               `scope-recall-openclaw: auto-recall skipped injection after budgeting (hits=${results.length}, dedupFiltered=${dedupFilteredCount}, maxItems=${autoRecallMaxItems}, maxChars=${autoRecallMaxChars})`,
             );
+            for (const candidate of preBudgetCandidates) {
+              if (!traceStatusById.has(candidate.id)) {
+                traceStatusById.set(candidate.id, {
+                  status: "budget_filtered",
+                  reason: "budget_exhausted",
+                });
+              }
+            }
+            writeAutoRecallTrace({
+              decision: "skipped",
+              reason: "budget_exhausted",
+              result_count: results.length,
+              injected_count: 0,
+              suppressed_count: results.length,
+              memory_refs: makeTraceRefs(results, traceStatusById),
+              metadata: {
+                dedup_filtered: dedupFilteredCount,
+                pre_budget_items: preBudgetItems,
+                pre_budget_chars: preBudgetChars,
+                max_items: autoRecallMaxItems,
+                max_chars: autoRecallMaxChars,
+              },
+            });
             return;
           }
 
@@ -2460,9 +2706,41 @@ const scopeRecallOpenClawPlugin = {
           const memoryContext = selected.map((item) => item.line).join("\n");
 
           const injectedIds = selected.map((item) => item.id).join(",") || "(none)";
+          const selectedIds = new Set(selected.map((item) => item.id));
+          for (const result of results) {
+            const id = String(result.entry.id);
+            if (selectedIds.has(id)) {
+              traceStatusById.set(id, { status: "injected" });
+            } else if (!traceStatusById.has(id)) {
+              traceStatusById.set(id, {
+                status: "budget_filtered",
+                reason: "not_selected_within_budget",
+              });
+            }
+          }
           api.logger.debug?.(
-            `scope-recall-openclaw: auto-recall stats hits=${results.length}, dedupFiltered=${dedupFilteredCount}, stateFiltered=${stateFilteredCount}, suppressedFiltered=${suppressedFilteredCount}, preBudgetItems=${preBudgetItems}, preBudgetChars=${preBudgetChars}, postBudgetItems=${selected.length}, postBudgetChars=${usedChars}, maxItems=${autoRecallMaxItems}, maxChars=${autoRecallMaxChars}, perItemMaxChars=${autoRecallPerItemMaxChars}, injectedIds=${injectedIds}`,
+            `scope-recall-openclaw: auto-recall stats hits=${results.length}, dedupFiltered=${dedupFilteredCount}, stateFiltered=${stateFilteredCount}, suppressedFiltered=${suppressedFilteredCount}, crossScopeFiltered=${crossScopeFilteredCount}, preBudgetItems=${preBudgetItems}, preBudgetChars=${preBudgetChars}, postBudgetItems=${selected.length}, postBudgetChars=${usedChars}, maxItems=${autoRecallMaxItems}, maxChars=${autoRecallMaxChars}, perItemMaxChars=${autoRecallPerItemMaxChars}, injectedIds=${injectedIds}`,
           );
+          writeAutoRecallTrace({
+            decision: "injected",
+            reason: "selected",
+            result_count: results.length,
+            injected_count: selected.length,
+            suppressed_count: Math.max(0, results.length - selected.length),
+            memory_refs: makeTraceRefs(results, traceStatusById),
+            metadata: {
+              dedup_filtered: dedupFilteredCount,
+              state_filtered: stateFilteredCount,
+              suppressed_filtered: suppressedFilteredCount,
+              cross_scope_filtered: crossScopeFilteredCount,
+              pre_budget_items: preBudgetItems,
+              pre_budget_chars: preBudgetChars,
+              post_budget_items: selected.length,
+              post_budget_chars: usedChars,
+              max_items: autoRecallMaxItems,
+              max_chars: autoRecallMaxChars,
+            },
+          });
 
           throwIfRecallAborted();
           api.logger.info?.(
@@ -2532,7 +2810,7 @@ const scopeRecallOpenClawPlugin = {
       };
 
       const agentEndAutoCaptureHook: AgentEndAutoCaptureHook = (event, ctx) => {
-        if (!event.success || !event.messages || event.messages.length === 0) {
+        if (event.success === false || !event.messages || event.messages.length === 0) {
           return;
         }
 
@@ -2558,6 +2836,15 @@ const scopeRecallOpenClawPlugin = {
             ? config.scopes?.default ?? "global"
             : scopeManager.getDefaultScope(agentId);
           const sessionKey = ctx?.sessionKey || (event as any).sessionKey || "unknown";
+          const runtimeScopeMetadata = buildRuntimeScopeMetadata({
+            agentId,
+            runtimeContext: ctx,
+            event,
+            scope: defaultScope,
+            scopeFilter: accessibleScopes,
+            workspaceDir: resolveWorkspaceDirFromContext(ctx),
+            sourceSession: sessionKey,
+          });
 
           api.logger.debug(
             `scope-recall-openclaw: auto-capture agent_end payload for agent ${agentId} (sessionKey=${sessionKey}, captureAssistant=${config.captureAssistant === true}, ${summarizeAgentEndMessages(event.messages)})`,
@@ -2713,6 +3000,7 @@ const scopeRecallOpenClawPlugin = {
           // Rate limiter charged AFTER successful extraction, not before,
           // so no-op sessions don't consume the hourly quota.
           // ----------------------------------------------------------------
+          let regexFallbackDegradedReason: string | undefined;
           if (smartExtractor) {
             // Pre-filter: embedding-based noise detection (language-agnostic)
             const cleanTexts = await smartExtractor.filterNoiseByEmbedding(texts);
@@ -2727,28 +3015,38 @@ const scopeRecallOpenClawPlugin = {
                 `scope-recall-openclaw: auto-capture running smart extraction for agent ${agentId} (${cleanTexts.length} clean texts >= ${minMessages})`,
               );
               const conversationText = cleanTexts.join("\n");
-              const stats = await smartExtractor.extractAndPersist(
-                conversationText, sessionKey,
-                { scope: defaultScope, scopeFilter: accessibleScopes },
-              );
-              // Charge rate limiter only after successful extraction
-              extractionRateLimiter.recordExtraction();
-              if (stats.created > 0 || stats.merged > 0) {
-                api.logger.info(
-                  `scope-recall-openclaw: smart-extracted ${stats.created} created, ${stats.merged} merged, ${stats.skipped} skipped for agent ${agentId}`
+              try {
+                const stats = await smartExtractor.extractAndPersist(
+                  conversationText, sessionKey,
+                  { scope: defaultScope, scopeFilter: accessibleScopes, runtimeMetadata: runtimeScopeMetadata },
                 );
-                return; // Smart extraction handled everything
-              }
+                if (stats.created > 0 || stats.merged > 0) {
+                  // Charge rate limiter only after actual writes/merges.
+                  extractionRateLimiter.recordExtraction();
+                  api.logger.info(
+                    `scope-recall-openclaw: smart-extracted ${stats.created} created, ${stats.merged} merged, ${stats.skipped} skipped for agent ${agentId}`
+                  );
+                  return; // Smart extraction handled everything
+                }
 
-              if ((stats.boundarySkipped ?? 0) > 0) {
+                if ((stats.boundarySkipped ?? 0) > 0) {
+                  api.logger.info(
+                    `scope-recall-openclaw: smart extraction skipped ${stats.boundarySkipped} USER.md-exclusive candidate(s) for agent ${agentId}; continuing to regex fallback for non-boundary texts`,
+                  );
+                }
+
+                regexFallbackDegradedReason = stats.degraded
+                  ? stats.degradedReason || "smart_extraction_degraded"
+                  : "smart_extraction_no_persisted_memories";
                 api.logger.info(
-                  `scope-recall-openclaw: smart extraction skipped ${stats.boundarySkipped} USER.md-exclusive candidate(s) for agent ${agentId}; continuing to regex fallback for non-boundary texts`,
+                  `scope-recall-openclaw: smart extraction produced no persisted memories for agent ${agentId} (created=${stats.created}, merged=${stats.merged}, skipped=${stats.skipped}); falling back to regex capture degraded_reason=${regexFallbackDegradedReason}`,
+                );
+              } catch (err) {
+                regexFallbackDegradedReason = `smart_extraction_error:${err instanceof Error ? err.message : String(err)}`;
+                api.logger.warn(
+                  `scope-recall-openclaw: smart extraction failed for agent ${agentId}; falling back to degraded regex capture: ${String(err)}`,
                 );
               }
-
-              api.logger.info(
-                `scope-recall-openclaw: smart extraction produced no persisted memories for agent ${agentId} (created=${stats.created}, merged=${stats.merged}, skipped=${stats.skipped}); falling back to regex capture`,
-              );
             } else {
               api.logger.debug(
                 `scope-recall-openclaw: auto-capture skipped smart extraction for agent ${agentId} (${cleanTexts.length} < ${minMessages})`,
@@ -2813,7 +3111,7 @@ const scopeRecallOpenClawPlugin = {
             await store.store({
               text,
               vector,
-              importance: 0.7,
+              importance: regexFallbackDegradedReason ? 0.45 : 0.7,
               category,
               scope: defaultScope,
               metadata: stringifySmartMetadata(
@@ -2821,13 +3119,14 @@ const scopeRecallOpenClawPlugin = {
                   {
                     text,
                     category,
-                    importance: 0.7,
+                    importance: regexFallbackDegradedReason ? 0.45 : 0.7,
                   },
                   {
+                    ...runtimeScopeMetadata,
                     l0_abstract: text,
                     l1_overview: `- ${text}`,
                     l2_content: text,
-                    source_session: (event as any).sessionKey || "unknown",
+                    source_session: sessionKey,
                     source: "auto-capture",
                     // Write "confirmed" so auto-recall governance filter accepts
                     // these memories immediately. Previously "pending" caused a
@@ -2835,6 +3134,10 @@ const scopeRecallOpenClawPlugin = {
                     // auto-recalled (see #350).
                     state: "confirmed",
                     memory_layer: "working",
+                    confidence: regexFallbackDegradedReason ? 0.35 : 0.7,
+                    trust: regexFallbackDegradedReason ? "degraded" : "normal",
+                    extraction_degraded: Boolean(regexFallbackDegradedReason),
+                    degraded_reason: regexFallbackDegradedReason || "",
                     injected_count: 0,
                     bad_recall_count: 0,
                     suppressed_until_turn: 0,
@@ -2867,6 +3170,133 @@ const scopeRecallOpenClawPlugin = {
       };
 
       api.on("agent_end", agentEndAutoCaptureHook);
+    }
+
+    // Reusable task experience: after a successful, tool-backed task, distill
+    // a replayable procedure capsule into the same SQL truth + vector path.
+    if (config.taskExperienceCapture?.enabled === true) {
+      type AgentEndTaskExperienceHook = {
+        (event: any, ctx: any): void;
+        __lastRun?: Promise<void>;
+      };
+
+      const taskExperienceHook: AgentEndTaskExperienceHook = (event, ctx) => {
+        if (!agentEndEventAllowsTaskExperience(event) || !Array.isArray(event.messages) || event.messages.length === 0) {
+          return;
+        }
+        const sessionKey = typeof ctx?.sessionKey === "string"
+          ? ctx.sessionKey
+          : typeof (event as any).sessionKey === "string"
+            ? (event as any).sessionKey
+            : "";
+        if (isInternalReflectionSessionKey(sessionKey)) return;
+
+        const backgroundRun = (async () => {
+          try {
+            if (!llmClientForExtraction) {
+              api.logger.debug(
+                "task-experience: skipped because smart extraction LLM client is unavailable",
+              );
+              return;
+            }
+
+            const agentId = resolveHookAgentId(ctx?.agentId, sessionKey);
+            const defaultScope = isSystemBypassId(agentId)
+              ? config.scopes?.default ?? "global"
+              : scopeManager.getDefaultScope(agentId);
+            const taskExperienceConfig = config.taskExperienceCapture!;
+            const transcript = extractTaskExperienceTranscript(event.messages, taskExperienceConfig.maxInputChars);
+            const result = await captureTaskExperience({
+              messages: event.messages,
+              sessionKey,
+              sessionId: typeof ctx?.sessionId === "string" ? ctx.sessionId : undefined,
+              agentId,
+              scope: defaultScope,
+              config: taskExperienceConfig,
+              llmClient: llmClientForExtraction,
+              embedder,
+              store,
+              mdMirror,
+              logger: api.logger,
+            });
+
+            const taskExperienceSessionId = sessionKey || (typeof ctx?.sessionId === "string" ? ctx.sessionId : "unknown");
+            let taskExperienceEpisodeId = "";
+            try {
+              const experienceDb = await store.getSqlTruthDb();
+              if (experienceDb) {
+                ensureExperienceSchema(experienceDb);
+                const episodeDraft = buildTaskExperienceEpisodeDraft({
+                  transcript,
+                  result,
+                  agentId,
+                });
+                if (episodeDraft) {
+                  const episode = createTaskEpisode(experienceDb, {
+                    scope_id: defaultScope,
+                    session_id: taskExperienceSessionId,
+                    task_class: episodeDraft.task_class,
+                    task_goal: episodeDraft.task_goal,
+                    user_intent: episodeDraft.user_intent,
+                    status: episodeDraft.status,
+                    outcome: episodeDraft.outcome,
+                    tool_names: episodeDraft.tool_names,
+                    evidence: episodeDraft.evidence,
+                    verification: episodeDraft.verification,
+                    metadata: episodeDraft.metadata,
+                  });
+                  taskExperienceEpisodeId = episode.id;
+                  api.logger.info(
+                    `task-experience: recorded episode ${episode.id.slice(0, 8)} action=${result.action} outcome=${episode.outcome}`,
+                  );
+                }
+                recordTaskExperienceCaptureEvent(experienceDb, {
+                  scope_id: defaultScope,
+                  session_id: taskExperienceSessionId,
+                  agent_id: agentId,
+                  action: result.action,
+                  reason: result.action === "skipped" ? result.reason : "",
+                  task_class: result.action === "created" || result.action === "duplicate" ? result.taskType : "",
+                  memory_id: result.action === "created" ? result.id : "",
+                  existing_memory_id: result.action === "duplicate" ? result.existingId : "",
+                  similarity: result.action === "duplicate" ? result.similarity : 0,
+                  metadata: {
+                    source: "task-experience",
+                    auto_recorded: true,
+                    episode_id: taskExperienceEpisodeId,
+                  },
+                });
+              } else {
+                api.logger.debug("task-experience: skipped episode/capture ledger because SQL truth DB is unavailable");
+              }
+            } catch (ledgerErr) {
+              api.logger.warn(`task-experience: episode/capture ledger write failed: ${String(ledgerErr)}`);
+            }
+
+            if (result.action === "created") {
+              api.logger.info(
+                `task-experience: stored reusable task experience ${result.id.slice(0, 8)} (${result.taskType}) for agent ${agentId}`,
+              );
+            } else if (result.action === "duplicate") {
+              api.logger.debug(
+                `task-experience: duplicate skipped (${result.taskType}) existing=${result.existingId.slice(0, 8)} similarity=${result.similarity.toFixed(3)}`,
+              );
+            } else {
+              api.logger.info(`task-experience: skipped (${result.reason})`);
+            }
+          } catch (err) {
+            api.logger.warn(`task-experience: capture failed: ${String(err)}`);
+          }
+        })();
+
+        taskExperienceHook.__lastRun = backgroundRun;
+        void backgroundRun;
+      };
+
+      api.on("agent_end", taskExperienceHook);
+      (isCliRegistrationMode(api) ? api.logger.debug : api.logger.info)(
+        "task-experience: successful task capsule capture enabled",
+      );
     }
 
     // ========================================================================
@@ -3863,6 +4293,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
     autoRecallMinLength: parsePositiveInt(cfg.autoRecallMinLength),
     autoRecallMinRepeated: parsePositiveInt(cfg.autoRecallMinRepeated) ?? 8,
     autoRecallTimeoutMs: parsePositiveInt(cfg.autoRecallTimeoutMs) ?? 5_000,
+    autoRecallQueryMaxChars: parseIntBetween(cfg.autoRecallQueryMaxChars, 256, 12_000) ?? 4_000,
     autoRecallMaxItems: parsePositiveInt(cfg.autoRecallMaxItems) ?? 3,
     autoRecallMaxChars: parsePositiveInt(cfg.autoRecallMaxChars) ?? 600,
     autoRecallPerItemMaxChars: parsePositiveInt(cfg.autoRecallPerItemMaxChars) ?? 180,
@@ -4009,6 +4440,28 @@ export function parsePluginConfig(value: unknown): PluginConfig {
                 : 30,
           }
         : { skipLowValue: false, maxExtractionsPerHour: 30 },
+    taskExperienceCapture: (() => {
+      const raw =
+        typeof cfg.taskExperienceCapture === "object" && cfg.taskExperienceCapture !== null
+          ? (cfg.taskExperienceCapture as Record<string, unknown>)
+          : null;
+      if (!raw) return { ...DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG };
+      return {
+        enabled: raw.enabled === true,
+        minMessages:
+          parseIntBetween(raw.minMessages, 2, 200) ?? DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG.minMessages,
+        minToolCalls:
+          parseIntBetween(raw.minToolCalls, 0, 50) ?? DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG.minToolCalls,
+        maxInputChars:
+          parseIntBetween(raw.maxInputChars, 1_000, 100_000) ?? DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG.maxInputChars,
+        maxCapsuleChars:
+          parseIntBetween(raw.maxCapsuleChars, 800, 8_000) ?? DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG.maxCapsuleChars,
+        minConfidence:
+          parseNumberBetween(raw.minConfidence, 0, 1) ?? DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG.minConfidence,
+        dedupeThreshold:
+          parseNumberBetween(raw.dedupeThreshold, 0, 1) ?? DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG.dedupeThreshold,
+      };
+    })(),
   };
 }
 

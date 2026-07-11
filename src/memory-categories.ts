@@ -75,6 +75,8 @@ export type ExtractionStats = {
   supported?: number; // context-aware support count
   contradicted?: number; // conflict-review contradiction count
   superseded?: number; // temporal fact replacements
+  degraded?: boolean; // upstream/extraction quality was degraded before fallback
+  degradedReason?: string;
 };
 
 /** Validate and normalize a category string. */

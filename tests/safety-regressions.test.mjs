@@ -11,13 +11,15 @@ const jiti = createJiti(import.meta.url, {
 });
 
 const { registerAllMemoryTools } = jiti("../src/tools.ts");
+const { EXPERIENCE_TOOL_NAMES } = jiti("../src/experience-tools.ts");
 const { buildSecretIndex } = jiti("../src/secret-index.ts");
+const { SmartExtractor } = jiti("../src/smart-extractor.ts");
 
 function fail(message) {
   throw new Error(message);
 }
 
-function createToolMap(toolCtx = {}) {
+function createToolMap(toolCtx = {}, options = {}) {
   const tools = new Map();
   const api = {
     registerTool(factory, meta) {
@@ -44,8 +46,62 @@ function createToolMap(toolCtx = {}) {
   registerAllMemoryTools(api, context, {
     enableManagementTools: true,
     enableSelfImprovementTools: false,
+    secretIndexToolsEnabled: options.secretIndexToolsEnabled === true,
   });
   return tools;
+}
+
+function createWritableToolMap(toolCtx = {}, options = {}) {
+  const tools = new Map();
+  const stored = [];
+  const retrieved = [];
+  const api = {
+    registerTool(factory, meta) {
+      tools.set(meta.name, factory(toolCtx));
+    },
+  };
+  const context = {
+    retriever: {
+      async retrieve(params) {
+        retrieved.push(params);
+        return [];
+      },
+    },
+    store: {
+      getById: async () => null,
+      list: async () => [],
+      patchMetadata: async () => null,
+      async store(entry) {
+        stored.push(entry);
+        return {
+          ...entry,
+          id: `mem-${stored.length}`,
+          timestamp: 1_700_000_000_000 + stored.length,
+        };
+      },
+      update: async () => null,
+      vectorSearch: async () => [],
+    },
+    scopeManager: {
+      getDefaultScope(agentId) {
+        return `agent:${agentId}`;
+      },
+      getScopeFilter(agentId) {
+        return [`agent:${agentId}`, "global"];
+      },
+      isAccessible(scope, agentId) {
+        return scope === "global" || scope === `agent:${agentId}`;
+      },
+    },
+    embedder: { embedPassage: async () => [0.1, 0.2, 0.3] },
+    workspaceDir: "/workspace/default",
+  };
+  registerAllMemoryTools(api, context, {
+    enableManagementTools: true,
+    enableSelfImprovementTools: false,
+    secretIndexToolsEnabled: options.secretIndexToolsEnabled === true,
+  });
+  return { tools, stored, retrieved };
 }
 
 test("core memory tools fail closed when OpenClaw agent context is missing", async () => {
@@ -56,7 +112,6 @@ test("core memory tools fail closed when OpenClaw agent context is missing", asy
     const calls = [
       ["memory_recall", { query: "anything" }],
       ["memory_store", { text: "remember this" }],
-      ["memory_store_secret_index", { label: "deploy credential", vaultRef: "op://infra/deploy/password" }],
       ["memory_forget", { query: "anything" }],
       ["memory_update", { memoryId: "memory-id", importance: 0.5 }],
     ];
@@ -65,6 +120,24 @@ test("core memory tools fail closed when OpenClaw agent context is missing", asy
       const result = await tools.get(name).execute("test-call", params);
       assert.equal(result.details.error, "missing_agent_context", name);
     }
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+test("secret index tool is hidden by default and fail-closed when explicitly enabled without agent context", async () => {
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    const defaultTools = createToolMap();
+    assert.equal(defaultTools.has("memory_store_secret_index"), false);
+
+    const enabledTools = createToolMap({}, { secretIndexToolsEnabled: true });
+    assert.equal(enabledTools.has("memory_store_secret_index"), true);
+    const result = await enabledTools
+      .get("memory_store_secret_index")
+      .execute("test-call", { label: "deploy credential", vaultRef: "op://infra/deploy/password" });
+    assert.equal(result.details.error, "missing_agent_context");
   } finally {
     console.warn = originalWarn;
   }
@@ -90,6 +163,165 @@ test("secret index rejects plaintext secrets in free-text metadata fields", () =
   assert.doesNotMatch(safe.content, /sk-proj-/);
 });
 
+test("memory_store persists deterministic runtime scope metadata", async () => {
+  const { tools, stored } = createWritableToolMap({ workspaceDir: "/workspace/static" });
+  const sessionKey = "agent:main:telegram:default:direct:8176453077";
+  const result = await tools.get("memory_store").execute(
+    "test-call",
+    {
+      text: "OpenClaw release audits must include targeted regression tests.",
+      category: "fact",
+      importance: 0.83,
+    },
+    undefined,
+    undefined,
+    {
+      agentId: "main",
+      sessionKey,
+      sessionId: "session-123",
+      channelId: "telegram",
+      accountId: "default",
+      conversationId: "8176453077",
+      threadId: "direct",
+      platform: "telegram",
+      workspaceDir: "/workspace/runtime",
+    },
+  );
+
+  assert.equal(result.details.action, "created");
+  assert.equal(stored.length, 1);
+  const metadata = JSON.parse(stored[0].metadata);
+  assert.equal(stored[0].scope, "agent:main");
+  assert.equal(metadata.runtime_contract, "openclaw-scope-v1");
+  assert.equal(metadata.agentId, "main");
+  assert.equal(metadata.agent_id, "main");
+  assert.equal(metadata.scope_owner_agent_id, "main");
+  assert.equal(metadata.sessionKey, sessionKey);
+  assert.equal(metadata.session_key, sessionKey);
+  assert.equal(metadata.source_session, sessionKey);
+  assert.equal(metadata.session_id, "session-123");
+  assert.equal(metadata.channel_id, "telegram");
+  assert.equal(metadata.account_id, "default");
+  assert.equal(metadata.conversation_id, "8176453077");
+  assert.equal(metadata.thread_id, "direct");
+  assert.equal(metadata.workspace_dir, "/workspace/runtime");
+  assert.equal(metadata.scope_id, "agent:main");
+  assert.deepEqual(metadata.scope_filter, ["agent:main"]);
+  assert.equal(metadata.scope_filter_mode, "restricted");
+});
+
+test("memory_store denies inaccessible scopes before embedding or storing", async () => {
+  const { tools, stored } = createWritableToolMap();
+  const result = await tools.get("memory_store").execute(
+    "test-call",
+    {
+      text: "This should never be stored in another agent scope.",
+      category: "fact",
+      scope: "agent:other",
+    },
+    undefined,
+    undefined,
+    {
+      agentId: "main",
+      sessionKey: "agent:main:telegram:default:direct:8176453077",
+    },
+  );
+
+  assert.equal(result.details.error, "scope_access_denied");
+  assert.equal(stored.length, 0);
+});
+
+test("memory_recall denies inaccessible scopes before retrieval", async () => {
+  const { tools, retrieved } = createWritableToolMap();
+  const result = await tools.get("memory_recall").execute(
+    "test-call",
+    {
+      query: "release audit preferences",
+      scope: "agent:other",
+    },
+    undefined,
+    undefined,
+    {
+      agentId: "main",
+      sessionKey: "agent:main:telegram:default:direct:8176453077",
+    },
+  );
+
+  assert.equal(result.details.error, "scope_access_denied");
+  assert.equal(retrieved.length, 0);
+});
+
+test("smart extraction persists runtime scope metadata on auto-captured memories", async () => {
+  const stored = [];
+  const store = {
+    vectorSearch: async () => [],
+    async store(entry) {
+      stored.push(entry);
+      return { ...entry, id: `auto-${stored.length}`, timestamp: Date.now() };
+    },
+    getById: async () => null,
+    update: async () => null,
+  };
+  const embedder = {
+    embed: async () => [0.4, 0.5, 0.6],
+  };
+  const llm = {
+    async completeJson(_prompt, label) {
+      if (label === "extract-candidates") {
+        return {
+          memories: [
+            {
+              category: "cases",
+              abstract: "Release audits require targeted regression tests.",
+              overview: "- Targeted tests should accompany release audits.",
+              content: "OpenClaw release audits should include targeted regression tests before the release gate.",
+            },
+          ],
+        };
+      }
+      return null;
+    },
+    getLastError: () => null,
+  };
+  const extractor = new SmartExtractor(store, embedder, llm, {
+    defaultScope: "agent:main",
+    log: () => {},
+    debugLog: () => {},
+  });
+  const sessionKey = "agent:main:telegram:default:direct:8176453077";
+
+  const stats = await extractor.extractAndPersist(
+    "Joy said OpenClaw release audits should include targeted regression tests.",
+    sessionKey,
+    {
+      scope: "agent:main",
+      scopeFilter: ["agent:main", "global"],
+      runtimeMetadata: {
+        runtime_contract: "openclaw-scope-v1",
+        agentId: "main",
+        agent_id: "main",
+        source_session: sessionKey,
+        channel_id: "telegram",
+        scope_id: "agent:main",
+        scope_filter: ["agent:main", "global"],
+        scope_filter_mode: "restricted",
+      },
+    },
+  );
+
+  assert.equal(stats.created, 1);
+  assert.equal(stored.length, 1);
+  const metadata = JSON.parse(stored[0].metadata);
+  assert.equal(metadata.runtime_contract, "openclaw-scope-v1");
+  assert.equal(metadata.agentId, "main");
+  assert.equal(metadata.agent_id, "main");
+  assert.equal(metadata.source_session, sessionKey);
+  assert.equal(metadata.channel_id, "telegram");
+  assert.equal(metadata.scope_id, "agent:main");
+  assert.deepEqual(metadata.scope_filter, ["agent:main", "global"]);
+  assert.equal(metadata.scope_filter_mode, "restricted");
+});
+
 test("operator schemas include rejected memory state", () => {
   const tools = createToolMap({ agentId: "audit-agent" });
   for (const name of ["memory_context", "memory_promote"]) {
@@ -102,11 +334,102 @@ test("operator schemas include rejected memory state", () => {
 test("manifest declares all owned tools and marks management tools with config availability", () => {
   const manifest = JSON.parse(readFileSync(new URL("../openclaw.plugin.json", import.meta.url), "utf8"));
   assert.ok(manifest.contracts.tools.includes("memory_recall"));
+  assert.ok(manifest.contracts.tools.includes("memory_store_secret_index"));
   assert.ok(manifest.contracts.tools.includes("memory_govern"));
   assert.ok(manifest.contracts.tools.includes("self_improvement_review"));
+
+  const secretSignal = manifest.toolMetadata.memory_store_secret_index.configSignals[0];
+  assert.equal(secretSignal.rootPath, "plugins.entries.scope-recall-openclaw.config");
+  assert.equal(secretSignal.mode.path, "secretIndexToolsEnabled");
+  assert.deepEqual(secretSignal.mode.allowed, ["true"]);
 
   const governSignal = manifest.toolMetadata.memory_govern.configSignals[0];
   assert.equal(governSignal.rootPath, "plugins.entries.scope-recall-openclaw.config");
   assert.equal(governSignal.mode.path, "enableManagementTools");
   assert.deepEqual(governSignal.mode.allowed, ["true"]);
+
+  const alwaysAvailableExperienceTools = new Set([
+    "scope_recall_playbook_search",
+    "scope_recall_playbook_inspect",
+    "scope_recall_experience_preflight",
+    "scope_recall_experience_stats",
+    "scope_recall_experience_replay",
+  ]);
+  for (const toolName of EXPERIENCE_TOOL_NAMES) {
+    assert.ok(manifest.contracts.tools.includes(toolName), `${toolName} contract missing`);
+    assert.ok(manifest.toolMetadata[toolName]?.discoverable, `${toolName} metadata missing`);
+    if (!alwaysAvailableExperienceTools.has(toolName)) {
+      const signal = manifest.toolMetadata[toolName].configSignals?.[0];
+      assert.equal(signal?.rootPath, "plugins.entries.scope-recall-openclaw.config", toolName);
+      assert.equal(signal?.mode?.path, "enableManagementTools", toolName);
+      assert.deepEqual(signal?.mode?.allowed, ["true"], toolName);
+    }
+  }
+});
+
+test("vector repair CLI is dry-run-first and SQLite stores use busy timeout", () => {
+  const cli = readFileSync(new URL("../cli.ts", import.meta.url), "utf8");
+  assert.match(cli, /\.option\("--apply"/);
+  assert.match(cli, /\.option\("--full"/);
+  assert.match(cli, /options\.dryRun === true \|\| options\.apply !== true/);
+  assert.match(cli, /fullRebuild: options\.full === true/);
+
+  const truthStore = readFileSync(new URL("../src/sql-truth-store.ts", import.meta.url), "utf8");
+  const sqliteVectorStore = readFileSync(new URL("../src/sqlite-vector-store.ts", import.meta.url), "utf8");
+  assert.match(truthStore, /PRAGMA busy_timeout = 10000/);
+  assert.match(sqliteVectorStore, /PRAGMA busy_timeout = 10000/);
+});
+
+test("operator CLI exposes Yuheng 1.6 governance function surface", () => {
+  const cli = readFileSync(new URL("../cli.ts", import.meta.url), "utf8");
+  for (const marker of [
+    ".command(\"dashboard\")",
+    ".command(\"candidates\")",
+    ".command(\"governance\")",
+    ".command(\"cleanup\")",
+    ".command(\"rollback\")",
+    ".command(\"audit-coverage\")",
+    ".command(\"journal\")",
+    ".command(\"recovery\")",
+    ".command(\"graph\")",
+    ".command(\"hygiene\")",
+    ".command(\"forgetting\")",
+    ".command(\"experience\")",
+    ".command(\"playbooks\")",
+    ".command(\"supersede\")",
+  ]) {
+    assert.ok(cli.includes(marker), marker);
+  }
+
+  assert.match(cli, /candidateDebtReport\(db/);
+  assert.match(cli, /promoteMemoryCandidates\(db/);
+  assert.match(cli, /applyCleanup\(db/);
+  assert.match(cli, /rollbackCleanupBatch\(db/);
+  assert.match(cli, /recoveryReport\(db/);
+  assert.match(cli, /scheduleReplay\(db/);
+  assert.match(cli, /graphHygieneReport\(db/);
+  assert.match(cli, /repairGraphHygiene\(db/);
+  assert.match(cli, /buildForgettingReport\(db/);
+  assert.match(cli, /runForgettingWithVectorSync\(db/);
+  assert.match(cli, /buildExperienceDebtReport\(db/);
+  assert.match(cli, /promoteExperiences\(db/);
+  assert.match(cli, /reviewPlaybook\(db/);
+  assert.match(cli, /dryRunFromApplyOptions/);
+});
+
+test("release gate includes source/live separation and OpenClaw runtime smoke", () => {
+  const gate = readFileSync(new URL("../scripts/release-gate.mjs", import.meta.url), "utf8");
+  const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  const indexSource = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
+  assert.match(packageJson.scripts["release:gate"], /SCOPE_RECALL_ALLOW_NESTED_GIT_ROOT=1/);
+  assert.match(gate, /"rev-parse",\s*"--show-toplevel"/);
+  assert.match(gate, /SCOPE_RECALL_ALLOW_NESTED_GIT_ROOT/);
+  assert.match(gate, /"diff",\s*"--check",\s*"--"/);
+  assert.match(gate, /refusing self-drift comparison/);
+  assert.match(gate, /OPENCLAW_STATE_DIR/);
+  assert.match(gate, /OPENCLAW_CONFIG_PATH/);
+  assert.match(gate, /plugins",\s*"inspect",\s*"scope-recall-openclaw"/);
+  assert.match(gate, /"scope-recall",\s*"doctor",\s*"--json",\s*"--quiet"/);
+  assert.match(indexSource, /diagnosticBuildTag = `\$\{DIAG_BUILD_TAG_PREFIX\}-\$\{pluginVersion\}`/);
+  assert.doesNotMatch(indexSource, /scope-recall-openclaw-1\.0\.24/);
 });

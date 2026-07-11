@@ -1,6 +1,8 @@
-import { access, readdir, readFile } from "node:fs/promises";
+import { access, readdir, readFile, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { relative, resolve } from "node:path";
 
 async function exists(path) {
   try {
@@ -18,15 +20,118 @@ function run(command, args) {
   }
 }
 
+function runCapture(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    encoding: "utf8",
+    shell: false,
+    env: options.env || process.env,
+  });
+  if (result.status !== 0) {
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    if (result.error) process.stderr.write(`${result.error.message}\n`);
+    process.exit(result.status ?? 1);
+  }
+  return result.stdout || "";
+}
+
+function parseJsonWithPreamble(raw, label) {
+  const start = raw.indexOf("{");
+  if (start < 0) {
+    throw new Error(`release gate failed: ${label} did not return JSON`);
+  }
+  try {
+    return JSON.parse(raw.slice(start));
+  } catch (err) {
+    throw new Error(`release gate failed: ${label} returned invalid JSON: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+async function hashFile(path) {
+  return createHash("sha256").update(await readFile(path)).digest("hex");
+}
+
+async function assertFileHashesMatch(leftPath, rightPath) {
+  const [leftHash, rightHash] = await Promise.all([hashFile(leftPath), hashFile(rightPath)]);
+  if (leftHash !== rightHash) {
+    throw new Error(`release gate failed: workspace/extension drift for ${leftPath}`);
+  }
+}
+
+function changelogSection(changelog, version) {
+  const marker = `## ${version}`;
+  const start = changelog.indexOf(marker);
+  if (start < 0) return "";
+  const next = changelog.indexOf("\n## ", start + marker.length);
+  return changelog.slice(start, next < 0 ? changelog.length : next);
+}
+
 const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+const manifest = JSON.parse(await readFile("openclaw.plugin.json", "utf8"));
+const changelog = await readFile("CHANGELOG.md", "utf8");
+const sourceRoot = await realpath(process.cwd());
+const gitRoot = (await realpath(runCapture("git", ["rev-parse", "--show-toplevel"]).trim()));
+const allowNestedGitRoot = process.env.SCOPE_RECALL_ALLOW_NESTED_GIT_ROOT === "1";
+const sourceInsideGitRoot = sourceRoot === gitRoot || sourceRoot.startsWith(`${gitRoot}/`);
+
+if (gitRoot !== sourceRoot && !(allowNestedGitRoot && sourceInsideGitRoot)) {
+  throw new Error(`release gate failed: run from plugin git root (${gitRoot}), not ${sourceRoot}`);
+}
+
+if (packageJson.version !== manifest.version) {
+  throw new Error(
+    `release gate failed: package.json version ${packageJson.version} does not match openclaw.plugin.json ${manifest.version}`,
+  );
+}
+
+const currentChangelog = changelogSection(changelog, packageJson.version);
+if (!currentChangelog) {
+  throw new Error(`release gate failed: CHANGELOG.md missing section for ${packageJson.version}`);
+}
+
+for (const marker of ["governance", "journal", "operator dashboard", "golden", "hard-delete", "release gate"]) {
+  if (!currentChangelog.includes(marker)) {
+    throw new Error(`release gate failed: CHANGELOG ${packageJson.version} missing ${marker}`);
+  }
+}
+
 const requiredFiles = [
   "README.md",
   "SECURITY.md",
+  "docs/openclaw-contract-matrix.md",
+  "docs/response-contracts.md",
+  "docs/configuration.md",
+  "docs/runtime-identity-scope-rules.md",
+  "docs/phase-2-scope-identity-admission-audit-2026-06-30.md",
+  "docs/phase-3-commercial-retrieval-audit-2026-06-30.md",
+  "docs/phase-4-freshness-relation-audit-2026-06-30.md",
+  "docs/phase-5-digest-audit-2026-06-30.md",
+  "docs/phase-6-experience-productization-audit-2026-06-30.md",
+  "docs/phase-7-release-hardening-audit-2026-06-30.md",
+  "docs/operator-runbook.md",
+  "docs/release-readiness-template.md",
+  "docs/tianji-independent-roadmap-2026-07-01.md",
   "openclaw.plugin.json",
   "tsconfig.json",
   "index.ts",
+  "src/runtime-scope-metadata.ts",
   "src/embedder.ts",
+  "src/experience-models.ts",
+  "src/experience-store.ts",
+  "src/experience-governance.ts",
+  "src/experience-tools.ts",
+  "src/experience-promotion.ts",
+  "src/experience-replay.ts",
+  "src/candidate-promotion.ts",
+  "src/forgetting.ts",
+  "src/graph-hygiene.ts",
+  "src/governance-cleanup.ts",
+  "src/journal-recovery.ts",
+  "src/operator-dashboard.ts",
   "src/types/openclaw-plugin-sdk.d.ts",
+  "benchmarks/golden-recall-cases.json",
+  "benchmarks/experience-replay-cases.json",
+  "scripts/golden-benchmark.mjs",
   "scripts/smoke-vector-repair.mjs",
 ];
 
@@ -50,8 +155,361 @@ for (const file of packageJson.files ?? []) {
   }
 }
 
+const experienceStoreSource = await readFile("src/experience-store.ts", "utf8");
+if (!experienceStoreSource.includes("buildSafeFtsQuery(") || !experienceStoreSource.includes("safeFtsQuery")) {
+  throw new Error("release gate failed: Experience playbook FTS search must use buildSafeFtsQuery()");
+}
+
+const requiredExperienceTools = [
+  "scope_recall_playbook_search",
+  "scope_recall_playbook_inspect",
+  "scope_recall_experience_preflight",
+  "scope_recall_experience_stats",
+  "scope_recall_experience_replay",
+  "scope_recall_episode_create",
+  "scope_recall_episode_complete",
+  "scope_recall_playbook_create",
+  "scope_recall_playbook_feedback",
+  "scope_recall_experience_promote",
+  "scope_recall_forgetting_report",
+  "scope_recall_forgetting_run",
+  "scope_recall_governance_cleanup_report",
+  "scope_recall_governance_cleanup_run",
+  "scope_recall_memory_candidate_promotion_report",
+  "scope_recall_memory_candidate_promotion_run",
+  "scope_recall_graph_hygiene_report",
+  "scope_recall_graph_hygiene_run",
+  "scope_recall_journal_recovery_report",
+  "scope_recall_journal_recovery_run",
+  "scope_recall_digest_report",
+  "scope_recall_digest_run",
+  "scope_recall_digest_recovery",
+  "scope_recall_operator_dashboard",
+  "scope_recall_playbook_review",
+];
+for (const toolName of requiredExperienceTools) {
+  if (!manifest.contracts?.tools?.includes(toolName)) {
+    throw new Error(`release gate failed: manifest missing Experience tool contract ${toolName}`);
+  }
+  if (manifest.toolMetadata?.[toolName]?.discoverable !== true) {
+    throw new Error(`release gate failed: manifest missing discoverability metadata for ${toolName}`);
+  }
+}
+
+const alwaysAvailableExperienceTools = new Set([
+  "scope_recall_playbook_search",
+  "scope_recall_playbook_inspect",
+  "scope_recall_experience_preflight",
+  "scope_recall_experience_stats",
+  "scope_recall_experience_replay",
+]);
+for (const toolName of requiredExperienceTools) {
+  if (alwaysAvailableExperienceTools.has(toolName)) continue;
+  const signal = manifest.toolMetadata?.[toolName]?.configSignals?.[0];
+  if (
+    signal?.rootPath !== "plugins.entries.scope-recall-openclaw.config" ||
+    signal?.mode?.path !== "enableManagementTools" ||
+    !Array.isArray(signal?.mode?.allowed) ||
+    !signal.mode.allowed.includes("true")
+  ) {
+    throw new Error(`release gate failed: management Experience tool ${toolName} missing enableManagementTools signal`);
+  }
+}
+
+const indexSource = await readFile("index.ts", "utf8");
+if (!indexSource.includes("registerExperienceTools(") || !indexSource.includes("ensureExperienceSchema(db)")) {
+  throw new Error("release gate failed: index.ts does not initialize/register Experience Kernel");
+}
+
+const cliSource = await readFile("cli.ts", "utf8");
+for (const marker of ["collectExperienceHealth", "collectNightlyDigestHealth", "Experience Kernel"]) {
+  if (!cliSource.includes(marker)) {
+    throw new Error(`release gate failed: cli doctor missing ${marker}`);
+  }
+}
+if (!cliSource.includes(".option(\"--apply\"") || !cliSource.includes("options.apply !== true")) {
+  throw new Error("release gate failed: repair-vectors must be dry-run-first and require --apply for writes");
+}
+for (const marker of [
+  ".command(\"dashboard\")",
+  ".command(\"candidates\")",
+  ".command(\"governance\")",
+  ".command(\"journal\")",
+  ".command(\"graph\")",
+  ".command(\"forgetting\")",
+  ".command(\"digest\")",
+  ".command(\"experience\")",
+  ".command(\"debt\")",
+  ".command(\"replay\")",
+  ".command(\"playbooks\")",
+]) {
+  if (!cliSource.includes(marker)) {
+    throw new Error(`release gate failed: CLI missing Yuheng 1.6 operator route ${marker}`);
+  }
+}
+for (const marker of [
+  "buildOperatorDashboard",
+  "promoteMemoryCandidates",
+  "applyCleanup",
+  "rollbackCleanupBatch",
+  "scheduleReplay",
+  "repairGraphHygiene",
+  "runForgettingWithVectorSync",
+  "buildExperienceDebtReport",
+  "promoteExperiences",
+  "runDigestPipeline",
+  "digestRecoveryReport",
+  "runReplaySuite",
+  "loadReplayCases",
+  "reviewPlaybook",
+]) {
+  if (!cliSource.includes(marker)) {
+    throw new Error(`release gate failed: CLI missing operator implementation marker ${marker}`);
+  }
+}
+
+for (const sqliteSourcePath of ["src/sql-truth-store.ts", "src/sqlite-vector-store.ts"]) {
+  const sqliteSource = await readFile(sqliteSourcePath, "utf8");
+  if (!sqliteSource.includes("PRAGMA busy_timeout = 10000")) {
+    throw new Error(`release gate failed: ${sqliteSourcePath} must set SQLite busy_timeout`);
+  }
+}
+
+const parityRoadmap = await readFile("docs/parity-roadmap.md", "utf8");
+if (!parityRoadmap.includes("runtime-maturity-audit-2026-06-25.md")) {
+  throw new Error("release gate failed: parity roadmap must link current runtime maturity audit");
+}
+
+const contractMatrix = await readFile("docs/openclaw-contract-matrix.md", "utf8");
+for (const marker of ["Tool surface", "Scope isolation", "Recall Funnel trace", "Fact freshness", "Live rollout"]) {
+  if (!contractMatrix.includes(marker)) {
+    throw new Error(`release gate failed: contract matrix missing ${marker}`);
+  }
+}
+
+const responseContracts = await readFile("docs/response-contracts.md", "utf8");
+for (const marker of ["doctor", "dashboard", "freshness", "repair-vectors", "Governance Cleanup", "OpenClaw Digest", "Experience Replay", "Benchmark", "knownAnswerRecall", "forbiddenViolationRate", "promptBudget"]) {
+  if (!responseContracts.includes(marker)) {
+    throw new Error(`release gate failed: response contracts missing ${marker}`);
+  }
+}
+
+const digestSource = await readFile("src/digest-pipeline.ts", "utf8");
+for (const marker of ["ok_with_fallback", "dead_letter", "digest-candidate", "openclaw_digest_runs", "openclaw_digest_chunks"]) {
+  if (!digestSource.includes(marker)) {
+    throw new Error(`release gate failed: digest pipeline missing commercial marker ${marker}`);
+  }
+}
+
+const retrieverSource = await readFile("src/retriever.ts", "utf8");
+for (const marker of ["relation_evidence", "applyRelationEvidence", "conflict_review_penalty", "freshness_debt_penalty"]) {
+  if (!retrieverSource.includes(marker)) {
+    throw new Error(`release gate failed: retriever missing relation-aware marker ${marker}`);
+  }
+}
+const dashboardSource = await readFile("src/operator-dashboard.ts", "utf8");
+for (const marker of ["freshnessHealth", "freshness_debt", "unknown_freshness_facts"]) {
+  if (!dashboardSource.includes(marker)) {
+    throw new Error(`release gate failed: operator dashboard missing freshness marker ${marker}`);
+  }
+}
+
+const goldenBenchmarkSource = await readFile("scripts/golden-benchmark.mjs", "utf8");
+for (const marker of ["knownAnswerRecall", "topKAccuracy", "forbiddenViolationRate", "promptBudget", "filterCounts"]) {
+  if (!goldenBenchmarkSource.includes(marker)) {
+    throw new Error(`release gate failed: golden benchmark missing metric ${marker}`);
+  }
+}
+const goldenCases = await readFile("benchmarks/golden-recall-cases.json", "utf8");
+for (const marker of ["project-alpha-deploy", "project-beta-deploy", "home-ip-old", "home-ip-current", "max_prompt_chars"]) {
+  if (!goldenCases.includes(marker)) {
+    throw new Error(`release gate failed: golden benchmark fixture missing ${marker}`);
+  }
+}
+
+const experienceReplayCases = JSON.parse(await readFile("benchmarks/experience-replay-cases.json", "utf8"));
+if (!Array.isArray(experienceReplayCases) || experienceReplayCases.length < 6) {
+  throw new Error("release gate failed: experience replay benchmark must contain at least six cases");
+}
+for (const marker of ["config-change-safety", "gateway-recovery", "vector-repair", "release-gate", "plugin-rollout", "telegram-delivery"]) {
+  if (!experienceReplayCases.some((item) => item?.id === marker)) {
+    throw new Error(`release gate failed: experience replay benchmark missing ${marker}`);
+  }
+}
+
+const configurationReference = await readFile("docs/configuration.md", "utf8");
+for (const marker of ["embedding.provider", "autoRecall", "autoCapture", "retrieval.mode", "taskExperienceCapture.enabled"]) {
+  if (!configurationReference.includes(marker)) {
+    throw new Error(`release gate failed: configuration reference missing ${marker}`);
+  }
+}
+
+const runtimeIdentityRules = await readFile("docs/runtime-identity-scope-rules.md", "utf8");
+for (const marker of ["openclaw-scope-v1", "scope_filter_mode", "memory_store", "foreign agent scopes", "Capture safety"]) {
+  if (!runtimeIdentityRules.includes(marker)) {
+    throw new Error(`release gate failed: runtime identity rules missing ${marker}`);
+  }
+}
+
+const diffPathspec = gitRoot === sourceRoot ? "." : relative(gitRoot, sourceRoot);
+run("git", ["diff", "--check", "--", diffPathspec || "."]);
 run("npm", ["test"]);
 run("npm", ["run", "typecheck"]);
 run("npm", ["run", "smoke:vector-repair"]);
 run("npm", ["run", "build"]);
-run("npm", ["pack", "--dry-run"]);
+run("node", ["scripts/golden-benchmark.mjs"]);
+
+const extensionDir = process.env.SCOPE_RECALL_EXTENSION_DIR || resolve(process.cwd(), "../../extensions/scope-recall-openclaw");
+if (await exists(extensionDir)) {
+  const extensionRoot = await realpath(extensionDir);
+  if (extensionRoot === sourceRoot) {
+    if (!allowNestedGitRoot) {
+      throw new Error("release gate failed: extension dir resolves to source root; refusing self-drift comparison");
+    }
+    console.log("release gate: extension dir resolves to source root; skipping self-drift comparison for nested live extension");
+  } else {
+    const driftFiles = [
+      "CHANGELOG.md",
+      "README.md",
+      "package.json",
+      "openclaw.plugin.json",
+      "benchmarks/golden-recall-cases.json",
+      "benchmarks/experience-replay-cases.json",
+      "index.ts",
+      "cli.ts",
+      "scripts/golden-benchmark.mjs",
+      "scripts/release-gate.mjs",
+      "docs/openclaw-contract-matrix.md",
+      "docs/response-contracts.md",
+      "docs/runtime-identity-scope-rules.md",
+      "docs/phase-1-contract-audit-2026-06-30.md",
+      "docs/phase-2-scope-identity-admission-audit-2026-06-30.md",
+      "docs/phase-3-commercial-retrieval-audit-2026-06-30.md",
+      "docs/phase-4-freshness-relation-audit-2026-06-30.md",
+      "docs/phase-5-digest-audit-2026-06-30.md",
+      "docs/phase-6-experience-productization-audit-2026-06-30.md",
+      "docs/phase-7-release-hardening-audit-2026-06-30.md",
+      "docs/operator-runbook.md",
+      "docs/release-readiness-template.md",
+      "docs/tianji-independent-roadmap-2026-07-01.md",
+      "src/auto-recall-query.ts",
+      "src/capture-safety.ts",
+      "src/digest-pipeline.ts",
+      "src/experience-governance.ts",
+      "src/experience-store.ts",
+      "src/experience-replay.ts",
+      "src/runtime-scope-metadata.ts",
+      "src/retriever.ts",
+      "src/smart-metadata.ts",
+      "src/smart-extractor.ts",
+      "src/tools.ts",
+      "src/candidate-promotion.ts",
+      "src/forgetting.ts",
+      "src/graph-hygiene.ts",
+      "src/governance-cleanup.ts",
+      "src/journal-recovery.ts",
+      "src/operator-dashboard.ts",
+      "src/task-experience.ts",
+      "dist/cli.js",
+      "dist/index.js",
+      "dist/src/auto-recall-query.js",
+      "dist/src/capture-safety.js",
+      "dist/src/digest-pipeline.js",
+      "dist/src/experience-governance.js",
+      "dist/src/experience-store.js",
+      "dist/src/experience-replay.js",
+      "dist/src/runtime-scope-metadata.js",
+      "dist/src/retriever.js",
+      "dist/src/smart-metadata.js",
+      "dist/src/smart-extractor.js",
+      "dist/src/tools.js",
+      "dist/src/candidate-promotion.js",
+      "dist/src/forgetting.js",
+      "dist/src/graph-hygiene.js",
+      "dist/src/governance-cleanup.js",
+      "dist/src/journal-recovery.js",
+      "dist/src/operator-dashboard.js",
+      "dist/src/task-experience.js",
+    ];
+    for (const file of driftFiles) {
+      const extensionFile = resolve(extensionDir, file);
+      if (!(await exists(extensionFile))) {
+        throw new Error(`release gate failed: extension missing ${file}`);
+      }
+      await assertFileHashesMatch(file, extensionFile);
+    }
+  }
+}
+
+if (process.env.SCOPE_RECALL_SKIP_RUNTIME_SMOKE !== "1") {
+  const stateDir = resolve(process.env.OPENCLAW_STATE_DIR || process.env.OPENCLAW_HOME || resolve(sourceRoot, "../.."));
+  const configPath = resolve(process.env.OPENCLAW_CONFIG_PATH || resolve(stateDir, "openclaw.json"));
+  const inferredCli = resolve(stateDir, "../../app/node_modules/.bin/openclaw");
+  const configuredCli = String(process.env.OPENCLAW_CLI || "").trim();
+  const openclawCli = configuredCli && !["1", "true", "yes"].includes(configuredCli.toLowerCase())
+    ? configuredCli
+    : inferredCli;
+  if (openclawCli.includes("/") && !(await exists(openclawCli))) {
+    throw new Error(`release gate failed: OpenClaw CLI not found for runtime smoke: ${openclawCli}`);
+  }
+  if (!(await exists(configPath))) {
+    throw new Error(`release gate failed: OpenClaw config not found for runtime smoke: ${configPath}`);
+  }
+  const runtimeEnv = {
+    ...process.env,
+    OPENCLAW_HOME: stateDir,
+    OPENCLAW_STATE_DIR: stateDir,
+    OPENCLAW_CONFIG_PATH: configPath,
+  };
+  const inspect = parseJsonWithPreamble(
+    runCapture(openclawCli, ["plugins", "inspect", "scope-recall-openclaw", "--json"], { env: runtimeEnv }),
+    "OpenClaw plugin inspect",
+  );
+  if (
+    inspect.plugin?.id !== "scope-recall-openclaw" ||
+    inspect.plugin?.status !== "loaded" ||
+    inspect.plugin?.version !== packageJson.version ||
+    inspect.plugin?.enabled !== true ||
+    inspect.plugin?.activated !== true ||
+    !Array.isArray(inspect.commands) ||
+    !inspect.commands.includes("scope-recall")
+  ) {
+    throw new Error("release gate failed: OpenClaw runtime did not load scope-recall-openclaw with expected command surface");
+  }
+  const doctor = parseJsonWithPreamble(
+    runCapture(openclawCli, ["scope-recall", "doctor", "--json", "--quiet"], { env: runtimeEnv }),
+    "OpenClaw scope-recall doctor",
+  );
+  if (doctor.ok !== true) {
+    throw new Error("release gate failed: OpenClaw runtime doctor did not report ok=true");
+  }
+}
+
+const packJson = runCapture("npm", ["pack", "--dry-run", "--json"]);
+const packInfo = JSON.parse(packJson)[0];
+const packFiles = (packInfo.files || []).map((file) => file.path);
+for (const required of [
+  "dist/index.js",
+  "docs/operator-runbook.md",
+  "docs/release-readiness-template.md",
+  "benchmarks/experience-replay-cases.json",
+  "openclaw.plugin.json",
+]) {
+  if (!packFiles.includes(required)) {
+    throw new Error(`release gate failed: pack artifact missing ${required}`);
+  }
+}
+for (const file of packFiles) {
+  if (
+    /(^|\/)node_modules\//.test(file) ||
+    /(^|\/)(tmp|archive|backups?)\//i.test(file) ||
+    /\.(sqlite|sqlite3|db|log|bak|tmp)$/i.test(file) ||
+    /(^|\/)\.credentials($|\/)/i.test(file) ||
+    /(^|\/)(credentials|secrets|tokens?)($|\/)/i.test(file) ||
+    /(^|\/)\.env($|[.-])/i.test(file) ||
+    /(api[_-]?key|password|credential[_-]?dump)/i.test(file)
+  ) {
+    throw new Error(`release gate failed: forbidden runtime/sensitive artifact in npm pack: ${file}`);
+  }
+}
+console.log(`release gate pack scan ok: ${packFiles.length} files`);

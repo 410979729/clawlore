@@ -16,6 +16,7 @@ import type { TierManager } from "./tier-manager.js";
 import {
   getDecayableFromEntry,
   isMemoryActiveAt,
+  parseSupportInfo,
   parseSmartMetadata,
   toLifecycleMemory,
 } from "./smart-metadata.js";
@@ -110,6 +111,7 @@ export interface RetrievalResult extends MemorySearchResult {
     bm25?: { score: number; rank: number };
     fused?: { score: number };
     reranked?: { score: number };
+    relation?: { adjustment: number; reasons: string[] };
   };
 }
 
@@ -555,8 +557,12 @@ export class MemoryRetriever {
       : lifecycleRanked;
     trace?.endStage(denoised.map((r) => r.entry.id), denoised.map((r) => r.score));
 
-    trace?.startStage("mmr_diversity", denoised.map((r) => r.entry.id));
-    const deduplicated = this.applyMMRDiversity(denoised);
+    trace?.startStage("relation_evidence", denoised.map((r) => r.entry.id));
+    const relationRanked = this.applyRelationEvidence(denoised);
+    trace?.endStage(relationRanked.map((r) => r.entry.id), relationRanked.map((r) => r.score));
+
+    trace?.startStage("mmr_diversity", relationRanked.map((r) => r.entry.id));
+    const deduplicated = this.applyMMRDiversity(relationRanked);
     const finalResults = deduplicated.slice(0, limit);
     trace?.endStage(finalResults.map((r) => r.entry.id), finalResults.map((r) => r.score));
 
@@ -621,8 +627,12 @@ export class MemoryRetriever {
       ? filterNoise(lifecycleRanked, r => r.entry.text) : lifecycleRanked;
     trace?.endStage(denoised.map((r) => r.entry.id), denoised.map((r) => r.score));
 
-    trace?.startStage("mmr_diversity", denoised.map((r) => r.entry.id));
-    const deduplicated = this.applyMMRDiversity(denoised);
+    trace?.startStage("relation_evidence", denoised.map((r) => r.entry.id));
+    const relationRanked = this.applyRelationEvidence(denoised);
+    trace?.endStage(relationRanked.map((r) => r.entry.id), relationRanked.map((r) => r.score));
+
+    trace?.startStage("mmr_diversity", relationRanked.map((r) => r.entry.id));
+    const deduplicated = this.applyMMRDiversity(relationRanked);
     const finalResults = deduplicated.slice(0, limit);
     trace?.endStage(finalResults.map((r) => r.entry.id), finalResults.map((r) => r.score));
 
@@ -714,8 +724,12 @@ export class MemoryRetriever {
       ? filterNoise(lifecycleRanked, r => r.entry.text) : lifecycleRanked;
     trace?.endStage(denoised.map((r) => r.entry.id), denoised.map((r) => r.score));
 
-    trace?.startStage("mmr_diversity", denoised.map((r) => r.entry.id));
-    const deduplicated = this.applyMMRDiversity(denoised);
+    trace?.startStage("relation_evidence", denoised.map((r) => r.entry.id));
+    const relationRanked = this.applyRelationEvidence(denoised);
+    trace?.endStage(relationRanked.map((r) => r.entry.id), relationRanked.map((r) => r.score));
+
+    trace?.startStage("mmr_diversity", relationRanked.map((r) => r.entry.id));
+    const deduplicated = this.applyMMRDiversity(relationRanked);
     const finalResults = deduplicated.slice(0, limit);
     trace?.endStage(finalResults.map((r) => r.entry.id), finalResults.map((r) => r.score));
 
@@ -1050,6 +1064,67 @@ export class MemoryRetriever {
       };
     });
     return weighted.sort((a, b) => b.score - a.score);
+  }
+
+  private applyRelationEvidence(results: RetrievalResult[]): RetrievalResult[] {
+    if (results.length === 0) return results;
+
+    const adjusted = results.map((result) => {
+      const meta = parseSmartMetadata(result.entry.metadata, result.entry);
+      const relationTypes = new Set(
+        [
+          ...(Array.isArray(meta.relation_types) ? meta.relation_types.map(String) : []),
+          ...(Array.isArray(meta.relations) ? meta.relations.map((r) => String(r.type || "")) : []),
+        ].filter(Boolean),
+      );
+      const supportInfo = parseSupportInfo(meta.support_info);
+      const reasons: string[] = [];
+      let adjustment = 0;
+
+      if (meta.needs_conflict_review === true || relationTypes.has("contradicts")) {
+        adjustment -= 0.12;
+        reasons.push("conflict_review_penalty");
+      }
+      const conflictCount = Number(meta.conflict_review_count || 0);
+      if (Number.isFinite(conflictCount) && conflictCount > 0) {
+        const penalty = Math.min(0.09, conflictCount * 0.03);
+        adjustment -= penalty;
+        reasons.push("conflict_count_penalty");
+      }
+      if (
+        relationTypes.has("supports") ||
+        relationTypes.has("supported_by") ||
+        relationTypes.has("contextualizes") ||
+        relationTypes.has("supersedes")
+      ) {
+        adjustment += 0.04;
+        reasons.push("positive_relation_boost");
+      }
+      if (supportInfo.global_strength >= 0.75 && supportInfo.total_observations >= 2) {
+        adjustment += 0.04;
+        reasons.push("support_strength_boost");
+      } else if (supportInfo.total_observations >= 2 && supportInfo.global_strength < 0.45) {
+        adjustment -= 0.05;
+        reasons.push("weak_support_penalty");
+      }
+      if (meta.freshness_status === "stale" || meta.live_check_needed === true) {
+        adjustment -= 0.08;
+        reasons.push("freshness_debt_penalty");
+      }
+
+      if (adjustment === 0) return result;
+
+      return {
+        ...result,
+        score: clamp01(result.score + adjustment, 0),
+        sources: {
+          ...result.sources,
+          relation: { adjustment, reasons },
+        },
+      };
+    });
+
+    return adjusted.sort((a, b) => b.score - a.score);
   }
 
   private applyDecayBoost(results: RetrievalResult[]): RetrievalResult[] {

@@ -1,0 +1,235 @@
+import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+import test from "node:test";
+
+const require = createRequire(import.meta.url);
+const { createJiti } = require("jiti");
+const { DatabaseSync } = require("node:sqlite");
+const jiti = createJiti(import.meta.url, {
+  interopDefault: true,
+  moduleCache: false,
+});
+
+const {
+  ensureExperienceSchema,
+  createTaskEpisode,
+  createPlaybook,
+} = jiti("../src/experience-store.ts");
+const {
+  recordAutoRecallTrace,
+  listAutoRecallTraces,
+} = jiti("../src/auto-recall-ledger.ts");
+const { runPromotionBatch } = jiti("../src/experience-promotion-batch.ts");
+const {
+  evaluateRecallScopePolicy,
+  scopeIdForContext,
+} = jiti("../src/scope-policy.ts");
+const { buildKnowledgeSkillDrafts } = jiti("../src/knowledge-skill-bridge.ts");
+
+function tableExists(db, name) {
+  const row = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual') AND name = ?",
+  ).get(name);
+  return row?.name === name;
+}
+
+function createPlaybookPayload(overrides = {}) {
+  return {
+    task_class: "scope_recall_quality_check",
+    title: "Scope recall quality closeout",
+    trigger: "scope recall roadmap implementation",
+    goal: "Close a scoped roadmap item with tests and live evidence.",
+    preconditions: [{ check: "Read current roadmap and repo state" }],
+    steps: [
+      {
+        number: 1,
+        capability_class: "read_only",
+        action: "Inspect current state before changing files.",
+        evidence_required: "repo status and relevant source reads",
+      },
+      {
+        number: 2,
+        capability_class: "local_write",
+        action: "Patch the narrow module and add tests.",
+        evidence_required: "focused diff",
+      },
+    ],
+    pitfalls: [{ note: "Do not treat dry-run commands as mutation-free unless verified." }],
+    verification: ["node --test passes"],
+    cleanup: ["Remove temporary artifacts."],
+    reuse_policy: { scope: "same plugin workflow" },
+    status: "promoted",
+    confidence: 0.86,
+    ...overrides,
+  };
+}
+
+test("auto-recall trace ledger redacts query text and raw memory ids", () => {
+  const db = new DatabaseSync(":memory:");
+  const rawMemoryId = "memory-secret-raw-id-123";
+  recordAutoRecallTrace(db, {
+    scope_id: "agent:main",
+    session_id: "session-1",
+    agent_id: "main",
+    channel: "telegram",
+    query_source: "cached-user-message",
+    query: "please inspect api_key = sk-test-not-real-123456789 and <relevant-memories>hidden</relevant-memories>",
+    decision: "injected",
+    reason: "selected",
+    result_count: 2,
+    injected_count: 1,
+    memory_refs: [
+      {
+        memory_id: rawMemoryId,
+        scope: "agent:main",
+        category: "fact",
+        score: 0.9,
+        rank_reasons: ["bm25_rank=1"],
+        filter_status: "injected",
+      },
+      {
+        memory_id: "other-memory-id",
+        scope: "custom:customer:work-pc",
+        category: "decision",
+        score: 0.5,
+        filter_status: "suppressed",
+        filter_reason: "cross_scope_review",
+      },
+    ],
+  });
+
+  const report = listAutoRecallTraces(db, { scope_id: "agent:main" });
+  const serialized = JSON.stringify(report);
+  assert.equal(report.status, "ok");
+  assert.equal(report.total, 1);
+  assert.equal(report.items[0].injected_count, 1);
+  assert.equal(report.items[0].crossed_scope_count, 1);
+  assert.match(report.items[0].query_preview, /redacted/);
+  assert.doesNotMatch(serialized, /sk-test-not-real/);
+  assert.doesNotMatch(serialized, /memory-secret-raw-id/);
+  assert.match(report.items[0].memory_refs[0].memory_ref, /^mem_[a-f0-9]{16}$/);
+});
+
+test("promotion batch dry-run is zero-write and apply records batch items", () => {
+  const db = new DatabaseSync(":memory:");
+  ensureExperienceSchema(db);
+  createTaskEpisode(db, {
+    scope_id: "agent:main",
+    session_id: "session-ready",
+    task_class: "scope_recall_quality_check",
+    task_goal: "Implement scope recall roadmap controls.",
+    status: "completed",
+    outcome: "success",
+    tool_names: ["node:test"],
+    evidence: ["node --test tests/experience-roadmap.test.mjs passed"],
+    verification: ["typecheck passed"],
+  });
+
+  const preview = runPromotionBatch(db, { scope_id: "agent:main", dry_run: true });
+  assert.equal(preview.dry_run, true);
+  assert.equal(preview.recorded, false);
+  assert.equal(preview.promotion.playbooks_created, 1);
+  assert.equal(tableExists(db, "experience_promotion_batches"), false);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM procedural_playbooks").get().count, 0);
+
+  const applied = runPromotionBatch(db, {
+    scope_id: "agent:main",
+    dry_run: false,
+    reviewer_note: "roadmap phase 2 apply test",
+  });
+  assert.equal(applied.recorded, true);
+  assert.equal(applied.backup_required, true);
+  assert.match(applied.backup_hint, /SQLite truth DB/);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM experience_promotion_batches").get().count, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM experience_promotion_batch_items").get().count, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM procedural_playbooks").get().count, 1);
+});
+
+test("scope policy labels global, same-scope, and cross-customer decisions", () => {
+  const current = scopeIdForContext({ agent_id: "main" });
+  assert.equal(current, "agent:main");
+
+  const global = evaluateRecallScopePolicy({
+    current_scope: current,
+    candidate_scope: "global",
+  });
+  assert.equal(global.injectable, true);
+  assert.equal(global.label, "global_shared");
+
+  const cross = evaluateRecallScopePolicy({
+    current_scope: current,
+    candidate_scope: "custom:customer:work-pc",
+  });
+  assert.equal(cross.injectable, false);
+  assert.equal(cross.crossed_scope, true);
+  assert.equal(cross.label, "cross_scope_review");
+
+  const allowed = evaluateRecallScopePolicy({
+    current_scope: current,
+    candidate_scope: "custom:customer:work-pc",
+    allow_cross_scope: true,
+  });
+  assert.equal(allowed.injectable, true);
+  assert.equal(allowed.label, "cross_scope_allowed");
+});
+
+test("knowledge/skill bridge generates drafts and dedupes existing truth without writing Markdown", () => {
+  const db = new DatabaseSync(":memory:");
+  ensureExperienceSchema(db);
+  const covered = createPlaybook(db, {
+    scope_id: "agent:main",
+    payload: createPlaybookPayload({
+      title: "Existing OpenClaw gateway recovery runbook",
+      trigger: "gateway recovery",
+      status: "promoted",
+    }),
+  });
+  createPlaybook(db, {
+    scope_id: "agent:main",
+    payload: createPlaybookPayload({
+      title: "High risk remote service restart workflow",
+      trigger: "remote service restart",
+      steps: [
+        {
+          number: 1,
+          capability_class: "read_only",
+          action: "Inspect service state.",
+          evidence_required: "systemctl status",
+        },
+        {
+          number: 2,
+          capability_class: "service_control",
+          action: "Restart only after authorization.",
+          evidence_required: "explicit authorization and health check",
+        },
+      ],
+      status: "promoted",
+    }),
+  });
+
+  const preview = buildKnowledgeSkillDrafts(db, {
+    scope_id: "agent:main",
+    existing_docs: [
+      {
+        path: "knowledge/openclaw/gateway-recovery-playbook.md",
+        title: "Existing OpenClaw gateway recovery runbook",
+        text: "Existing OpenClaw gateway recovery runbook",
+      },
+    ],
+  });
+  assert.equal(preview.dry_run, true);
+  assert.equal(preview.recorded, false);
+  assert.equal(tableExists(db, "knowledge_skill_promotion_drafts"), false);
+  assert.ok(preview.drafts.some((draft) => draft.playbook_id === covered.id && draft.target_kind === "already_covered"));
+  assert.ok(preview.drafts.some((draft) => draft.target_kind === "skill"));
+
+  const recorded = buildKnowledgeSkillDrafts(db, {
+    scope_id: "agent:main",
+    record: true,
+  });
+  assert.equal(recorded.recorded, true);
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM knowledge_skill_promotion_drafts").get().count,
+    recorded.count,
+  );
+});

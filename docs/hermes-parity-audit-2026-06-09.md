@@ -1,5 +1,10 @@
 # Hermes Parity Audit - 2026-06-09
 
+> Historical note: this audit captured the 2026-06-09 `1.0.11` / Hermes
+> `1.0.9` comparison. For Tianji's current `1.0.23` runtime evidence and
+> remaining maturity gaps, use
+> [`runtime-maturity-audit-2026-06-25.md`](runtime-maturity-audit-2026-06-25.md).
+
 This audit compares the public OpenClaw package tree against Joy's current
 Yuheng Hermes `scope-recall` plugin. It is a release-quality checklist, not a
 claim that every Hermes surface should be copied into OpenClaw unchanged.

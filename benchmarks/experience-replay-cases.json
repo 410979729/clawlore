@@ -1,0 +1,88 @@
+[
+  {
+    "id": "config-change-safety",
+    "name": "Config change safety",
+    "description": "A reusable playbook for OpenClaw config changes must preserve backup, validation, health, and rollback evidence.",
+    "required_terms": [
+      "backup",
+      "validate",
+      "health",
+      "rollback"
+    ],
+    "negative_terms": [
+      "write secret",
+      "skip validation"
+    ]
+  },
+  {
+    "id": "gateway-recovery",
+    "name": "Gateway recovery",
+    "description": "Gateway recovery playbooks must inspect service status, logs, port binding, and health endpoints.",
+    "required_terms": [
+      "systemctl",
+      "journalctl",
+      "port",
+      "healthz"
+    ],
+    "negative_terms": [
+      "blind restart"
+    ]
+  },
+  {
+    "id": "vector-repair",
+    "name": "Vector repair",
+    "description": "Vector companion repair must start with doctor evidence, dry-run, explicit apply, and post-repair doctor verification.",
+    "required_terms": [
+      "doctor",
+      "repair-vectors",
+      "dry-run",
+      "apply"
+    ],
+    "negative_terms": [
+      "vector overwrites truth"
+    ]
+  },
+  {
+    "id": "release-gate",
+    "name": "Release gate",
+    "description": "Release playbooks must include tests, typecheck, build, golden benchmark, and release gate evidence.",
+    "required_terms": [
+      "npm test",
+      "typecheck",
+      "build",
+      "release gate"
+    ],
+    "negative_terms": [
+      "claim without evidence"
+    ]
+  },
+  {
+    "id": "plugin-rollout",
+    "name": "Plugin rollout",
+    "description": "Live extension rollout playbooks must backup, sync, inspect, run doctor, and smoke the live CLI.",
+    "required_terms": [
+      "backup live extension",
+      "sync",
+      "inspect",
+      "doctor",
+      "smoke"
+    ],
+    "negative_terms": [
+      "delete live extension"
+    ]
+  },
+  {
+    "id": "telegram-delivery",
+    "name": "Telegram delivery",
+    "description": "Telegram delivery playbooks must verify visible replies, channel route, smoke message, and final delivery.",
+    "required_terms": [
+      "telegram",
+      "visible replies",
+      "route",
+      "smoke message"
+    ],
+    "negative_terms": [
+      "assume delivered"
+    ]
+  }
+]

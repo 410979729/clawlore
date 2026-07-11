@@ -39,6 +39,30 @@ test("capture safety blocks operational trace wrappers", () => {
   assert.equal(decision.reason, "operational-trace");
 });
 
+test("capture safety blocks raw tool output dumps", () => {
+  const decision = evaluateCaptureSafety(
+    '```json\n{"tool_call_id":"call_123","wall_time_seconds":1.2,"stdout":"secret-looking output"}\n```',
+  );
+  assert.equal(decision.allowed, false);
+  assert.equal(decision.reason, "operational-trace");
+  assert.equal(decision.pattern, "tool-call-json");
+});
+
+test("capture safety blocks private credential paths", () => {
+  const decision = evaluateCaptureSafety(
+    "The deploy credential is referenced by /home/a/openclaw-tianji/home/state/workspace/.credentials/deploy.txt",
+  );
+  assert.equal(decision.allowed, false);
+  assert.equal(decision.reason, "private-path");
+  assert.equal(decision.pattern, "credentials-path");
+});
+
+test("capture safety blocks ephemeral assistant progress noise", () => {
+  const decision = evaluateCaptureSafety("我现在开始排查 scope-recall 插件的运行状态。");
+  assert.equal(decision.allowed, false);
+  assert.equal(decision.reason, "progress-noise");
+});
+
 test("noise filter rejects raw user task prompts", () => {
   assert.equal(isNoise("你去检查一下天姬记忆库，看看 SQL 记忆质量"), true);
 });

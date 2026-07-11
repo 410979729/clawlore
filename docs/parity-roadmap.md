@@ -21,23 +21,47 @@
 - Capture safety for common secret patterns.
 - Auto-recall, auto-capture, session reflection, and self-improvement hooks for OpenClaw sessions.
 - Release gate for manifest/package consistency and package hygiene.
+- Partial OpenClaw-native adoption of Yuheng 1.6.0 operator concepts: dashboard,
+  candidate promotion, governance cleanup/rollback/audit coverage, journal
+  recovery, graph hygiene, forgetting report/run, Experience stats/promotion,
+  and playbook review/promotion/quarantine/supersede routes.
 
 ## Hermes-Only Surfaces Not Yet Claimed
 
 These are roadmap candidates, not current OpenClaw guarantees:
 
 - Entity probe, related entity, and feedback tools.
-- Benchmark-style recall checks and broader export flows.
-- Nightly workflow digest.
+- Broader export flows beyond the existing OpenClaw JSON import/export and
+  golden recall fixture runner.
+- Commercial Recall Funnel traces, fact freshness, relation-aware recall, and
+  production-grade benchmark gates.
+- OpenClaw-native nightly workflow digest/productized long-term memory
+  distillation.
 - Hermes-specific shared durable versus local scratch scope semantics.
 - Hermes memory-provider packaging through `pyproject.toml` and `plugin.yaml`.
 
-For the current gap analysis against Yuheng's Hermes `scope-recall` `1.0.9`,
+For historical gap analysis against Yuheng's Hermes `scope-recall` `1.0.9`,
 see [`hermes-parity-audit-2026-06-09.md`](hermes-parity-audit-2026-06-09.md).
+For Tianji's current 2026-06-25 runtime maturity evidence on the
+`scope-recall-openclaw` `1.0.23` baseline, see
+[`runtime-maturity-audit-2026-06-25.md`](runtime-maturity-audit-2026-06-25.md).
+The 2026-06-30 `1.0.25` line carries Yuheng `scope-recall` `1.6.0` safety
+semantics for dry-run-first vector repair and SQLite busy timeouts. The
+`1.0.26` line adds a partial OpenClaw-native operator CLI adoption for
+governance, journal recovery, graph hygiene, candidate promotion, dashboard,
+forgetting, Experience, and playbook maintenance routes. It is not full
+Yuheng/Hermes 1.6.0 feature parity.
+
+For Tianji's 2026-06-30 partial-parity baseline and commercial-memory starting
+point, see [`runtime-maturity-audit-2026-06-30.md`](runtime-maturity-audit-2026-06-30.md).
+The follow-on commercial product plan is
+[`commercial-memory-plugin-plan-2026-06-30.md`](commercial-memory-plugin-plan-2026-06-30.md).
 
 ## Promotion Criteria
 
-Before claiming first-class parity with Hermes `scope-recall`, the OpenClaw package should have:
+Before claiming first-class parity with Hermes `scope-recall`, or before using
+commercial-grade language for OpenClaw-native memory behavior, the OpenClaw
+package should have:
 
 - User-facing docs for every supported tool and command.
 - Tests for package metadata, capture safety, CLI registration, vector repair, and migration.

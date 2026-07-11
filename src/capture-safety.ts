@@ -4,6 +4,8 @@ export type CaptureSafetyReason =
   | "system-wrapper"
   | "context-compaction"
   | "operational-trace"
+  | "private-path"
+  | "progress-noise"
   | "secret"
   | "trivial";
 
@@ -127,12 +129,25 @@ const OPERATIONAL_TRACE_PATTERNS: Array<{ name: string; re: RegExp }> = [
   { name: "execution-status-marker", re: /\|\s*status=(?:completed|failed|running|cancelled)\b/i },
   { name: "execution-result-block", re: /^Result:\s*(?:Command|Task|Exec|Shell|Tool)\b/im },
   { name: "tool-fields-block", re: /^(?:Files|Result):\s*[\s\S]*\n(?:Files|Result|Command hints):/im },
+  { name: "tool-call-json", re: /```json[\s\S]*"(?:tool_call_id|recipient_name|sandbox_permissions|wall_time_seconds)"[\s\S]*```/i },
+  { name: "tool-output-dump", re: /^(?:stdout|stderr|exit_code|wall_time_seconds|original_token_count):\s*/im },
 ];
 
 const CONTEXT_COMPACTION_PATTERNS: Array<{ name: string; re: RegExp }> = [
   { name: "turn-context-split", re: /Turn Context \(split turn\):/i },
   { name: "compaction-summary", re: /^## (?:Goal|Progress|Decisions|Open TODOs|Constraints\/Rules|Pending user asks|Exact identifiers)\b/m },
   { name: "critical-context-block", re: /^## Critical Context\b/m },
+];
+
+const PRIVATE_PATH_PATTERNS: Array<{ name: string; re: RegExp }> = [
+  { name: "credentials-path", re: /(?:^|\s)(?:~|\/home\/[^/\s]+|\/Users\/[^/\s]+|[A-Za-z]:\\Users\\[^\\\s]+)[^\s`'"]*(?:\.credentials|credentials|credential|secret|token|cookie|oauth|vault|id_rsa|id_ed25519)[^\s`'"]*/i },
+  { name: "ssh-private-material-path", re: /(?:^|\s)(?:~|\/home\/[^/\s]+|\/Users\/[^/\s]+|[A-Za-z]:\\Users\\[^\\\s]+)[^\s`'"]*\.ssh[^\s`'"]*/i },
+  { name: "local-scratch-sensitive-path", re: /(?:^|\s)(?:\/tmp|\/var\/tmp|[A-Za-z]:\\Temp\\|[A-Za-z]:\\Windows\\Temp\\)[^\s`'"]*(?:credential|secret|token|cookie|oauth|vault|password|private[_-]?key)[^\s`'"]*/i },
+];
+
+const PROGRESS_NOISE_PATTERNS: Array<{ name: string; re: RegExp }> = [
+  { name: "assistant-progress-cn", re: /^(?:我)?(?:先|现在|继续|马上|接下来)?(?:开始|正在|继续|准备|会|把|先把).{0,80}(?:排查|定位|读取|检查|修改|修复|验证|审计|同步|跑测试|收口).{0,80}(?:。|\.|$)/iu },
+  { name: "assistant-progress-en", re: /^(?:i[' ]?m|i am|i will|next i(?:'ll| will)?|now i(?:'ll| will)?)\s+(?:checking|reading|patching|testing|verifying|auditing|syncing|investigating|updating)\b.{0,120}$/i },
 ];
 
 /**
@@ -243,6 +258,16 @@ export function evaluateCaptureSafety(text: string): CaptureSafetyDecision {
   const operationalTrace = matchPattern(OPERATIONAL_TRACE_PATTERNS, sanitized);
   if (operationalTrace) {
     return { allowed: false, reason: "operational-trace", pattern: operationalTrace.name };
+  }
+
+  const privatePath = matchPattern(PRIVATE_PATH_PATTERNS, sanitized);
+  if (privatePath) {
+    return { allowed: false, reason: "private-path", pattern: privatePath.name };
+  }
+
+  const progressNoise = matchPattern(PROGRESS_NOISE_PATTERNS, sanitized);
+  if (progressNoise) {
+    return { allowed: false, reason: "progress-noise", pattern: progressNoise.name };
   }
 
   const compaction = matchPattern(CONTEXT_COMPACTION_PATTERNS, sanitized);

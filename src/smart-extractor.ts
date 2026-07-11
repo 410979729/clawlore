@@ -52,6 +52,7 @@ import {
 import { inferAtomicBrandItemPreferenceSlot } from "./preference-slots.js";
 import { batchDedup } from "./batch-dedup.js";
 import { recordConflictReviewRelations } from "./conflict-governance.js";
+import type { RuntimeScopeMetadata } from "./runtime-scope-metadata.js";
 
 // ============================================================================
 // Envelope Metadata Stripping
@@ -153,6 +154,8 @@ export interface ExtractPersistOptions {
    * - pass a non-empty array to restrict reads to those scopes
    */
   scopeFilter?: string[];
+  /** Stable runtime identity/scope evidence to persist with created or updated memories. */
+  runtimeMetadata?: RuntimeScopeMetadata;
 }
 
 export class SmartExtractor {
@@ -216,6 +219,7 @@ export class SmartExtractor {
     const scopeFilter = hasExplicitScopeFilter
       ? options.scopeFilter
       : [targetScope];
+    const runtimeMetadata = options.runtimeMetadata ?? {};
 
     // Step 1: LLM extraction
     const candidates = await this.extractCandidates(conversationText);
@@ -282,6 +286,7 @@ export class SmartExtractor {
           stats,
           targetScope,
           scopeFilter,
+          runtimeMetadata,
         );
       } catch (err) {
         this.log(
@@ -380,6 +385,9 @@ export class SmartExtractor {
     const prompt = buildExtractionPrompt(cleaned, user);
 
     const result = await this.llm.completeJson<{
+      degraded?: boolean;
+      degraded_reason?: string;
+      degradedReason?: string;
       memories: Array<{
         category: string;
         abstract: string;
@@ -389,16 +397,17 @@ export class SmartExtractor {
     }>(prompt, "extract-candidates");
 
     if (!result) {
-      this.debugLog(
-        "scope-recall-openclaw: smart-extractor: extract-candidates returned null",
+      throw new Error("extract-candidates returned null");
+    }
+    if (result.degraded === true) {
+      throw new Error(
+        `extract-candidates degraded: ${result.degradedReason || result.degraded_reason || "unknown"}`,
       );
-      return [];
     }
     if (!result.memories || !Array.isArray(result.memories)) {
-      this.debugLog(
-        `scope-recall-openclaw: smart-extractor: extract-candidates returned unexpected shape keys=${Object.keys(result).join(",") || "(none)"}`,
+      throw new Error(
+        `extract-candidates returned unexpected shape keys=${Object.keys(result).join(",") || "(none)"}`,
       );
-      return [];
     }
 
     this.debugLog(
@@ -480,6 +489,7 @@ export class SmartExtractor {
     stats: ExtractionStats,
     targetScope: string,
     scopeFilter?: string[],
+    runtimeMetadata: RuntimeScopeMetadata = {},
   ): Promise<void> {
     // Profile always merges (skip dedup — admission control still applies)
     if (ALWAYS_MERGE_CATEGORIES.has(candidate.category)) {
@@ -489,6 +499,8 @@ export class SmartExtractor {
         sessionKey,
         targetScope,
         scopeFilter,
+        undefined,
+        runtimeMetadata,
       );
       if (profileResult === "rejected") {
         stats.rejected = (stats.rejected ?? 0) + 1;
@@ -505,7 +517,7 @@ export class SmartExtractor {
     const vector = await this.embedder.embed(embeddingText);
     if (!vector || vector.length === 0) {
       this.log("scope-recall: smart-extractor: embedding failed, storing as-is");
-      await this.storeCandidate(candidate, vector || [], sessionKey, targetScope);
+      await this.storeCandidate(candidate, vector || [], sessionKey, targetScope, undefined, runtimeMetadata);
       stats.created++;
       return;
     }
@@ -532,6 +544,7 @@ export class SmartExtractor {
         targetScope,
         scopeFilter ?? [targetScope],
         admission.audit as AdmissionAuditRecord & { decision: "reject" },
+        runtimeMetadata,
       );
       return;
     }
@@ -541,7 +554,7 @@ export class SmartExtractor {
 
     switch (dedupResult.decision) {
       case "create":
-        await this.storeCandidate(candidate, vector, sessionKey, targetScope, admission?.audit);
+        await this.storeCandidate(candidate, vector, sessionKey, targetScope, admission?.audit, runtimeMetadata);
         stats.created++;
         break;
 
@@ -557,11 +570,12 @@ export class SmartExtractor {
             scopeFilter,
             dedupResult.contextLabel,
             admission?.audit,
+            runtimeMetadata,
           );
           stats.merged++;
         } else {
           // Category doesn't support merge → create instead
-          await this.storeCandidate(candidate, vector, sessionKey, targetScope, admission?.audit);
+          await this.storeCandidate(candidate, vector, sessionKey, targetScope, admission?.audit, runtimeMetadata);
           stats.created++;
         }
         break;
@@ -586,42 +600,43 @@ export class SmartExtractor {
             targetScope,
             scopeFilter,
             admission?.audit,
+            runtimeMetadata,
           );
           stats.created++;
           stats.superseded = (stats.superseded ?? 0) + 1;
         } else {
-          await this.storeCandidate(candidate, vector, sessionKey, targetScope, admission?.audit);
+          await this.storeCandidate(candidate, vector, sessionKey, targetScope, admission?.audit, runtimeMetadata);
           stats.created++;
         }
         break;
 
       case "support":
         if (dedupResult.matchId) {
-          await this.handleSupport(dedupResult.matchId, { session: sessionKey, timestamp: Date.now() }, dedupResult.reason, dedupResult.contextLabel, scopeFilter, admission?.audit);
+          await this.handleSupport(dedupResult.matchId, { session: sessionKey, timestamp: Date.now() }, dedupResult.reason, dedupResult.contextLabel, scopeFilter, admission?.audit, runtimeMetadata);
           stats.supported = (stats.supported ?? 0) + 1;
         } else {
-          await this.storeCandidate(candidate, vector, sessionKey, targetScope, admission?.audit);
+          await this.storeCandidate(candidate, vector, sessionKey, targetScope, admission?.audit, runtimeMetadata);
           stats.created++;
         }
         break;
 
       case "contextualize":
         if (dedupResult.matchId) {
-          await this.handleContextualize(candidate, vector, dedupResult.matchId, sessionKey, targetScope, scopeFilter, dedupResult.contextLabel, admission?.audit);
+          await this.handleContextualize(candidate, vector, dedupResult.matchId, sessionKey, targetScope, scopeFilter, dedupResult.contextLabel, admission?.audit, runtimeMetadata);
           stats.created++;
         } else {
-          await this.storeCandidate(candidate, vector, sessionKey, targetScope, admission?.audit);
+          await this.storeCandidate(candidate, vector, sessionKey, targetScope, admission?.audit, runtimeMetadata);
           stats.created++;
         }
         break;
 
       case "contradict":
         if (dedupResult.matchId) {
-          await this.handleContradict(candidate, vector, dedupResult.matchId, sessionKey, targetScope, scopeFilter, dedupResult.contextLabel, admission?.audit);
+          await this.handleContradict(candidate, vector, dedupResult.matchId, sessionKey, targetScope, scopeFilter, dedupResult.contextLabel, admission?.audit, runtimeMetadata);
           stats.created++;
           stats.contradicted = (stats.contradicted ?? 0) + 1;
         } else {
-          await this.storeCandidate(candidate, vector, sessionKey, targetScope, admission?.audit);
+          await this.storeCandidate(candidate, vector, sessionKey, targetScope, admission?.audit, runtimeMetadata);
           stats.created++;
         }
         break;
@@ -775,6 +790,7 @@ export class SmartExtractor {
     targetScope: string,
     scopeFilter?: string[],
     admissionAudit?: AdmissionAuditRecord,
+    runtimeMetadata: RuntimeScopeMetadata = {},
   ): Promise<"merged" | "created" | "rejected"> {
     // Find existing profile memory by category
     const embeddingText = `${candidate.abstract} ${candidate.content}`;
@@ -792,7 +808,7 @@ export class SmartExtractor {
         this.log(
           `scope-recall: smart-extractor: admission rejected profile [${candidate.abstract.slice(0, 60)}] — ${profileAdmission.audit.reason}`,
         );
-        await this.recordRejectedAdmission(candidate, conversationText, sessionKey, targetScope, scopeFilter ?? [targetScope], profileAdmission.audit as AdmissionAuditRecord & { decision: "reject" });
+        await this.recordRejectedAdmission(candidate, conversationText, sessionKey, targetScope, scopeFilter ?? [targetScope], profileAdmission.audit as AdmissionAuditRecord & { decision: "reject" }, runtimeMetadata);
         return "rejected";
       }
       admissionAudit = profileAdmission.audit;
@@ -822,11 +838,12 @@ export class SmartExtractor {
         scopeFilter,
         undefined,
         admissionAudit,
+        runtimeMetadata,
       );
       return "merged";
     } else {
       // No existing profile — create new
-      await this.storeCandidate(candidate, vector || [], sessionKey, targetScope, admissionAudit);
+      await this.storeCandidate(candidate, vector || [], sessionKey, targetScope, admissionAudit, runtimeMetadata);
       return "created";
     }
   }
@@ -841,6 +858,7 @@ export class SmartExtractor {
     scopeFilter?: string[],
     contextLabel?: string,
     admissionAudit?: AdmissionAuditRecord,
+    runtimeMetadata: RuntimeScopeMetadata = {},
   ): Promise<void> {
     let existingAbstract = "";
     let existingOverview = "";
@@ -867,6 +885,8 @@ export class SmartExtractor {
         vector || [],
         "merge-fallback",
         targetScope,
+        undefined,
+        runtimeMetadata,
       );
       return;
     }
@@ -902,6 +922,7 @@ export class SmartExtractor {
     const metadata = stringifySmartMetadata(
       this.withAdmissionAudit(
         buildSmartMetadata(existing ?? { text: merged.abstract }, {
+          ...runtimeMetadata,
           l0_abstract: merged.abstract,
           l1_overview: merged.overview,
           l2_content: merged.content,
@@ -952,12 +973,13 @@ export class SmartExtractor {
     matchId: string,
     sessionKey: string,
     targetScope: string,
-    scopeFilter: string[],
+    scopeFilter?: string[],
     admissionAudit?: AdmissionAuditRecord,
+    runtimeMetadata: RuntimeScopeMetadata = {},
   ): Promise<void> {
     const existing = await this.store.getById(matchId, scopeFilter);
     if (!existing) {
-      await this.storeCandidate(candidate, vector, sessionKey, targetScope);
+      await this.storeCandidate(candidate, vector, sessionKey, targetScope, undefined, runtimeMetadata);
       return;
     }
 
@@ -979,6 +1001,7 @@ export class SmartExtractor {
             category: storeCategory,
           },
           {
+            ...runtimeMetadata,
             l0_abstract: candidate.abstract,
             l1_overview: candidate.overview,
             l2_content: candidate.content,
@@ -1006,6 +1029,7 @@ export class SmartExtractor {
     });
 
     const invalidatedMetadata = buildSmartMetadata(existing, {
+      ...runtimeMetadata,
       fact_key: factKey,
       invalidated_at: now,
       superseded_by: created.id,
@@ -1040,6 +1064,7 @@ export class SmartExtractor {
     contextLabel?: string,
     scopeFilter?: string[],
     admissionAudit?: AdmissionAuditRecord,
+    runtimeMetadata: RuntimeScopeMetadata = {},
   ): Promise<void> {
     const existing = await this.store.getById(matchId, scopeFilter);
     if (!existing) return;
@@ -1051,7 +1076,7 @@ export class SmartExtractor {
 
     await this.store.update(
       matchId,
-      { metadata: stringifySmartMetadata(this.withAdmissionAudit(meta, admissionAudit)) },
+      { metadata: stringifySmartMetadata(this.withAdmissionAudit({ ...meta, ...runtimeMetadata }, admissionAudit)) },
       scopeFilter,
     );
 
@@ -1073,9 +1098,11 @@ export class SmartExtractor {
     scopeFilter?: string[],
     contextLabel?: string,
     admissionAudit?: AdmissionAuditRecord,
+    runtimeMetadata: RuntimeScopeMetadata = {},
   ): Promise<void> {
     const storeCategory = this.mapToStoreCategory(candidate.category);
     const metadata = stringifySmartMetadata(this.withAdmissionAudit({
+      ...runtimeMetadata,
       l0_abstract: candidate.abstract,
       l1_overview: candidate.overview,
       l2_content: candidate.content,
@@ -1122,6 +1149,7 @@ export class SmartExtractor {
     scopeFilter?: string[],
     contextLabel?: string,
     admissionAudit?: AdmissionAuditRecord,
+    runtimeMetadata: RuntimeScopeMetadata = {},
   ): Promise<void> {
     // 1. Record contradiction on the existing memory
     const existing = await this.store.getById(matchId, scopeFilter);
@@ -1132,7 +1160,7 @@ export class SmartExtractor {
       meta.support_info = updated;
       await this.store.update(
         matchId,
-        { metadata: stringifySmartMetadata(meta) },
+        { metadata: stringifySmartMetadata(this.withAdmissionAudit({ ...meta, ...runtimeMetadata }, admissionAudit)) },
         scopeFilter,
       );
     }
@@ -1140,6 +1168,7 @@ export class SmartExtractor {
     // 2. Store the contradicting entry as a new memory
     const storeCategory = this.mapToStoreCategory(candidate.category);
     const metadata = stringifySmartMetadata(this.withAdmissionAudit({
+      ...runtimeMetadata,
       l0_abstract: candidate.abstract,
       l1_overview: candidate.overview,
       l2_content: candidate.content,
@@ -1189,6 +1218,7 @@ export class SmartExtractor {
     sessionKey: string,
     targetScope: string,
     admissionAudit?: AdmissionAuditRecord,
+    runtimeMetadata: RuntimeScopeMetadata = {},
   ): Promise<void> {
     // Map 6-category to existing store categories for backward compatibility
     const storeCategory = this.mapToStoreCategory(candidate.category);
@@ -1200,6 +1230,7 @@ export class SmartExtractor {
           category: this.mapToStoreCategory(candidate.category),
         },
         {
+          ...runtimeMetadata,
           l0_abstract: candidate.abstract,
           l1_overview: candidate.overview,
           l2_content: candidate.content,
@@ -1305,6 +1336,7 @@ export class SmartExtractor {
     targetScope: string,
     scopeFilter: string[],
     audit: AdmissionAuditRecord & { decision: "reject" },
+    runtimeMetadata: RuntimeScopeMetadata = {},
   ): Promise<void> {
     if (!this.onAdmissionRejected) {
       return;
@@ -1316,6 +1348,7 @@ export class SmartExtractor {
         session_key: sessionKey,
         target_scope: targetScope,
         scope_filter: scopeFilter,
+        runtime_metadata: runtimeMetadata,
         candidate: {
           ...candidate,
           abstract: redactAuditText(candidate.abstract),

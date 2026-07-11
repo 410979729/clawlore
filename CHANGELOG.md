@@ -1,5 +1,83 @@
 # Changelog
 
+## Unreleased
+
+- Added Tianji's independent Scope Recall roadmap, documenting that the
+  OpenClaw plugin may borrow from Yuheng/Hermes without remaining lockstep.
+- Added a read-only `scope-recall experience debt` report for Experience
+  Kernel promotion/review debt, with redacted output and regression coverage.
+- Hardened the release gate for Tianji's nested live-extension layout via an
+  explicit `SCOPE_RECALL_ALLOW_NESTED_GIT_ROOT=1` operator switch.
+- Tightened the operator dashboard top-level health signal so freshness debt,
+  digest debt, and missing Experience readiness no longer report `ok=true`.
+- Added a task-experience capture ledger so skipped reviewer outcomes such as
+  `review_invalid_or_low_confidence` are visible in Experience debt reports.
+- Aligned the diagnostic build tag with the package version instead of the old
+  `1.0.24` release line.
+- Added Phase 1-4 of Tianji's independent roadmap: a redacted auto-recall trace
+  ledger and `scope-recall recall-trace`, controlled dry-run-first promotion
+  batches, explicit scope policy evaluation/gating, and reviewed
+  knowledge/skill bridge draft candidates that do not directly write Markdown
+  truth or apply skills.
+
+## 1.1.0
+
+- Corrected 1.0.26 documentation so it describes partial OpenClaw-native adoption of Yuheng/Hermes 1.6.0 concepts, not full feature parity.
+- Added the 2026-06-30 commercial memory plugin plan and baseline runtime audit so future parity claims must point to release gates, live inspect output, doctor/dashboard evidence, and explicit remaining gaps.
+- Added Phase 1 contract docs for the OpenClaw capability matrix, stable operator JSON responses, and plugin configuration risk/restart semantics, with release-gate coverage for required sections.
+- Added Phase 2 runtime identity/scope metadata hardening for manual stores, secret index stores, smart extraction, regex auto-capture, and rejected admission audits; `memory_store` now has regression coverage for deterministic runtime metadata and foreign-scope denial.
+- Tightened conservative capture defaults for raw tool dumps, private credential paths, and ephemeral assistant progress noise.
+- Expanded the golden recall benchmark with scope-isolation, forbidden-id, archived/stale exclusion, prompt-budget cases, per-case traces, and aggregate commercial metrics (`knownAnswerRecall`, `topKAccuracy`, forbidden violation rate, latency, prompt budget, and filter counts).
+- Added partial Phase 4 freshness/relation support: smart metadata now normalizes freshness fields, the operator dashboard reports freshness debt, and retrieval applies conservative relation-evidence scoring without expanding scope.
+- Preserved and release-gated governance, journal, and operator dashboard surfaces while extending them with digest and freshness visibility.
+- Added a Phase 5 OpenClaw-native digest baseline with digest report/run/recovery CLI routes, `scope_recall_digest_*` management tools, strict run/chunk ledgers, dry-run-first candidate extraction, candidate-only writes, dashboard/doctor visibility, and digest regression tests.
+- Added Phase 6 Experience Kernel productization evidence with replay fixtures for common OpenClaw workflows and an operator CLI replay command for bounded playbook checks.
+- Added Phase 7 commercial release hardening with package hygiene scan checks, release/live rollout runbooks, release-readiness evidence templates, and expanded workspace/live drift checks.
+- Preserved hard-delete fail-closed behavior while extending digest, Experience, and release gate coverage.
+- Hardened the 1.1.0 audit fixes: digest reflection collection is scope-filtered, hard delete blocks SQL deletion when vector companion cleanup fails, graph hygiene apply is transactional, release gate rejects source/live self-comparison and runs OpenClaw runtime inspect/doctor smoke, and npm package files now include the source/test/script files required by exposed scripts.
+- Fixed vector repair result accounting so multi-row batches increment `rebuilt` once per repaired row; the smoke test now covers multi-row repair batches.
+- Decided to keep `1.0.26` as the partial-parity internal baseline; the next contract-driven commercial-memory work should move on the `1.1.0` line.
+
+## 1.0.26
+
+- Added OpenClaw-native operator CLI routes for a partial adoption of Yuheng `scope-recall` 1.6.0 maintenance concepts: `dashboard`, `candidates report/apply`, `governance cleanup/rollback/audit-coverage`, `journal recovery`, `graph hygiene`, `forgetting report/run`, `experience stats/promote`, and `playbooks list/review/promote/quarantine/supersede`.
+- Kept mutating maintenance flows dry-run-first unless the subcommand itself is an explicit lifecycle action or the operator passes `--apply`; `--dry-run` continues to win over accidental apply flags for cleanup, journal recovery, graph hygiene, forgetting, and Experience promotion.
+- Extended release gate checks and regression coverage so future releases cannot claim this OpenClaw CLI operation slice while omitting the required entry points, while preserving the existing operator dashboard, golden benchmark, and hard-delete safety gates.
+
+## 1.0.25
+
+- Aligned the OpenClaw port with the Yuheng `scope-recall` 1.6.0 safety posture: `repair-vectors` is now dry-run-first and requires `--apply` for vector companion writes, while `--dry-run` wins over accidental apply flags.
+- Added SQLite `busy_timeout` on the SQL truth and sqlite-bruteforce vector stores to reduce lock failures under concurrent OpenClaw capture, governance, and journal/dashboard reads.
+- Preserved the 1.0.24 governance, journal, operator dashboard, golden benchmark, hard-delete, and release gate surfaces while tightening release checks for the new dry-run and SQLite timeout contracts.
+
+## 1.0.24
+
+- Added dry-run-first candidate-memory promotion report/run tools for explicit `candidate` / `pending` SQL truth rows, with conservative human-review gates, optional noise archival, governance audit events, and redacted review output.
+- Added graph hygiene report/run tools for rebuildable `memory_entities` / `memory_relations` companion rows; OpenClaw deployments without graph tables now report `unsupported` explicitly instead of pretending repair is available.
+- Extended the operator dashboard with memory candidate debt and graph hygiene status while preserving the 1.0.23 governance, journal, golden benchmark, hard-delete, and release gate hardening line.
+- Hid `memory_store_secret_index` behind explicit `secretIndexToolsEnabled=true`, keeping the low-frequency credential-index schema out of default tool registration.
+
+## 1.0.23
+
+- Aligned OpenClaw scope-recall with the Yuheng `scope-recall` 1.5.x governance line.
+- Added governance cleanup report/run tools for historical template/transcript-shaped memory rows, with dry-run default, soft archive, audit events, and batch rollback.
+- Added journal recovery report/run compatibility tools. OpenClaw deployments without journal tables now report `unsupported` explicitly instead of pretending recovery is available.
+- Added an operator dashboard tool that summarizes SQL truth, FTS, governance cleanup, journal recovery, Experience Kernel, and vector status.
+- Made hard-delete forgetting fail closed when no vector companion delete callback is available, preventing SQL truth deletion that could leave stale vector hits.
+- Added OpenClaw-owned governance alignment tests and a golden recall benchmark fixture/runner wired into the release gate.
+- Added explicit manifest discoverability metadata for all `scope_recall_*` tools, release-gate enforcement for those metadata entries, and regression coverage proving Experience preflight is scope-filtered while playbook feedback records real run history.
+
+## 1.0.22
+
+- Added Experience Kernel tools and schemas for task episodes, procedural playbooks, experience runs, playbook promotion, replay, review, and forgetting reports.
+- Fixed task-experience capture so OpenClaw `agent_end` events without an explicit `success` field are not treated as failures.
+- Changed auto-recall to embed the current clean user request instead of the assembled prompt, with configurable `autoRecallQueryMaxChars`.
+- Synced hard forgetting with vector companion deletes and reports `needs_repair` if vector cleanup fails.
+- Marked degraded extraction/fallback captures with lower trust and only charge extraction quota after actual writes or merges.
+- Moved the default mdMirror fallback beside the configured memory DB instead of the extension directory.
+- Added safe procedural playbook FTS query construction and regression coverage for special-character queries.
+- Hardened release gates around Experience Kernel files, version/changelog consistency, diff whitespace, safe FTS source checks, and live extension drift checks.
+
 ## 1.0.21
 
 - Fixed smart-extractor and reflection-store to sanitize attachment markers before persisting to store

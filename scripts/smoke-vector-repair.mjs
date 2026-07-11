@@ -55,19 +55,31 @@ try {
   const dry = await store.rebuildVectorCompanion(fakeEmbedder, {
     dryRun: true,
     batchSize: 1,
+    fullRebuild: true,
   });
   assert(dry.dryRun === true, "dry run flag was not preserved");
+  assert(dry.fullRebuild === true, "full rebuild flag was not preserved");
   assert(dry.processed === 2, `dry run processed ${dry.processed}, expected 2`);
   assert(dry.rebuilt === 2, `dry run rebuild count ${dry.rebuilt}, expected 2`);
   assert(dry.errors.length === 0, `dry run errors: ${dry.errors.join("; ")}`);
 
   const result = await store.rebuildVectorCompanion(fakeEmbedder, {
-    batchSize: 1,
+    batchSize: 2,
+    fullRebuild: true,
   });
+  assert(result.fullRebuild === true, "write repair did not use full rebuild");
   assert(result.processed === 2, `processed ${result.processed}, expected 2`);
   assert(result.rebuilt === 2, `rebuilt ${result.rebuilt}, expected 2`);
   assert(result.skipped === 0, `skipped ${result.skipped}, expected 0`);
   assert(result.errors.length === 0, `repair errors: ${result.errors.join("; ")}`);
+
+  const incremental = await store.rebuildVectorCompanion(fakeEmbedder, {
+    batchSize: 2,
+  });
+  assert(incremental.fullRebuild === false, "default repair should be incremental");
+  assert(incremental.processed === 0, `incremental processed ${incremental.processed}, expected 0`);
+  assert(incremental.rebuilt === 0, `incremental rebuilt ${incremental.rebuilt}, expected 0`);
+  assert(incremental.errors.length === 0, `incremental repair errors: ${incremental.errors.join("; ")}`);
 
   const stats = await store.stats(["agent:test"]);
   assert(stats.totalCount === 2, `SQL truth count ${stats.totalCount}, expected 2`);

@@ -1,0 +1,115 @@
+{
+  "name": "scope-recall-openclaw-golden-recall-v1",
+  "setup": [
+    {
+      "id": "release-gate",
+      "text": "Scope Recall release hardening requires version, changelog, diff check, typecheck, build, release gate, and workspace extension drift checks.",
+      "category": "procedures",
+      "scope": "agent:main",
+      "metadata": {
+        "state": "confirmed",
+        "memory_layer": "durable"
+      }
+    },
+    {
+      "id": "secret-boundary",
+      "text": "普通记忆不要保存明文 secret token key；只保存用途、索引和 vault 位置。",
+      "category": "preferences",
+      "scope": "agent:main",
+      "metadata": {
+        "state": "confirmed",
+        "memory_layer": "durable"
+      }
+    },
+    {
+      "id": "archived-noise",
+      "text": "Operations workflow summary from journal digest: user: 继续 assistant: 完成。",
+      "category": "other",
+      "scope": "agent:main",
+      "metadata": {
+        "state": "archived",
+        "memory_layer": "archive"
+      }
+    },
+    {
+      "id": "project-alpha-deploy",
+      "text": "Project Alpha deploy procedure uses release gate, drift check, and staged rollout evidence.",
+      "category": "procedures",
+      "scope": "project:alpha",
+      "metadata": {
+        "state": "confirmed",
+        "memory_layer": "durable"
+      }
+    },
+    {
+      "id": "project-beta-deploy",
+      "text": "Project Beta deploy procedure uses release gate, drift check, and a separate operator approval.",
+      "category": "procedures",
+      "scope": "project:beta",
+      "metadata": {
+        "state": "confirmed",
+        "memory_layer": "durable"
+      }
+    },
+    {
+      "id": "home-ip-old",
+      "text": "Home gateway current IP was 100.64.0.25 before the reinstall.",
+      "category": "facts",
+      "scope": "agent:main",
+      "metadata": {
+        "state": "confirmed",
+        "memory_layer": "durable",
+        "invalidated_at": 10
+      }
+    },
+    {
+      "id": "home-ip-current",
+      "text": "Home gateway current IP is 100.64.0.30 after the reinstall.",
+      "category": "facts",
+      "scope": "agent:main",
+      "metadata": {
+        "state": "confirmed",
+        "memory_layer": "durable"
+      }
+    }
+  ],
+  "cases": [
+    {
+      "name": "release hardening finds release-gate procedure",
+      "query": "scope recall release gate changelog drift check",
+      "expected_ids": ["release-gate"],
+      "forbidden_ids": ["archived-noise"],
+      "min_rank": 1,
+      "limit": 3,
+      "max_prompt_chars": 420
+    },
+    {
+      "name": "secret boundary finds durable preference",
+      "query": "secret token vault 明文",
+      "expected_ids": ["secret-boundary"],
+      "forbidden_ids": ["archived-noise"],
+      "min_rank": 1,
+      "limit": 3,
+      "max_prompt_chars": 360
+    },
+    {
+      "name": "project alpha scope excludes project beta",
+      "query": "project deploy release gate drift operator approval",
+      "scope_filter": ["project:alpha"],
+      "expected_ids": ["project-alpha-deploy"],
+      "forbidden_ids": ["project-beta-deploy"],
+      "min_rank": 1,
+      "limit": 3,
+      "max_prompt_chars": 260
+    },
+    {
+      "name": "invalidated stale fact is excluded",
+      "query": "home gateway current IP after reinstall",
+      "expected_ids": ["home-ip-current"],
+      "forbidden_ids": ["home-ip-old"],
+      "min_rank": 1,
+      "limit": 3,
+      "max_prompt_chars": 260
+    }
+  ]
+}

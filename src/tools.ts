@@ -36,6 +36,7 @@ import {
   buildGovernanceReviewCandidates,
   recordConflictReviewRelations,
 } from "./conflict-governance.js";
+import { buildRuntimeScopeMetadata } from "./runtime-scope-metadata.js";
 
 // ============================================================================
 // Types
@@ -890,6 +891,14 @@ export function registerMemoryStoreTool(
 
           const safeImportance = clamp01(importance, 0.7);
           const vector = await runtimeContext.embedder.embedPassage(sanitizedText);
+          const runtimeScopeMetadata = buildRuntimeScopeMetadata({
+            agentId,
+            staticContext: toolCtx,
+            runtimeContext: runtimeCtx,
+            scope: targetScope,
+            scopeFilter: [targetScope],
+            workspaceDir: resolveWorkspaceDir(runtimeCtx, runtimeContext.workspaceDir),
+          });
 
           // Check for duplicates using raw vector similarity (bypasses importance/recency weighting)
           // Fail-open by design: dedup must never block a legitimate memory write.
@@ -938,6 +947,7 @@ export function registerMemoryStoreTool(
                     importance: safeImportance,
                   },
                   {
+                    ...runtimeScopeMetadata,
                     l0_abstract: sanitizedText,
                     l1_overview: `- ${sanitizedText}`,
                     l2_content: sanitizedText,
@@ -1059,6 +1069,14 @@ export function registerMemoryStoreSecretIndexTool(
             const { content: text, metadata: secretMetadata } = buildSecretIndex(raw);
             const vector = await runtimeContext.embedder.embedPassage(text);
             const importance = clamp01(secretMetadata.importance as number, 0.82);
+            const runtimeScopeMetadata = buildRuntimeScopeMetadata({
+              agentId,
+              staticContext: toolCtx,
+              runtimeContext: runtimeCtx,
+              scope: targetScope,
+              scopeFilter: [targetScope],
+              workspaceDir: resolveWorkspaceDir(runtimeCtx, runtimeContext.workspaceDir),
+            });
             const entry = await runtimeContext.store.store({
               text,
               vector,
@@ -1070,6 +1088,7 @@ export function registerMemoryStoreSecretIndexTool(
                   { text, category: "fact", importance },
                   {
                     ...secretMetadata,
+                    ...runtimeScopeMetadata,
                     l0_abstract: text.split("\n").slice(0, 4).join("; "),
                     l1_overview: text,
                     l2_content: text,
@@ -2643,12 +2662,15 @@ export function registerAllMemoryTools(
   options: {
     enableManagementTools?: boolean;
     enableSelfImprovementTools?: boolean;
+    secretIndexToolsEnabled?: boolean;
   } = {},
 ) {
   // Core tools (always enabled)
   registerMemoryRecallTool(api, context);
   registerMemoryStoreTool(api, context);
-  registerMemoryStoreSecretIndexTool(api, context);
+  if (options.secretIndexToolsEnabled === true) {
+    registerMemoryStoreSecretIndexTool(api, context);
+  }
   registerMemoryForgetTool(api, context);
   registerMemoryUpdateTool(api, context);
 

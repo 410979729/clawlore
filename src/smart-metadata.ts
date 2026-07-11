@@ -28,9 +28,11 @@ export interface MemoryRelation {
 
 export type MemoryState = "pending" | "confirmed" | "archived" | "rejected";
 export type MemoryLayer = "durable" | "working" | "reflection" | "archive";
+export type FreshnessStatus = "fresh" | "stale" | "unknown" | "live_check_needed";
 export type MemorySource =
   | "manual"
   | "auto-capture"
+  | "task-experience"
   | "reflection"
   | "session-summary"
   | "legacy";
@@ -46,6 +48,11 @@ export interface SmartMemoryMetadata {
   last_accessed_at: number;
   valid_from: number;
   invalidated_at?: number;
+  observed_at?: number;
+  valid_until?: number;
+  freshness_status?: FreshnessStatus;
+  live_check_needed?: boolean;
+  source_confidence?: number;
   fact_key?: string;
   supersedes?: string;
   superseded_by?: string;
@@ -112,6 +119,7 @@ function normalizeSource(value: unknown): MemorySource {
   switch (value) {
     case "manual":
     case "auto-capture":
+    case "task-experience":
     case "reflection":
     case "session-summary":
     case "legacy":
@@ -130,6 +138,18 @@ function normalizeLayer(value: unknown): MemoryLayer {
       return value;
     default:
       return "working";
+  }
+}
+
+function normalizeFreshnessStatus(value: unknown): FreshnessStatus | undefined {
+  switch (value) {
+    case "fresh":
+    case "stale":
+    case "unknown":
+    case "live_check_needed":
+      return value;
+    default:
+      return undefined;
   }
 }
 
@@ -274,6 +294,16 @@ export function parseSmartMetadata(
   const l2 = normalizeText(parsed.l2_content, text);
   const validFrom = normalizeTimestamp(parsed.valid_from, timestamp);
   const invalidatedAt = normalizeOptionalTimestamp(parsed.invalidated_at);
+  const observedAt = normalizeOptionalTimestamp(parsed.observed_at);
+  const validUntil = normalizeOptionalTimestamp(parsed.valid_until);
+  const explicitFreshnessStatus = normalizeFreshnessStatus(parsed.freshness_status);
+  const freshnessStatus =
+    explicitFreshnessStatus ??
+    (validUntil && validUntil <= Date.now() ? "stale" : observedAt ? "fresh" : undefined);
+  const liveCheckNeeded =
+    parsed.live_check_needed === true ||
+    freshnessStatus === "live_check_needed" ||
+    freshnessStatus === "stale";
   const fallbackSource =
     parsed.type === "session-summary"
       ? "session-summary"
@@ -303,6 +333,14 @@ export function parseSmartMetadata(
     valid_from: validFrom,
     invalidated_at:
       invalidatedAt && invalidatedAt >= validFrom ? invalidatedAt : undefined,
+    observed_at: observedAt,
+    valid_until: validUntil,
+    freshness_status: freshnessStatus,
+    live_check_needed: liveCheckNeeded || undefined,
+    source_confidence:
+      parsed.source_confidence === undefined
+        ? undefined
+        : clamp01(parsed.source_confidence, 0.7),
     fact_key:
       normalizeOptionalString(parsed.fact_key) ??
       deriveFactKey(
@@ -352,6 +390,25 @@ export function buildSmartMetadata(
     patch.invalidated_at === undefined
       ? base.invalidated_at
       : normalizeOptionalTimestamp(patch.invalidated_at);
+  const observedAt =
+    patch.observed_at === undefined
+      ? base.observed_at
+      : normalizeOptionalTimestamp(patch.observed_at);
+  const validUntil =
+    patch.valid_until === undefined
+      ? base.valid_until
+      : normalizeOptionalTimestamp(patch.valid_until);
+  const explicitFreshnessStatus = normalizeFreshnessStatus(
+    patch.freshness_status ?? base.freshness_status,
+  );
+  const freshnessStatus =
+    explicitFreshnessStatus ??
+    (validUntil && validUntil <= Date.now() ? "stale" : observedAt ? "fresh" : undefined);
+  const liveCheckNeeded =
+    patch.live_check_needed === true ||
+    (patch.live_check_needed === undefined && base.live_check_needed === true) ||
+    freshnessStatus === "live_check_needed" ||
+    freshnessStatus === "stale";
   return {
     ...base,
     ...patch,
@@ -369,6 +426,14 @@ export function buildSmartMetadata(
     valid_from: validFrom,
     invalidated_at:
       invalidatedAt && invalidatedAt >= validFrom ? invalidatedAt : undefined,
+    observed_at: observedAt,
+    valid_until: validUntil,
+    freshness_status: freshnessStatus,
+    live_check_needed: liveCheckNeeded || undefined,
+    source_confidence:
+      patch.source_confidence === undefined
+        ? base.source_confidence
+        : clamp01(patch.source_confidence, base.source_confidence ?? 0.7),
     fact_key:
       normalizeOptionalString(patch.fact_key) ??
       base.fact_key ??

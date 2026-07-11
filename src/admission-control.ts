@@ -84,6 +84,7 @@ export interface AdmissionRejectionAuditEntry {
   session_key: string;
   target_scope: string;
   scope_filter: string[];
+  runtime_metadata?: Record<string, unknown>;
   candidate: CandidateMemory;
   audit: AdmissionAuditRecord & { decision: "reject" };
   conversation_excerpt: string;

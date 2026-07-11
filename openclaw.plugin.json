@@ -2,7 +2,7 @@
   "id": "scope-recall-openclaw",
   "name": "Scope Recall for OpenClaw",
   "description": "Scoped long-term memory for OpenClaw with SQLite truth, hybrid recall, rebuildable vectors, safe capture, and native-free fallbacks",
-  "version": "1.0.19",
+  "version": "1.1.0",
   "kind": "memory",
   "contracts": {
     "tools": [
@@ -23,10 +23,49 @@
       "memory_explain_rank",
       "self_improvement_log",
       "self_improvement_extract_skill",
-      "self_improvement_review"
+      "self_improvement_review",
+      "scope_recall_playbook_search",
+      "scope_recall_playbook_inspect",
+      "scope_recall_experience_preflight",
+      "scope_recall_experience_stats",
+      "scope_recall_experience_replay",
+      "scope_recall_episode_create",
+      "scope_recall_episode_complete",
+      "scope_recall_playbook_create",
+      "scope_recall_playbook_feedback",
+      "scope_recall_experience_promote",
+      "scope_recall_forgetting_report",
+      "scope_recall_forgetting_run",
+      "scope_recall_governance_cleanup_report",
+      "scope_recall_governance_cleanup_run",
+      "scope_recall_memory_candidate_promotion_report",
+      "scope_recall_memory_candidate_promotion_run",
+      "scope_recall_graph_hygiene_report",
+      "scope_recall_graph_hygiene_run",
+      "scope_recall_journal_recovery_report",
+      "scope_recall_journal_recovery_run",
+      "scope_recall_digest_report",
+      "scope_recall_digest_run",
+      "scope_recall_digest_recovery",
+      "scope_recall_operator_dashboard",
+      "scope_recall_playbook_review"
     ]
   },
   "toolMetadata": {
+    "memory_store_secret_index": {
+      "configSignals": [
+        {
+          "rootPath": "plugins.entries.scope-recall-openclaw.config",
+          "mode": {
+            "path": "secretIndexToolsEnabled",
+            "default": "false",
+            "allowed": [
+              "true"
+            ]
+          }
+        }
+      ]
+    },
     "memory_stats": {
       "configSignals": [
         {
@@ -194,6 +233,321 @@
           }
         }
       ]
+    },
+    "scope_recall_playbook_search": {
+      "discoverable": true
+    },
+    "scope_recall_playbook_inspect": {
+      "discoverable": true
+    },
+    "scope_recall_experience_preflight": {
+      "discoverable": true
+    },
+    "scope_recall_experience_stats": {
+      "discoverable": true
+    },
+    "scope_recall_experience_replay": {
+      "discoverable": true
+    },
+    "scope_recall_episode_create": {
+      "discoverable": true,
+      "configSignals": [
+        {
+          "rootPath": "plugins.entries.scope-recall-openclaw.config",
+          "mode": {
+            "path": "enableManagementTools",
+            "default": "false",
+            "allowed": [
+              "true"
+            ]
+          }
+        }
+      ]
+    },
+    "scope_recall_episode_complete": {
+      "discoverable": true,
+      "configSignals": [
+        {
+          "rootPath": "plugins.entries.scope-recall-openclaw.config",
+          "mode": {
+            "path": "enableManagementTools",
+            "default": "false",
+            "allowed": [
+              "true"
+            ]
+          }
+        }
+      ]
+    },
+    "scope_recall_playbook_create": {
+      "discoverable": true,
+      "configSignals": [
+        {
+          "rootPath": "plugins.entries.scope-recall-openclaw.config",
+          "mode": {
+            "path": "enableManagementTools",
+            "default": "false",
+            "allowed": [
+              "true"
+            ]
+          }
+        }
+      ]
+    },
+    "scope_recall_playbook_feedback": {
+      "discoverable": true,
+      "configSignals": [
+        {
+          "rootPath": "plugins.entries.scope-recall-openclaw.config",
+          "mode": {
+            "path": "enableManagementTools",
+            "default": "false",
+            "allowed": [
+              "true"
+            ]
+          }
+        }
+      ]
+    },
+    "scope_recall_playbook_review": {
+      "discoverable": true,
+      "configSignals": [
+        {
+          "rootPath": "plugins.entries.scope-recall-openclaw.config",
+          "mode": {
+            "path": "enableManagementTools",
+            "default": "false",
+            "allowed": [
+              "true"
+            ]
+          }
+        }
+      ]
+    },
+    "scope_recall_experience_promote": {
+      "discoverable": true,
+      "configSignals": [
+        {
+          "rootPath": "plugins.entries.scope-recall-openclaw.config",
+          "mode": {
+            "path": "enableManagementTools",
+            "default": "false",
+            "allowed": [
+              "true"
+            ]
+          }
+        }
+      ]
+    },
+    "scope_recall_forgetting_report": {
+      "discoverable": true,
+      "configSignals": [
+        {
+          "rootPath": "plugins.entries.scope-recall-openclaw.config",
+          "mode": {
+            "path": "enableManagementTools",
+            "default": "false",
+            "allowed": [
+              "true"
+            ]
+          }
+        }
+      ]
+    },
+    "scope_recall_forgetting_run": {
+      "discoverable": true,
+      "configSignals": [
+        {
+          "rootPath": "plugins.entries.scope-recall-openclaw.config",
+          "mode": {
+            "path": "enableManagementTools",
+            "default": "false",
+            "allowed": [
+              "true"
+            ]
+          }
+        }
+      ]
+    },
+    "scope_recall_governance_cleanup_report": {
+      "discoverable": true,
+      "configSignals": [
+        {
+          "rootPath": "plugins.entries.scope-recall-openclaw.config",
+          "mode": {
+            "path": "enableManagementTools",
+            "default": "false",
+            "allowed": [
+              "true"
+            ]
+          }
+        }
+      ]
+    },
+    "scope_recall_governance_cleanup_run": {
+      "discoverable": true,
+      "configSignals": [
+        {
+          "rootPath": "plugins.entries.scope-recall-openclaw.config",
+          "mode": {
+            "path": "enableManagementTools",
+            "default": "false",
+            "allowed": [
+              "true"
+            ]
+          }
+        }
+      ]
+    },
+    "scope_recall_memory_candidate_promotion_report": {
+      "discoverable": true,
+      "configSignals": [
+        {
+          "rootPath": "plugins.entries.scope-recall-openclaw.config",
+          "mode": {
+            "path": "enableManagementTools",
+            "default": "false",
+            "allowed": [
+              "true"
+            ]
+          }
+        }
+      ]
+    },
+    "scope_recall_memory_candidate_promotion_run": {
+      "discoverable": true,
+      "configSignals": [
+        {
+          "rootPath": "plugins.entries.scope-recall-openclaw.config",
+          "mode": {
+            "path": "enableManagementTools",
+            "default": "false",
+            "allowed": [
+              "true"
+            ]
+          }
+        }
+      ]
+    },
+    "scope_recall_graph_hygiene_report": {
+      "discoverable": true,
+      "configSignals": [
+        {
+          "rootPath": "plugins.entries.scope-recall-openclaw.config",
+          "mode": {
+            "path": "enableManagementTools",
+            "default": "false",
+            "allowed": [
+              "true"
+            ]
+          }
+        }
+      ]
+    },
+    "scope_recall_graph_hygiene_run": {
+      "discoverable": true,
+      "configSignals": [
+        {
+          "rootPath": "plugins.entries.scope-recall-openclaw.config",
+          "mode": {
+            "path": "enableManagementTools",
+            "default": "false",
+            "allowed": [
+              "true"
+            ]
+          }
+        }
+      ]
+    },
+    "scope_recall_journal_recovery_report": {
+      "discoverable": true,
+      "configSignals": [
+        {
+          "rootPath": "plugins.entries.scope-recall-openclaw.config",
+          "mode": {
+            "path": "enableManagementTools",
+            "default": "false",
+            "allowed": [
+              "true"
+            ]
+          }
+        }
+      ]
+    },
+    "scope_recall_journal_recovery_run": {
+      "discoverable": true,
+      "configSignals": [
+        {
+          "rootPath": "plugins.entries.scope-recall-openclaw.config",
+          "mode": {
+            "path": "enableManagementTools",
+            "default": "false",
+            "allowed": [
+              "true"
+            ]
+          }
+        }
+      ]
+    },
+    "scope_recall_digest_report": {
+      "discoverable": true,
+      "configSignals": [
+        {
+          "rootPath": "plugins.entries.scope-recall-openclaw.config",
+          "mode": {
+            "path": "enableManagementTools",
+            "default": "false",
+            "allowed": [
+              "true"
+            ]
+          }
+        }
+      ]
+    },
+    "scope_recall_digest_run": {
+      "discoverable": true,
+      "configSignals": [
+        {
+          "rootPath": "plugins.entries.scope-recall-openclaw.config",
+          "mode": {
+            "path": "enableManagementTools",
+            "default": "false",
+            "allowed": [
+              "true"
+            ]
+          }
+        }
+      ]
+    },
+    "scope_recall_digest_recovery": {
+      "discoverable": true,
+      "configSignals": [
+        {
+          "rootPath": "plugins.entries.scope-recall-openclaw.config",
+          "mode": {
+            "path": "enableManagementTools",
+            "default": "false",
+            "allowed": [
+              "true"
+            ]
+          }
+        }
+      ]
+    },
+    "scope_recall_operator_dashboard": {
+      "discoverable": true,
+      "configSignals": [
+        {
+          "rootPath": "plugins.entries.scope-recall-openclaw.config",
+          "mode": {
+            "path": "enableManagementTools",
+            "default": "false",
+            "allowed": [
+              "true"
+            ]
+          }
+        }
+      ]
     }
   },
   "configSchema": {
@@ -289,6 +643,11 @@
         "default": false,
         "description": "Expose operator tools such as memory_list, memory_stats, memory_compact, and self-improvement review/extract actions."
       },
+      "secretIndexToolsEnabled": {
+        "type": "boolean",
+        "default": false,
+        "description": "Expose the low-frequency secret-index tool. Default is off so credential-index schemas stay hidden unless an operator explicitly enables them."
+      },
       "sessionStrategy": {
         "type": "string",
         "enum": [
@@ -356,6 +715,11 @@
         "default": 180,
         "description": "Maximum character budget per auto-injected memory summary."
       },
+      "autoRecallAllowCrossScope": {
+        "type": "boolean",
+        "default": false,
+        "description": "Allow auto-recall to inject memories that cross project/channel/customer/task scope boundaries. Global and same-scope recalls remain allowed by default."
+      },
       "maxRecallPerTurn": {
         "type": "integer",
         "minimum": 1,
@@ -365,7 +729,12 @@
       },
       "recallMode": {
         "type": "string",
-        "enum": ["full", "summary", "adaptive", "off"],
+        "enum": [
+          "full",
+          "summary",
+          "adaptive",
+          "off"
+        ],
         "default": "full",
         "description": "Auto-recall depth. full uses the configured item budget; summary injects compact L0 abstracts; adaptive routes by intent; off disables injection."
       },
@@ -376,6 +745,60 @@
         "type": "boolean",
         "default": false,
         "description": "Opt in to LLM-based memory extraction. When disabled, capture falls back to conservative regex rules."
+      },
+      "taskExperienceCapture": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Opt in to storing successful, tool-backed task runs as reusable experience capsules in SQL truth and vector recall.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": false,
+            "description": "Capture replayable procedure capsules after successful real tasks. Requires smartExtraction/LLM config."
+          },
+          "minMessages": {
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 200,
+            "default": 4,
+            "description": "Minimum transcript messages before a task can be reviewed for reusable experience capture."
+          },
+          "minToolCalls": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 50,
+            "default": 1,
+            "description": "Minimum tool-like transcript signals required before capture is attempted."
+          },
+          "maxInputChars": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 100000,
+            "default": 18000,
+            "description": "Maximum transcript characters sent to the task-experience reviewer."
+          },
+          "maxCapsuleChars": {
+            "type": "integer",
+            "minimum": 800,
+            "maximum": 8000,
+            "default": 2400,
+            "description": "Maximum persisted reusable experience capsule size."
+          },
+          "minConfidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.68,
+            "description": "Minimum reviewer confidence required before writing a reusable task experience."
+          },
+          "dedupeThreshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.92,
+            "description": "Vector similarity threshold used to skip duplicate reusable task experiences."
+          }
+        }
       },
       "extractMinMessages": {
         "type": "integer",
@@ -465,23 +888,78 @@
             "type": "object",
             "additionalProperties": false,
             "properties": {
-              "utility": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.1 },
-              "confidence": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.1 },
-              "novelty": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.1 },
-              "recency": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.1 },
-              "typePrior": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.6 }
+              "utility": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.1
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.1
+              },
+              "novelty": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.1
+              },
+              "recency": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.1
+              },
+              "typePrior": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.6
+              }
             }
           },
           "typePriors": {
             "type": "object",
             "additionalProperties": false,
             "properties": {
-              "profile": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.95 },
-              "preferences": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.9 },
-              "entities": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.75 },
-              "events": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.45 },
-              "cases": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.8 },
-              "patterns": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.85 }
+              "profile": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.95
+              },
+              "preferences": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.9
+              },
+              "entities": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.75
+              },
+              "events": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.45
+              },
+              "cases": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.8
+              },
+              "patterns": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0.85
+              }
             }
           }
         }
@@ -1132,6 +1610,10 @@
       "label": "Smart Extraction",
       "help": "Opt in to LLM extraction of six memory categories. This can send conversation text to the configured LLM provider."
     },
+    "taskExperienceCapture.enabled": {
+      "label": "Reusable Task Experience Capture",
+      "help": "When enabled, successful tool-backed tasks are distilled into replayable SQL truth memory capsules for future weak-model recall."
+    },
     "llm.apiKey": {
       "label": "LLM API Key",
       "sensitive": true,
@@ -1260,6 +1742,11 @@
     "autoRecallPerItemMaxChars": {
       "label": "Auto-Recall Per-Item Max Chars",
       "help": "Maximum characters per injected memory summary.",
+      "advanced": true
+    },
+    "autoRecallAllowCrossScope": {
+      "label": "Allow Cross-Scope Auto-Recall",
+      "help": "Opt in to injecting memories across project/channel/customer/task boundaries. Same-scope and global recalls remain allowed.",
       "advanced": true
     },
     "recallMode": {
@@ -1498,6 +1985,11 @@
     "enableManagementTools": {
       "label": "Management Tools",
       "help": "Expose operator tools such as memory_list, memory_stats, memory_compact, and self-improvement review/extract actions.",
+      "advanced": true
+    },
+    "secretIndexToolsEnabled": {
+      "label": "Secret Index Tools",
+      "help": "Expose the low-frequency secret-index tool. Leave off unless an operator explicitly needs credential index writes.",
       "advanced": true
     },
     "mdMirror.enabled": {

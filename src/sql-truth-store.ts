@@ -156,6 +156,7 @@ export class SqlTruthStore {
     const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: new (path: string) => DatabaseSync };
     mkdirSync(dirname(this.sqlitePath), { recursive: true });
     this.db = new DatabaseSync(this.sqlitePath);
+    runSql(this.db, "PRAGMA busy_timeout = 10000");
     runSql(this.db, "PRAGMA journal_mode = WAL");
     runSql(this.db, "PRAGMA synchronous = NORMAL");
     this.ensureSchema();
@@ -535,6 +536,14 @@ export class SqlTruthStore {
       sql: `(${alias}.scope IN (${placeholders}) OR ${alias}.scope IS NULL)`,
       params: scopes,
     };
+  }
+
+  /**
+   * Get the underlying database connection for Experience Kernel operations.
+   * @internal
+   */
+  getDb(): DatabaseSync {
+    return this.requireDb();
   }
 
   private requireDb(): DatabaseSync {
