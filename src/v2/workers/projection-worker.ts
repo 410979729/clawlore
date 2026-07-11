@@ -1,5 +1,5 @@
+import type { ProjectionOutboxRowV2, TruthStoreV2Port } from "../application/ports/truth-store.js";
 import type { MemoryRecordV2 } from "../domain/memory-record.js";
-import type { ProjectionOutboxRowV2, SqliteTruthStoreV2 } from "../storage/sqlite-truth-v2.js";
 
 export interface ProjectionAdapterV2 {
   projection: ProjectionOutboxRowV2["projection"];
@@ -20,7 +20,7 @@ function errorCode(error: unknown): string {
 export class ProjectionWorkerV2 {
   private readonly adapters: Map<string, ProjectionAdapterV2>;
 
-  constructor(private readonly truth: SqliteTruthStoreV2, adapters: ProjectionAdapterV2[]) {
+  constructor(private readonly truth: TruthStoreV2Port, adapters: ProjectionAdapterV2[]) {
     this.adapters = new Map(adapters.map((adapter) => [adapter.projection, adapter]));
   }
 

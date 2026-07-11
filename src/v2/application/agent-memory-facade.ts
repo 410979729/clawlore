@@ -1,6 +1,6 @@
 import type { MemoryAddressV2 } from "../domain/memory-address.js";
 import type { MemoryMutationReceiptV2, MemoryRecordV2 } from "../domain/memory-record.js";
-import type { SqliteTruthStoreV2 } from "../storage/sqlite-truth-v2.js";
+import type { TruthStoreV2Port } from "./ports/truth-store.js";
 
 export const CLAWLORE_AGENT_ACTIONS = [
   "memory_query",
@@ -10,7 +10,7 @@ export const CLAWLORE_AGENT_ACTIONS = [
 ] as const;
 
 export class AgentMemoryFacadeV2 {
-  constructor(private readonly truth: SqliteTruthStoreV2) {}
+  constructor(private readonly truth: TruthStoreV2Port) {}
 
   query(actor: MemoryAddressV2, query: string, limit?: number): MemoryRecordV2[] {
     return this.truth.queryAccessible(actor, query, limit);

@@ -1,4 +1,4 @@
-import { mapLegacyAddress, } from "../../migration/legacy-address-mapper.js";
+import { mapLegacyAddress, } from "../../application/legacy-address-mapper.js";
 function record(value) {
     if (value && typeof value === "object")
         return value;

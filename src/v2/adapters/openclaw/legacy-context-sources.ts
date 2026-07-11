@@ -8,7 +8,7 @@ import type { MemoryAddressV2 } from "../../domain/memory-address.js";
 import {
   mapLegacyAddress,
   type LegacyMemoryRowAddressInput,
-} from "../../migration/legacy-address-mapper.js";
+} from "../../application/legacy-address-mapper.js";
 
 export interface LegacyAutoRecallSourceV1 extends LegacyMemoryRowAddressInput {
   id: string;

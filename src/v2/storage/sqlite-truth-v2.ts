@@ -2,6 +2,13 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
+import type {
+  CorrectMemoryV2Input,
+  ForgetMemoryV2Input,
+  ProjectionOutboxRowV2,
+  RememberMemoryV2Input,
+  TruthStoreV2Port,
+} from "../application/ports/truth-store.js";
 import type { MemoryAddressV2 } from "../domain/memory-address.js";
 import { validateMemoryAddress } from "../domain/memory-address.js";
 import type {
@@ -12,54 +19,19 @@ import type {
   MemoryVerificationV2,
 } from "../domain/memory-record.js";
 
+export type {
+  CorrectMemoryV2Input,
+  ForgetMemoryV2Input,
+  ProjectionOutboxRowV2,
+  RememberMemoryV2Input,
+} from "../application/ports/truth-store.js";
+
 const require = createRequire(import.meta.url);
 type DatabaseSync = any;
 
 export interface TruthStoreClock {
   now(): Date;
   id(): string;
-}
-
-export interface RememberMemoryV2Input {
-  itemId?: string;
-  content: string;
-  category: string;
-  address: MemoryAddressV2;
-  lifecycle?: MemoryLifecycleV2;
-  verification?: MemoryVerificationV2;
-  validUntil?: string;
-  source: MemorySourceV2;
-  actor: string;
-  reason: string;
-}
-
-export interface CorrectMemoryV2Input {
-  itemId: string;
-  content: string;
-  source: MemorySourceV2;
-  actor: string;
-  reason: string;
-  verification?: MemoryVerificationV2;
-  validUntil?: string;
-}
-
-export interface ForgetMemoryV2Input {
-  itemId: string;
-  hardDelete?: boolean;
-  approved?: boolean;
-  actor: string;
-  reason: string;
-}
-
-export interface ProjectionOutboxRowV2 {
-  outboxId: string;
-  itemId: string;
-  revisionId?: string;
-  operation: "upsert" | "delete" | "purge";
-  projection: "fts" | "vector" | "relations";
-  attempts: number;
-  availableAt: string;
-  processedAt?: string;
 }
 
 const DEFAULT_CLOCK: TruthStoreClock = {
@@ -91,7 +63,7 @@ function toRecord(row: Record<string, unknown>): MemoryRecordV2 {
   };
 }
 
-export class SqliteTruthStoreV2 {
+export class SqliteTruthStoreV2 implements TruthStoreV2Port {
   private db: DatabaseSync | null = null;
 
   constructor(

@@ -52,10 +52,24 @@ Updated: 2026-07-11
 
 ## Next slice candidates
 
-- [ ] Add online SQLite snapshot backup, restore-to-new-location verification, and rollback drill.
+- [x] Add online SQLite snapshot backup, restore-to-new-location verification, and rollback drill.
 - [ ] Add additive v2 migration apply/rollback against copied fixtures; never the live database.
 - [ ] Adapt legacy auto-capture/reflection/digest/task-experience triggers to one candidate journal.
 - [ ] Add correction/forget projection convergence receipts and operator inspection.
+- [ ] Add encrypted archive wrapping and key-provider integration around verified snapshots.
+
+## Phase 2B — Module boundaries and verified snapshot
+
+- [x] Introduce a `TruthStoreV2Port`; application services no longer import the
+      concrete SQLite adapter.
+- [x] Define module ownership and preserve SQL/FTS/vector/relations/Experience
+      as separate capabilities.
+- [x] Add an executable module-boundary test.
+- [x] Repair the existing OpenClaw adapter -> migration reverse dependency.
+- [x] Create online SQLite snapshots while the source store remains open.
+- [x] Verify checksum, schema, integrity, foreign keys, and truth-table counts.
+- [x] Restore only to a new location and remove failed restore destinations.
+- [x] Reject tampered snapshots before restore.
 
 ## Phase 0 verification
 
@@ -100,6 +114,17 @@ Updated: 2026-07-11
 - Golden recall: recall 1.0; forbidden violations 0; prompt budget exceeded 0.
 - The first release-gate run correctly exposed stale discoverability assumptions;
   the gate contract was updated and the complete gate then passed.
+- Live extension/config/database/hooks/ContextEngine/Gateway: unchanged.
+
+## Phase 2B verification
+
+- Module-boundary tests: 2/2 PASS.
+- Snapshot/restore tests: 2/2 PASS.
+- Full plugin tests: 123/123 PASS.
+- `npm run typecheck`, build, vector-repair smoke, golden recall, and release
+  gate: PASS.
+- Release gate pack scan: 275 files.
+- Golden recall: 1.0; forbidden violations 0; prompt-budget exceeded 0.
 - Live extension/config/database/hooks/ContextEngine/Gateway: unchanged.
 
 ## Boundaries

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { MemoryAddressV2 } from "../domain/memory-address.js";
 import { memoryAddressKey } from "../domain/memory-address.js";
 import type { MemoryVerificationV2 } from "../domain/memory-record.js";
-import type { SqliteTruthStoreV2 } from "../storage/sqlite-truth-v2.js";
+import type { TruthStoreV2Port } from "./ports/truth-store.js";
 
 export interface TurnEnvelopeV2 {
   eventId: string;
@@ -96,7 +96,7 @@ export class UnifiedDistillationPipelineV2 {
   private readonly seen = new Set<string>();
 
   constructor(
-    private readonly truth: SqliteTruthStoreV2,
+    private readonly truth: TruthStoreV2Port,
     private readonly journal: DistillationJournalV2,
     private readonly extractor: DistillationExtractorV2,
   ) {}
