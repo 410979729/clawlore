@@ -1,0 +1,29 @@
+{
+  "directIdentity": {
+    "tenantId": "local",
+    "agentId": "main",
+    "workspaceId": "workspace-main",
+    "runtimeContext": {
+      "platform": "telegram",
+      "accountId": "default",
+      "chatType": "direct",
+      "conversationId": "user-1",
+      "sender": {
+        "senderId": "user-1"
+      }
+    }
+  },
+  "groupIdentity": {
+    "tenantId": "local",
+    "agentId": "main",
+    "runtimeContext": {
+      "platform": "telegram",
+      "accountId": "default",
+      "chatType": "group",
+      "conversationId": "group-9",
+      "threadId": "topic-3",
+      "senderId": "user-1"
+    }
+  },
+  "expectedDirectPrincipal": "telegram:default:user-1"
+}
