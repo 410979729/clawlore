@@ -35,6 +35,7 @@
     "smoke:clawlore-runtime-shadow": "node --test tests/clawlore-runtime-shadow.test.mjs",
     "smoke:clawlore-truth-v2": "node --test tests/clawlore-truth-v2.test.mjs",
     "smoke:clawlore-distillation": "node --test tests/clawlore-distillation-projection.test.mjs",
+    "smoke:clawlore-projection-convergence": "node --test tests/clawlore-projection-convergence.test.mjs",
     "smoke:clawlore-runtime-facade": "node --test tests/clawlore-agent-facade-context-engine.test.mjs",
     "smoke:clawlore-module-boundaries": "node --test tests/clawlore-module-boundaries.test.mjs",
     "smoke:clawlore-snapshot": "node --test tests/clawlore-snapshot-restore.test.mjs",

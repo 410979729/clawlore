@@ -2,6 +2,7 @@ import type { MemoryAddressV2 } from "../../domain/memory-address.js";
 import type {
   MemoryLifecycleV2,
   MemoryMutationReceiptV2,
+  MemoryProjectionV2,
   MemoryRecordV2,
   MemorySourceV2,
   MemoryVerificationV2,
@@ -43,10 +44,12 @@ export interface ProjectionOutboxRowV2 {
   itemId: string;
   revisionId?: string;
   operation: "upsert" | "delete" | "purge";
-  projection: "fts" | "vector" | "relations";
+  projection: MemoryProjectionV2;
   attempts: number;
   availableAt: string;
+  createdAt: string;
   processedAt?: string;
+  lastError?: string;
 }
 
 export interface TruthStoreV2Port {
@@ -56,6 +59,7 @@ export interface TruthStoreV2Port {
   get(itemId: string): MemoryRecordV2 | null;
   queryAccessible(actor: MemoryAddressV2, query: string, limit?: number): MemoryRecordV2[];
   listPendingOutbox(limit?: number): ProjectionOutboxRowV2[];
+  inspectOutbox(outboxIds: string[]): ProjectionOutboxRowV2[];
   markOutboxProcessed(outboxId: string): void;
   recordOutboxFailure(outboxId: string, errorCode: string, retryAt?: string): void;
 }

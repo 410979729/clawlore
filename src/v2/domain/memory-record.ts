@@ -36,6 +36,16 @@ export interface MemoryRecordV2 {
   updatedAt: string;
 }
 
+export type MemoryProjectionV2 = "fts" | "vector" | "relations";
+
+export interface MemoryProjectionHandleV2 {
+  schemaVersion: 1;
+  status: "pending";
+  operation: "upsert" | "delete" | "purge";
+  expected: MemoryProjectionV2[];
+  outboxIds: string[];
+}
+
 export interface MemoryMutationReceiptV2 {
   schemaVersion: 2;
   action: "remember" | "correct" | "archive" | "purge";
@@ -44,5 +54,6 @@ export interface MemoryMutationReceiptV2 {
   previousRevisionId?: string;
   eventId: string;
   outboxIds: string[];
+  projection: MemoryProjectionHandleV2;
   committedAt: string;
 }

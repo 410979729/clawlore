@@ -55,7 +55,7 @@ Updated: 2026-07-11
 - [x] Add online SQLite snapshot backup, restore-to-new-location verification, and rollback drill.
 - [x] Add additive v2 migration apply/rollback against copied fixtures; never the live database.
 - [ ] Adapt legacy auto-capture/reflection/digest/task-experience triggers to one candidate journal.
-- [ ] Add correction/forget projection convergence receipts and operator inspection.
+- [x] Add correction/forget projection convergence receipts and operator inspection.
 - [x] Add encrypted archive wrapping and key-provider integration around verified snapshots.
 
 ## Phase 2B — Module boundaries and verified snapshot
@@ -91,6 +91,14 @@ Updated: 2026-07-11
 - [x] Verify outer archive checksum and inner SQLite integrity before restore.
 - [x] Restore only to a new location.
 - [x] Remove plaintext SQLite, WAL, and SHM temporary files on all paths.
+
+## Phase 2E — Projection convergence receipts
+
+- [x] Return typed FTS/vector/relations projection handles from mutations.
+- [x] Inspect exact outbox rows without exposing memory content.
+- [x] Distinguish pending, retrying, processed, and missing states.
+- [x] Claim convergence only when all expected projections are processed.
+- [x] Prove correction retry and forget deletion convergence in fixtures.
 
 ## Phase 0 verification
 
@@ -166,6 +174,15 @@ Updated: 2026-07-11
 - Golden recall: 1.0; forbidden violations 0; prompt-budget exceeded 0.
 - First focused run exposed plaintext SQLite WAL/SHM cleanup debt; cleanup was
   repaired and the focused/full gates then passed.
+- Live extension/config/database/hooks/ContextEngine/Gateway: unchanged.
+
+## Phase 2E verification
+
+- Projection convergence tests: 2/2 PASS.
+- Full plugin tests: 130/130 PASS.
+- Typecheck/build/module-boundary/vector-repair/golden recall/release gate: PASS.
+- Release gate pack scan: 287 files.
+- Golden recall: 1.0; forbidden violations 0; prompt-budget exceeded 0.
 - Live extension/config/database/hooks/ContextEngine/Gateway: unchanged.
 
 ## Boundaries

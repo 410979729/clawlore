@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import { validateMemoryAddress } from "../domain/memory-address.js";
+const PROJECTIONS = ["fts", "vector", "relations"];
 const require = createRequire(import.meta.url);
 const DEFAULT_CLOCK = {
     now: () => new Date(),
@@ -76,7 +77,11 @@ export class SqliteTruthStoreV2 {
             this.insertEvent(eventId, itemId, revisionId, "remembered", input.actor, input.reason, now);
             this.insertOutbox(outboxIds, itemId, revisionId, "upsert", now);
         });
-        return { schemaVersion: 2, action: "remember", itemId, revisionId, eventId, outboxIds, committedAt: now };
+        return {
+            schemaVersion: 2, action: "remember", itemId, revisionId, eventId, outboxIds,
+            projection: { schemaVersion: 1, status: "pending", operation: "upsert", expected: [...PROJECTIONS], outboxIds },
+            committedAt: now,
+        };
     }
     correct(input) {
         if (!input.content.trim())
@@ -108,7 +113,9 @@ export class SqliteTruthStoreV2 {
         });
         return {
             schemaVersion: 2, action: "correct", itemId: current.itemId, revisionId,
-            previousRevisionId: current.revisionId, eventId, outboxIds, committedAt: now,
+            previousRevisionId: current.revisionId, eventId, outboxIds,
+            projection: { schemaVersion: 1, status: "pending", operation: "upsert", expected: [...PROJECTIONS], outboxIds },
+            committedAt: now,
         };
     }
     forget(input) {
@@ -148,7 +155,9 @@ export class SqliteTruthStoreV2 {
         return {
             schemaVersion: 2, action: input.hardDelete ? "purge" : "archive",
             itemId: current.itemId, revisionId, previousRevisionId: current.revisionId,
-            eventId, outboxIds, committedAt: now,
+            eventId, outboxIds,
+            projection: { schemaVersion: 1, status: "pending", operation, expected: [...PROJECTIONS], outboxIds },
+            committedAt: now,
         };
     }
     get(itemId) {
@@ -179,14 +188,18 @@ export class SqliteTruthStoreV2 {
         return this.requireDb().prepare(`SELECT * FROM projection_outbox WHERE processed_at IS NULL
       AND available_at <= ? ORDER BY created_at,outbox_id LIMIT ?`)
             .all(this.clock.now().toISOString(), Math.max(1, Math.min(1000, Math.floor(limit))))
-            .map((row) => ({
-            outboxId: String(row.outbox_id), itemId: String(row.item_id),
-            revisionId: row.revision_id ? String(row.revision_id) : undefined,
-            operation: row.operation,
-            projection: row.projection,
-            attempts: Number(row.attempts), availableAt: String(row.available_at),
-            processedAt: row.processed_at ? String(row.processed_at) : undefined,
-        }));
+            .map((row) => this.toOutboxRow(row));
+    }
+    inspectOutbox(outboxIds) {
+        const unique = [...new Set(outboxIds.filter((value) => typeof value === "string" && value.trim()))];
+        if (unique.length === 0)
+            return [];
+        if (unique.length > 100)
+            throw new Error("outbox inspection is limited to 100 ids");
+        const placeholders = unique.map(() => "?").join(",");
+        return this.requireDb().prepare(`SELECT * FROM projection_outbox WHERE outbox_id IN (${placeholders})`)
+            .all(...unique)
+            .map((row) => this.toOutboxRow(row));
     }
     markOutboxProcessed(outboxId) {
         this.requireDb().prepare("UPDATE projection_outbox SET processed_at=? WHERE outbox_id=?")
@@ -236,11 +249,23 @@ export class SqliteTruthStoreV2 {
       VALUES (?,?,?,?,?,?,?)`).run(eventId, itemId, revisionId ?? null, eventType, actor, reason, now);
     }
     insertOutbox(ids, itemId, revisionId, operation, now) {
-        ["fts", "vector", "relations"].forEach((projection, index) => {
+        PROJECTIONS.forEach((projection, index) => {
             this.requireDb().prepare(`INSERT INTO projection_outbox
         (outbox_id,item_id,revision_id,operation,projection,attempts,available_at,created_at)
         VALUES (?,?,?,?,?,0,?,?)`).run(ids[index], itemId, revisionId ?? null, operation, projection, now, now);
         });
+    }
+    toOutboxRow(row) {
+        return {
+            outboxId: String(row.outbox_id), itemId: String(row.item_id),
+            revisionId: row.revision_id ? String(row.revision_id) : undefined,
+            operation: row.operation,
+            projection: row.projection,
+            attempts: Number(row.attempts), availableAt: String(row.available_at),
+            createdAt: String(row.created_at),
+            processedAt: row.processed_at ? String(row.processed_at) : undefined,
+            lastError: row.last_error ? String(row.last_error) : undefined,
+        };
     }
     ensureSchema() {
         this.requireDb().exec(`
