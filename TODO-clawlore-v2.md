@@ -56,7 +56,7 @@ Updated: 2026-07-11
 - [x] Add additive v2 migration apply/rollback against copied fixtures; never the live database.
 - [ ] Adapt legacy auto-capture/reflection/digest/task-experience triggers to one candidate journal.
 - [ ] Add correction/forget projection convergence receipts and operator inspection.
-- [ ] Add encrypted archive wrapping and key-provider integration around verified snapshots.
+- [x] Add encrypted archive wrapping and key-provider integration around verified snapshots.
 
 ## Phase 2B — Module boundaries and verified snapshot
 
@@ -82,6 +82,15 @@ Updated: 2026-07-11
       as source evidence.
 - [x] Write a 0600 migration marker and require its id/digest for rollback.
 - [x] Prove the legacy SQLite hash is unchanged before/after preview, apply, and rollback.
+
+## Phase 2D — Encrypted snapshot archive
+
+- [x] Wrap verified online snapshots with AES-256-GCM.
+- [x] Resolve archive keys through a file SecretRef-style provider.
+- [x] Reject group/other-readable key files and write archives as 0600.
+- [x] Verify outer archive checksum and inner SQLite integrity before restore.
+- [x] Restore only to a new location.
+- [x] Remove plaintext SQLite, WAL, and SHM temporary files on all paths.
 
 ## Phase 0 verification
 
@@ -146,6 +155,17 @@ Updated: 2026-07-11
 - Typecheck/build/vector-repair/golden recall/release gate: PASS.
 - Release gate pack scan: 279 files.
 - Golden recall: 1.0; forbidden violations 0; prompt-budget exceeded 0.
+- Live extension/config/database/hooks/ContextEngine/Gateway: unchanged.
+
+## Phase 2D verification
+
+- Encrypted archive tests: 3/3 PASS.
+- Full plugin tests: 128/128 PASS.
+- Typecheck/build/module-boundary/vector-repair/golden recall/release gate: PASS.
+- Release gate pack scan: 283 files.
+- Golden recall: 1.0; forbidden violations 0; prompt-budget exceeded 0.
+- First focused run exposed plaintext SQLite WAL/SHM cleanup debt; cleanup was
+  repaired and the focused/full gates then passed.
 - Live extension/config/database/hooks/ContextEngine/Gateway: unchanged.
 
 ## Boundaries
