@@ -253,6 +253,12 @@ export class SqliteTruthStoreV2 {
       .run(this.clock.now().toISOString(), outboxId);
   }
 
+  recordOutboxFailure(outboxId: string, errorCode: string, retryAt?: string): void {
+    this.requireDb().prepare(`UPDATE projection_outbox
+      SET attempts=attempts+1,last_error=?,available_at=? WHERE outbox_id=?`)
+      .run(errorCode.slice(0, 160), retryAt ?? this.clock.now().toISOString(), outboxId);
+  }
+
   count(table: string): number {
     const allowed = new Set(["memory_items","memory_revisions","memory_sources","memory_acl","memory_relations","memory_events","projection_outbox"]);
     if (!allowed.has(table)) throw new Error("unsupported table");
