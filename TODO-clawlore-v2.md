@@ -1,6 +1,6 @@
 # ClawLore 2.0 TODO
 
-Updated: 2026-07-11
+Updated: 2026-07-12
 
 ## Phase 0
 
@@ -108,6 +108,17 @@ Updated: 2026-07-11
 - [x] Route all automatic events through one journal, admission, and outbox path.
 - [x] Keep all automatic outputs candidate-only, including tool-verified episodes.
 
+## Phase 4A — Read-only Memory Center model
+
+- [x] Add a read-only application model over Truth V2 instead of a second UI store.
+- [x] Expose ACL-filtered knowledge, used-this-turn, provenance, review inbox,
+      corrections, current conflicts/stale facts, scope counts, projection health,
+      provider egress declarations, and product capabilities.
+- [x] Reuse the storage ACL predicate for memories, events, relations, and outbox health.
+- [x] Reject ContextPacks whose actor differs from the Memory Center actor.
+- [x] Suppress inaccessible ContextPack items and historical-revision conflicts.
+- [x] Keep backup/export/playbook operations descriptive and read-only in this slice.
+
 ## Phase 0 verification
 
 - Focused Memory Address V2 tests: 8/8 PASS.
@@ -200,6 +211,18 @@ Updated: 2026-07-11
 - Typecheck/build/module-boundary/vector-repair/golden recall/release gate: PASS.
 - Release gate pack scan: 291 files.
 - Golden recall: 1.0; forbidden violations 0; prompt-budget exceeded 0.
+- Live extension/config/database/hooks/ContextEngine/Gateway: unchanged.
+
+## Phase 4A verification
+
+- Memory Center tests: 2/2 PASS.
+- Full plugin tests: 134/134 PASS.
+- Typecheck/build/module-boundary/vector-repair/golden recall/release gate: PASS.
+- Release gate pack scan: 299 files.
+- Golden recall: 1.0; forbidden violations 0; prompt-budget exceeded 0.
+- The first historical-conflict regression run exposed a stale test expectation
+  after adding a second correction fixture; the expectation was corrected and
+  the complete gates then passed.
 - Live extension/config/database/hooks/ContextEngine/Gateway: unchanged.
 
 ## Boundaries

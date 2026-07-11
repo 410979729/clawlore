@@ -39,6 +39,7 @@
     "smoke:clawlore-projection-convergence": "node --test tests/clawlore-projection-convergence.test.mjs",
     "smoke:clawlore-runtime-facade": "node --test tests/clawlore-agent-facade-context-engine.test.mjs",
     "smoke:clawlore-module-boundaries": "node --test tests/clawlore-module-boundaries.test.mjs",
+    "smoke:clawlore-memory-center": "node --test tests/clawlore-memory-center.test.mjs",
     "smoke:clawlore-snapshot": "node --test tests/clawlore-snapshot-restore.test.mjs",
     "smoke:clawlore-encrypted-snapshot": "node --test tests/clawlore-encrypted-snapshot-archive.test.mjs",
     "smoke:clawlore-migration-drill": "node --test tests/clawlore-legacy-migration-drill.test.mjs",

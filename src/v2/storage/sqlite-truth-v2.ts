@@ -9,6 +9,13 @@ import type {
   RememberMemoryV2Input,
   TruthStoreV2Port,
 } from "../application/ports/truth-store.js";
+import type {
+  MemoryCenterEventRowV1,
+  MemoryCenterProjectionHealthV1,
+  MemoryCenterReadPortV1,
+  MemoryCenterRelationRowV1,
+  MemoryCenterRowV1,
+} from "../application/ports/memory-center-read.js";
 import type { MemoryAddressV2 } from "../domain/memory-address.js";
 import { validateMemoryAddress } from "../domain/memory-address.js";
 import type {
@@ -65,7 +72,7 @@ function toRecord(row: Record<string, unknown>): MemoryRecordV2 {
   };
 }
 
-export class SqliteTruthStoreV2 implements TruthStoreV2Port {
+export class SqliteTruthStoreV2 implements TruthStoreV2Port, MemoryCenterReadPortV1 {
   private db: DatabaseSync | null = null;
 
   constructor(
@@ -256,6 +263,88 @@ export class SqliteTruthStoreV2 implements TruthStoreV2Port {
       .map((row: Record<string, unknown>) => this.toOutboxRow(row));
   }
 
+  listMemoryCenterRows(actor: MemoryAddressV2, limit = 200): MemoryCenterRowV1[] {
+    const validation = validateMemoryAddress(actor);
+    if (!validation.valid) return [];
+    const rows = this.requireDb().prepare(`SELECT i.*,
+      (SELECT source_type FROM memory_sources s WHERE s.revision_id=i.current_revision_id
+        ORDER BY observed_at DESC,source_id LIMIT 1) AS source_type,
+      (SELECT external_id FROM memory_sources s WHERE s.revision_id=i.current_revision_id
+        ORDER BY observed_at DESC,source_id LIMIT 1) AS source_external_id,
+      (SELECT observed_at FROM memory_sources s WHERE s.revision_id=i.current_revision_id
+        ORDER BY observed_at DESC,source_id LIMIT 1) AS source_observed_at,
+      (SELECT event_type FROM memory_events e WHERE e.item_id=i.item_id
+        ORDER BY created_at DESC,event_id DESC LIMIT 1) AS latest_event_type,
+      (SELECT reason FROM memory_events e WHERE e.item_id=i.item_id
+        ORDER BY created_at DESC,event_id DESC LIMIT 1) AS latest_reason
+      FROM memory_items i WHERE ${this.accessSql("i")}
+      ORDER BY i.updated_at DESC,i.item_id ASC LIMIT ?`)
+      .all(...this.accessArgs(actor), Math.max(1, Math.min(1000, Math.floor(limit))));
+    return rows.map((row: Record<string, unknown>) => ({
+      itemId: String(row.item_id),
+      content: String(row.content),
+      category: String(row.category),
+      address: parseAddress(row),
+      lifecycle: row.lifecycle as MemoryLifecycleV2,
+      verification: row.verification as MemoryVerificationV2,
+      validUntil: row.valid_until ? String(row.valid_until) : undefined,
+      updatedAt: String(row.updated_at),
+      sourceType: row.source_type ? String(row.source_type) : undefined,
+      sourceId: row.source_external_id ? String(row.source_external_id) : undefined,
+      observedAt: row.source_observed_at ? String(row.source_observed_at) : undefined,
+      latestEventType: row.latest_event_type ? String(row.latest_event_type) : undefined,
+      latestReason: row.latest_reason ? String(row.latest_reason) : undefined,
+    }));
+  }
+
+  listMemoryCenterEvents(actor: MemoryAddressV2, limit = 200): MemoryCenterEventRowV1[] {
+    if (!validateMemoryAddress(actor).valid) return [];
+    return this.requireDb().prepare(`SELECT e.* FROM memory_events e
+      JOIN memory_items i ON i.item_id=e.item_id
+      WHERE ${this.accessSql("i")}
+      ORDER BY e.created_at DESC,e.event_id DESC LIMIT ?`)
+      .all(...this.accessArgs(actor), Math.max(1, Math.min(1000, Math.floor(limit))))
+      .map((row: Record<string, unknown>) => ({
+        eventId: String(row.event_id), itemId: String(row.item_id),
+        eventType: String(row.event_type), reason: String(row.reason), createdAt: String(row.created_at),
+      }));
+  }
+
+  listMemoryCenterRelations(actor: MemoryAddressV2, limit = 200): MemoryCenterRelationRowV1[] {
+    if (!validateMemoryAddress(actor).valid) return [];
+    return this.requireDb().prepare(`SELECT r.relation_type,r.created_at,
+      fr.item_id AS from_item_id,tr.item_id AS to_item_id
+      FROM memory_relations r
+      JOIN memory_revisions fr ON fr.revision_id=r.from_revision_id
+      JOIN memory_revisions tr ON tr.revision_id=r.to_revision_id
+      JOIN memory_items fi ON fi.item_id=fr.item_id
+      JOIN memory_items ti ON ti.item_id=tr.item_id
+      WHERE fi.current_revision_id=fr.revision_id
+        AND ti.current_revision_id=tr.revision_id
+        AND ${this.accessSql("fi")} AND ${this.accessSql("ti")}
+      ORDER BY r.created_at DESC,r.relation_id DESC LIMIT ?`)
+      .all(...this.accessArgs(actor), ...this.accessArgs(actor), Math.max(1, Math.min(1000, Math.floor(limit))))
+      .map((row: Record<string, unknown>) => ({
+        relationType: String(row.relation_type), fromItemId: String(row.from_item_id),
+        toItemId: String(row.to_item_id), createdAt: String(row.created_at),
+      }));
+  }
+
+  getMemoryCenterProjectionHealth(actor: MemoryAddressV2): MemoryCenterProjectionHealthV1 {
+    if (!validateMemoryAddress(actor).valid) return { pending: 0, retrying: 0, processed: 0 };
+    const row = this.requireDb().prepare(`SELECT
+      SUM(CASE WHEN o.processed_at IS NULL AND o.attempts=0 THEN 1 ELSE 0 END) AS pending,
+      SUM(CASE WHEN o.processed_at IS NULL AND o.attempts>0 THEN 1 ELSE 0 END) AS retrying,
+      SUM(CASE WHEN o.processed_at IS NOT NULL THEN 1 ELSE 0 END) AS processed
+      FROM projection_outbox o JOIN memory_items i ON i.item_id=o.item_id
+      WHERE ${this.accessSql("i")}`).get(...this.accessArgs(actor)) as Record<string, unknown>;
+    return {
+      pending: Number(row.pending ?? 0),
+      retrying: Number(row.retrying ?? 0),
+      processed: Number(row.processed ?? 0),
+    };
+  }
+
   markOutboxProcessed(outboxId: string): void {
     this.requireDb().prepare("UPDATE projection_outbox SET processed_at=? WHERE outbox_id=?")
       .run(this.clock.now().toISOString(), outboxId);
@@ -327,6 +416,22 @@ export class SqliteTruthStoreV2 implements TruthStoreV2Port {
       processedAt: row.processed_at ? String(row.processed_at) : undefined,
       lastError: row.last_error ? String(row.last_error) : undefined,
     };
+  }
+
+  private accessSql(alias: string): string {
+    return `${alias}.tenant_id=? AND ${alias}.agent_id=? AND (
+      (${alias}.visibility='private' AND ${alias}.principal_id=?)
+      OR (${alias}.visibility='conversation' AND ${alias}.conversation_id=?
+        AND (${alias}.thread_id IS NULL OR ${alias}.thread_id=?))
+      OR (${alias}.visibility='project' AND ${alias}.project_id=?)
+    )`;
+  }
+
+  private accessArgs(actor: MemoryAddressV2): unknown[] {
+    return [
+      actor.tenantId, actor.agentId, actor.principalId,
+      actor.conversationId ?? "", actor.threadId ?? "", actor.projectId ?? "",
+    ];
   }
 
   private ensureSchema(): void {
