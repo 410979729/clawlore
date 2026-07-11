@@ -191,8 +191,8 @@ for (const toolName of requiredExperienceTools) {
   if (!manifest.contracts?.tools?.includes(toolName)) {
     throw new Error(`release gate failed: manifest missing Experience tool contract ${toolName}`);
   }
-  if (manifest.toolMetadata?.[toolName]?.discoverable !== true) {
-    throw new Error(`release gate failed: manifest missing discoverability metadata for ${toolName}`);
+  if (typeof manifest.toolMetadata?.[toolName]?.discoverable !== "boolean") {
+    throw new Error(`release gate failed: manifest missing boolean discoverability metadata for ${toolName}`);
   }
 }
 
@@ -200,11 +200,18 @@ const alwaysAvailableExperienceTools = new Set([
   "scope_recall_playbook_search",
   "scope_recall_playbook_inspect",
   "scope_recall_experience_preflight",
-  "scope_recall_experience_stats",
-  "scope_recall_experience_replay",
 ]);
 for (const toolName of requiredExperienceTools) {
-  if (alwaysAvailableExperienceTools.has(toolName)) continue;
+  const discoverable = manifest.toolMetadata?.[toolName]?.discoverable;
+  if (alwaysAvailableExperienceTools.has(toolName)) {
+    if (discoverable !== true) {
+      throw new Error(`release gate failed: core Experience tool ${toolName} must remain discoverable`);
+    }
+    continue;
+  }
+  if (discoverable !== false) {
+    throw new Error(`release gate failed: operator Experience tool ${toolName} must not be discoverable by default`);
+  }
   const signal = manifest.toolMetadata?.[toolName]?.configSignals?.[0];
   if (
     signal?.rootPath !== "plugins.entries.scope-recall-openclaw.config" ||

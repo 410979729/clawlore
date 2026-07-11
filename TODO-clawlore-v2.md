@@ -31,12 +31,31 @@ Updated: 2026-07-11
 - [x] Add six focused tests and a machine-readable JSON smoke.
 - [x] Run full regression, typecheck, build, old/new smokes, golden recall, and release gate.
 
+## Phase 1C — 1.x safety hardening
+
+- [x] Declare plugin SecretRef contracts without copying credential values.
+- [x] Disable plaintext JSONL auto-backup and destructive startup compaction.
+- [x] Hide management tools behind explicit operator gates.
+- [x] Keep only read-only playbook search/inspect/preflight discoverable by default.
+
+## Phase 2A — Truth/runtime spine
+
+- [x] Add a default-off, redacted runtime shadow trace without replacing hooks.
+- [x] Add revision/source/ACL/event/outbox Truth V2 transactions.
+- [x] Add read-only legacy migration preview with verification debt.
+- [x] Add one unified distillation admission path and retryable projection worker.
+- [x] Add four-action Agent facade over the shared Truth V2 service.
+- [x] Filter private/conversation/project access in SQL before returning rows.
+- [x] Deny ungranted team/global rows and expired rows by default.
+- [x] Add compatibility-first ContextEngine capability negotiation skeleton.
+- [x] Align the release gate with the reduced Experience discoverability contract.
+
 ## Next slice candidates
 
-- [ ] Audit 1.x SecretRef support, plaintext backup, startup compaction, and
-      management-tool discovery as a separate hardening patch.
-- [ ] Design a default-off runtime shadow flag and trace sink without replacing hooks.
-- [ ] Design additive v2 SQLite tables and migration preview against a fixture.
+- [ ] Add online SQLite snapshot backup, restore-to-new-location verification, and rollback drill.
+- [ ] Add additive v2 migration apply/rollback against copied fixtures; never the live database.
+- [ ] Adapt legacy auto-capture/reflection/digest/task-experience triggers to one candidate journal.
+- [ ] Add correction/forget projection convergence receipts and operator inspection.
 
 ## Phase 0 verification
 
@@ -70,6 +89,17 @@ Updated: 2026-07-11
 - Address V2, ContextPack V1, and vector-repair smokes: PASS.
 - Golden recall: recall 1.0; forbidden violations 0.
 - `npm run release:gate`: PASS; pack scan 243 files.
+- Live extension/config/database/hooks/ContextEngine/Gateway: unchanged.
+
+## Phase 2A verification
+
+- Agent facade/ContextEngine focused tests: 2/2 PASS.
+- Full plugin tests: 119/119 PASS.
+- `npm run typecheck` and `npm run build`: PASS.
+- Release gate: PASS; pack scan 265 files.
+- Golden recall: recall 1.0; forbidden violations 0; prompt budget exceeded 0.
+- The first release-gate run correctly exposed stale discoverability assumptions;
+  the gate contract was updated and the complete gate then passed.
 - Live extension/config/database/hooks/ContextEngine/Gateway: unchanged.
 
 ## Boundaries

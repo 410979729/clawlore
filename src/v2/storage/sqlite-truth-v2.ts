@@ -234,6 +234,29 @@ export class SqliteTruthStoreV2 {
     return row ? toRecord(row as Record<string, unknown>) : null;
   }
 
+  queryAccessible(actor: MemoryAddressV2, query: string, limit = 20): MemoryRecordV2[] {
+    const needle = query.trim();
+    if (!needle) return [];
+    const validation = validateMemoryAddress(actor);
+    if (!validation.valid) return [];
+    const escaped = needle.replace(/[\\%_]/g, (value) => `\\${value}`);
+    const rows = this.requireDb().prepare(`SELECT * FROM memory_items
+      WHERE tenant_id=? AND agent_id=? AND lifecycle='active'
+        AND (valid_until IS NULL OR valid_until >= ?)
+        AND content LIKE ? ESCAPE '\\'
+        AND (
+          (visibility='private' AND principal_id=?)
+          OR (visibility='conversation' AND conversation_id=? AND (thread_id IS NULL OR thread_id=?))
+          OR (visibility='project' AND project_id=?)
+        )
+      ORDER BY updated_at DESC,item_id ASC LIMIT ?`).all(
+      actor.tenantId, actor.agentId, this.clock.now().toISOString(), `%${escaped}%`, actor.principalId,
+      actor.conversationId ?? "", actor.threadId ?? "", actor.projectId ?? "",
+      Math.max(1, Math.min(100, Math.floor(limit))),
+    );
+    return rows.map((row: Record<string, unknown>) => toRecord(row));
+  }
+
   listPendingOutbox(limit = 100): ProjectionOutboxRowV2[] {
     return this.requireDb().prepare(`SELECT * FROM projection_outbox WHERE processed_at IS NULL
       AND available_at <= ? ORDER BY created_at,outbox_id LIMIT ?`)
