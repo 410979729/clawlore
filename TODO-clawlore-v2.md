@@ -119,6 +119,19 @@ Updated: 2026-07-12
 - [x] Suppress inaccessible ContextPack items and historical-revision conflicts.
 - [x] Keep backup/export/playbook operations descriptive and read-only in this slice.
 
+## Phase 5A — Subagent and Experience lifecycle
+
+- [x] Add separate domain, application port/service, SQLite adapter, and OpenClaw adapter modules.
+- [x] Implement isolated snapshots with explicitly authorized non-private context only.
+- [x] Implement fork snapshots as read-only copies of the bounded parent ContextPack.
+- [x] Deny child durable writes; keep safe scratch candidate-only and ephemeral/working.
+- [x] Atomically revoke a snapshot while creating the child episode candidate.
+- [x] Require parent ownership, successful outcome, receipts, and evidence for parent verification.
+- [x] Require parent/actor ownership before episodes can seed a playbook candidate.
+- [x] Prevent single-run promotion unless a separate operator review is explicit.
+- [x] Add promoted/quarantined/superseded playbook lineage and negative-feedback quarantine.
+- [x] Add replay quality gates for scope, tools, prerequisites, steps, verification, and disabled steps.
+
 ## Phase 0 verification
 
 - Focused Memory Address V2 tests: 8/8 PASS.
@@ -223,6 +236,19 @@ Updated: 2026-07-12
 - The first historical-conflict regression run exposed a stale test expectation
   after adding a second correction fixture; the expectation was corrected and
   the complete gates then passed.
+- Live extension/config/database/hooks/ContextEngine/Gateway: unchanged.
+
+## Phase 5A verification
+
+- Subagent/Experience lifecycle tests: 2/2 PASS.
+- Full plugin tests: 136/136 PASS.
+- Typecheck/build/module-boundary/vector-repair/golden recall/release gate: PASS.
+- Release gate pack scan: 311 files.
+- Golden recall: 1.0; forbidden violations 0; prompt-budget exceeded 0.
+- The first typecheck exposed direct experimental `node:sqlite` type coupling;
+  the storage adapter was aligned with the existing runtime-load boundary.
+- Review then found active snapshots after child completion and missing evidence
+  ownership checks; finalization is now atomic and ownership is enforced.
 - Live extension/config/database/hooks/ContextEngine/Gateway: unchanged.
 
 ## Boundaries
