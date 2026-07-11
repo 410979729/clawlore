@@ -33,6 +33,7 @@
     "smoke:clawlore-legacy-shadow": "node scripts/clawlore-legacy-shadow-smoke.mjs",
     "smoke:clawlore-security-hardening": "node scripts/clawlore-security-hardening-smoke.mjs",
     "smoke:clawlore-runtime-shadow": "node --test tests/clawlore-runtime-shadow.test.mjs",
+    "smoke:clawlore-truth-v2": "node --test tests/clawlore-truth-v2.test.mjs",
     "smoke:vector-repair": "node scripts/smoke-vector-repair.mjs",
     "release:gate": "SCOPE_RECALL_ALLOW_NESTED_GIT_ROOT=1 node scripts/release-gate.mjs"
   },
