@@ -1,0 +1,98 @@
+{
+  "identityCases": [
+    {
+      "name": "telegram direct principal",
+      "input": {
+        "tenantId": "local",
+        "agentId": "main",
+        "runtimeContext": {
+          "platform": "telegram",
+          "accountId": "default",
+          "chatType": "direct",
+          "senderId": "user-1",
+          "conversationId": "user-1"
+        }
+      },
+      "expected": {
+        "status": "resolved",
+        "principalId": "telegram:default:user-1",
+        "visibility": "private",
+        "conversationId": "user-1"
+      }
+    },
+    {
+      "name": "telegram group stays conversation scoped",
+      "input": {
+        "tenantId": "local",
+        "agentId": "main",
+        "runtimeContext": {
+          "platform": "telegram",
+          "accountId": "default",
+          "chatType": "group",
+          "senderId": "user-1",
+          "conversationId": "group-9",
+          "threadId": "topic-3"
+        }
+      },
+      "expected": {
+        "status": "resolved",
+        "principalId": "telegram:default:user-1",
+        "visibility": "conversation",
+        "conversationId": "group-9",
+        "threadId": "topic-3"
+      }
+    },
+    {
+      "name": "nickname is never a principal fallback",
+      "input": {
+        "tenantId": "local",
+        "agentId": "main",
+        "runtimeContext": {
+          "platform": "discord",
+          "chatType": "direct",
+          "senderName": "Joy"
+        }
+      },
+      "expected": {
+        "status": "unresolved",
+        "durableWriteAllowed": false,
+        "missing": ["principalId"]
+      }
+    }
+  ],
+  "legacyCases": [
+    {
+      "name": "legacy agent row keeps identity debt",
+      "input": {
+        "id": "legacy-1",
+        "scope": "agent:main",
+        "metadata": "{}"
+      },
+      "expected": {
+        "principalResolution": "legacy_unresolved",
+        "reviewRequired": true,
+        "verificationDebt": "legacy_identity",
+        "visibility": "private"
+      }
+    },
+    {
+      "name": "legacy channel row maps conversation boundary",
+      "input": {
+        "id": "legacy-2",
+        "scope": "custom:channel:group-9",
+        "metadata": {
+          "platform": "telegram",
+          "account_id": "default",
+          "sender_id": "user-1"
+        }
+      },
+      "expected": {
+        "principalResolution": "runtime_metadata",
+        "reviewRequired": false,
+        "verificationDebt": "none",
+        "visibility": "conversation",
+        "conversationId": "group-9"
+      }
+    }
+  ]
+}
