@@ -141,6 +141,17 @@ Updated: 2026-07-12
 - [x] Make shadow read-only and require snapshot/migration/rollback/hash gates before writes or cutover.
 - [x] Add recursively redacted support-bundle output for credentials, authorization, private keys, and local paths.
 
+## Phase 6B — Default-off runtime composition
+
+- [x] Add an isolated `clawloreV2` schema request with `disabled` as the default.
+- [x] Require a matching release-readiness receipt and separate operator approval before shadow registration.
+- [x] Register exactly one low-priority `before_prompt_build` observer in approved fixture shadow mode.
+- [x] Keep Agent tools, writes, prompt mutation, and ContextEngine registration at zero.
+- [x] Hash runtime trace ids and retain only the existing redacted shadow receipt.
+- [x] Fail open on retrieval timeout or trace-sink failure so memory observation cannot block ordinary replies.
+- [x] Reject native ContextEngine activation even when the fixture host advertises all capabilities.
+- [x] Add five focused tests and a machine-readable fixture-host smoke.
+
 ## Phase 0 verification
 
 - Focused Memory Address V2 tests: 8/8 PASS.
@@ -271,9 +282,21 @@ Updated: 2026-07-12
   node; it was corrected to the actual top-level `commandAliases` contract.
 - Live extension/config/database/hooks/ContextEngine/Gateway: unchanged.
 
+## Phase 6B verification
+
+- Runtime composition tests: 5/5 PASS.
+- Fixture-host JSON smoke: PASS; disabled hooks 0, shadow hooks 1.
+- Shadow receipt: completed; retrieval invoked; one safe candidate selected.
+- Tool registrations 0; writes disabled; prompt mutation disabled; ContextEngine registration disabled.
+- Full plugin tests: 144/144 PASS.
+- Typecheck/build/module-boundary/vector-repair/golden recall/release gate: PASS.
+- Release gate pack scan: 324 files.
+- Golden recall: 1.0; forbidden violations 0; prompt-budget exceeded 0.
+- Live extension/config/database/hooks/ContextEngine/Gateway: unchanged.
+
 ## Boundaries
 
-- Do not edit or deploy to the live extension during isolated Phase 1 work.
+- Do not edit or deploy to the live extension without a separate live rollout approval.
 - Do not open or mutate the live memory database.
 - Do not select the ContextEngine slot or restart Gateway.
 - Do not rename package, CLI, config root, tools, or data paths.

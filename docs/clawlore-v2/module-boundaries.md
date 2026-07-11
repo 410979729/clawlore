@@ -45,3 +45,10 @@ backup logic, and projection implementations do not belong in `index.ts`.
 
 The module-boundary test rejects reverse dependencies such as application ->
 storage or domain -> application.
+
+The fixture-only OpenClaw runtime composition root stays inside the adapter
+layer and receives retrieval/trace dependencies through typed injection. It may
+normalize runtime requests and register host observers, but it may not import a
+concrete storage adapter, migration, backup, operator mutation, or projection
+implementation. A shadow observer must return no prompt mutation and must fail
+open on timeout or trace persistence failure.
