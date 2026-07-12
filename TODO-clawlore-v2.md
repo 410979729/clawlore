@@ -202,12 +202,33 @@ Updated: 2026-07-12
 - [x] Add registry-bound session attribution preview without reading transcript
       content; exact live coverage is 77 direct-principal rows plus 15
       conversation-boundary rows.
-- [ ] Resolve the 382-row session-attribution lane from verifiable session
-      metadata; do not infer identity from transcript text or nicknames.
-- [ ] Review 77 manual rows and keep 194 unattributed rows quarantined unless
-      stronger provenance appears.
-- [ ] Select an approved persistent SecretRef and create/restore-test the
-      actual encrypted live snapshot before requesting V2-write approval.
+- [x] Adjudicate the current 383-row broad session-reference lane from registry
+      metadata only: 93 trusted, 114 system-derived, 78 legacy agent aliases,
+      98 opaque/quarantined, and zero unresolved session keys or conflicts.
+- [x] Review the 77 manual rows without reading content for identity: preserve
+      1 archived row and require operator assignment for 76; activate none.
+- [x] Add a collision-safe encrypted live-snapshot executor that rejects
+      existing destinations, restore-tests to a disposable path, removes all
+      plaintext SQLite files, and emits a 0600 non-authorizing receipt.
+- [ ] Select an approved persistent SecretRef and run the executor against the
+      actual live source before requesting V2-write approval.
+
+## Phase 7B verification
+
+- Live read-only preflight: 952 rows stable during the run; active 0, candidate
+  632, archived 320; `authorizesV2Writes=false`.
+- Refined session attribution: trusted private 78, conversation 15, unresolved
+  session references 0, conflicting evidence 0, transcript content read false.
+- Manual review: 77 total; operator identity assignment 76, archived 1,
+  automatic activation 0, content read false.
+- Focused attribution/encrypted workflow tests: 8/8 PASS.
+- Full plugin tests: 162/162 PASS.
+- Typecheck/build/module boundaries/vector repair/golden recall/release gate:
+  PASS; package scan 348 files.
+- Implementation commit: `3692f99`.
+- Live V2 schema/writes, configuration, prompt mutation, ContextEngine, and
+  Gateway were unchanged. No persistent key or encrypted live archive was
+  created in this round.
 
 ## Phase 0 verification
 
