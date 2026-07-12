@@ -42,7 +42,7 @@ const commonDependencies = {
       platform: boundary.platform,
       accountId: boundary.accountId,
       conversationId: boundary.conversationId,
-      visibility: "private",
+      visibility: boundary.visibility,
       retention: "working",
     },
     lifecycle: "active",
@@ -92,14 +92,21 @@ const shadow = composeClawLoreRuntimeV1({
 assert.equal(shadow.status, "registered");
 assert.equal(shadowHost.hooks.length, 1);
 const hookResult = await shadowHost.hooks[0].handler(
-  { id: "message-1", prompt: "do not persist this prompt" },
   {
-    agentId: "main", senderId: "fixture-user", platform: "telegram",
-    accountId: "default", chatType: "direct", conversationId: "fixture-user",
-    sessionId: "fixture-session", tokenBudget: 128,
+    runId: "run-1",
+    messageId: "message-1",
+    content: "do not persist this prompt",
+    channel: "telegram",
+    accountId: "default",
+    senderId: "fixture-user",
+    conversationId: "fixture-user",
+    isGroup: false,
+  },
+  {
+    agentId: "main", sessionId: "fixture-session", tokenBudget: 128,
   },
 );
-assert.equal(hookResult, undefined);
+assert.deepEqual(hookResult, { handled: false });
 assert.equal(sink.receipts.length, 1);
 assert.equal(sink.receipts[0].status, "completed");
 assert.equal(sink.receipts[0].selectedCount, 1);

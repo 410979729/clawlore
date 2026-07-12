@@ -62,9 +62,9 @@ class FixtureHost {
     this.hooks.push({ event, handler, options });
   }
 
-  async emitBeforePrompt(event, context) {
+  async emitInboundClaim(event, context) {
     const results = [];
-    for (const hook of this.hooks.filter((item) => item.event === "before_prompt_build")) {
+    for (const hook of this.hooks.filter((item) => item.event === "inbound_claim")) {
       results.push(await hook.handler(event, context));
     }
     return results;
@@ -89,7 +89,7 @@ function dependencies(overrides = {}) {
         platform: boundary.platform,
         accountId: boundary.accountId,
         conversationId: boundary.conversationId,
-        visibility: "private",
+        visibility: boundary.visibility,
         retention: "durable",
       },
       lifecycle: "active",
@@ -170,7 +170,7 @@ test("approved fixture shadow registers one observer and never mutates prompt or
   });
 
   assert.equal(receipt.status, "registered");
-  assert.deepEqual(receipt.registeredHooks, ["before_prompt_build"]);
+  assert.deepEqual(receipt.registeredHooks, ["inbound_claim"]);
   assert.equal(receipt.contextEngine.selected, "compatibility");
   assert.equal(receipt.contextEngineRegistered, false);
   assert.equal(receipt.toolRegistrations, 0);
@@ -179,20 +179,25 @@ test("approved fixture shadow registers one observer and never mutates prompt or
   assert.equal(host.hooks.length, 1);
   assert.equal(host.hooks[0].options.priority, -100);
 
-  const hookResults = await host.emitBeforePrompt(
-    { id: "raw-message-id", prompt: "private prompt must not enter the trace" },
+  const hookResults = await host.emitInboundClaim(
+    {
+      runId: "private-run-id",
+      messageId: "raw-message-id",
+      content: "private prompt must not enter the trace",
+      channel: "telegram",
+      accountId: "default",
+      senderId: "joy-secret-id",
+      conversationId: "joy-secret-id",
+      isGroup: false,
+    },
     {
       agentId: "main",
-      senderId: "joy-secret-id",
-      platform: "telegram",
-      accountId: "default",
-      chatType: "direct",
-      conversationId: "joy-secret-id",
+      sessionKey: "private-session-id",
       sessionId: "private-session-id",
       tokenBudget: 128,
     },
   );
-  assert.deepEqual(hookResults, [undefined]);
+  assert.deepEqual(hookResults, [{ handled: false }]);
   assert.equal(retrievalCalls, 1);
   assert.equal(sink.receipts.length, 1);
   assert.equal(sink.receipts[0].status, "completed");
@@ -201,6 +206,44 @@ test("approved fixture shadow registers one observer and never mutates prompt or
   assert.match(sink.receipts[0].traceId, /^clawlore-shadow-[a-f0-9]{20}$/);
   const serialized = JSON.stringify(sink.receipts);
   assert.doesNotMatch(serialized, /joy-secret-id|private-session-id|private prompt|Simplified Chinese/);
+});
+
+test("trusted inbound claim preserves group sender and conversation boundaries", async () => {
+  const host = new FixtureHost();
+  const sink = new InMemoryRuntimeShadowSinkV1();
+  let boundary;
+  composeClawLoreRuntimeV1({
+    config: normalizeClawLoreRuntimeConfigV1({ mode: "shadow" }),
+    host,
+    dependencies: dependencies({
+      traceSink: sink,
+      retrieveCandidates: async (request) => {
+        boundary = request.boundary;
+        return dependencies().retrieveCandidates(request);
+      },
+    }),
+    readiness: readiness(),
+    approval: approval(),
+  });
+
+  const results = await host.emitInboundClaim({
+    runId: "group-run",
+    messageId: "group-message",
+    content: "group query",
+    channel: "telegram",
+    accountId: "default",
+    senderId: "group-sender",
+    conversationId: "group-conversation",
+    threadId: "topic-7",
+    isGroup: true,
+  }, { agentId: "main", sessionKey: "group-session" });
+
+  assert.deepEqual(results, [{ handled: false }]);
+  assert.equal(boundary.principalId, "telegram:default:group-sender");
+  assert.equal(boundary.visibility, "conversation");
+  assert.equal(boundary.conversationId, "group-conversation");
+  assert.equal(boundary.threadId, "topic-7");
+  assert.equal(sink.receipts[0].retrievalInvoked, true);
 });
 
 test("native ContextEngine request remains blocked even when fixture host is capable", () => {
@@ -233,11 +276,18 @@ test("shadow observer fails open when retrieval times out or trace persistence f
     approval: approval(),
   });
   const startedAt = Date.now();
-  const timeoutResults = await timeoutHost.emitBeforePrompt(
-    { id: "timeout-message", prompt: "timeout retrieval query" },
-    { agentId: "main", senderId: "user-1", platform: "telegram", chatType: "direct" },
+  const timeoutResults = await timeoutHost.emitInboundClaim(
+    {
+      messageId: "timeout-message",
+      content: "timeout retrieval query",
+      channel: "telegram",
+      senderId: "user-1",
+      conversationId: "user-1",
+      isGroup: false,
+    },
+    { agentId: "main" },
   );
-  assert.deepEqual(timeoutResults, [undefined]);
+  assert.deepEqual(timeoutResults, [{ handled: false }]);
   assert.ok(Date.now() - startedAt < 250);
   assert.deepEqual(errors, ["shadow_observer_timeout"]);
 
@@ -252,10 +302,17 @@ test("shadow observer fails open when retrieval times out or trace persistence f
     readiness: readiness(),
     approval: approval(),
   });
-  const sinkResults = await sinkHost.emitBeforePrompt(
-    { id: "sink-message", prompt: "sink failure query" },
-    { agentId: "main", senderId: "user-1", platform: "telegram", chatType: "direct" },
+  const sinkResults = await sinkHost.emitInboundClaim(
+    {
+      messageId: "sink-message",
+      content: "sink failure query",
+      channel: "telegram",
+      senderId: "user-1",
+      conversationId: "user-1",
+      isGroup: false,
+    },
+    { agentId: "main" },
   );
-  assert.deepEqual(sinkResults, [undefined]);
+  assert.deepEqual(sinkResults, [{ handled: false }]);
   assert.deepEqual(errors, ["shadow_observer_timeout", "shadow_observer_failed"]);
 });

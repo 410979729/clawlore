@@ -30,6 +30,9 @@ export function normalizeClawLoreRuntimeConfigV1(value) {
 }
 function shadowQueryText(event, context, maxChars) {
     const candidates = [
+        event.bodyForAgent,
+        event.body,
+        event.content,
         event.userPrompt,
         event.prompt,
         event.text,
@@ -39,6 +42,20 @@ function shadowQueryText(event, context, maxChars) {
     ];
     const value = candidates.find((candidate) => typeof candidate === "string" && candidate.trim());
     return typeof value === "string" ? value.trim().slice(0, maxChars) : "";
+}
+function shadowChatType(event) {
+    if (event.isGroup === true)
+        return "group";
+    if (event.isGroup === false)
+        return "direct";
+    return undefined;
+}
+function shadowVisibility(event) {
+    if (event.isGroup === true)
+        return "conversation";
+    if (event.isGroup === false)
+        return "private";
+    return undefined;
 }
 function validApproval(approval, readiness) {
     if (!approval || !readiness)
@@ -108,6 +125,8 @@ function numericBudget(event, context, fallback) {
 }
 function opaqueTraceId(sequence, event, context) {
     const material = [
+        event.runId,
+        event.sessionKey,
         context.runId,
         context.sessionId,
         context.sessionKey,
@@ -144,7 +163,7 @@ export function composeClawLoreRuntimeV1(input) {
             ? new JsonlRuntimeShadowTraceSink(input.config.traceFile, input.config.maxTraceBytes)
             : undefined);
     let sequence = 0;
-    input.host.on("before_prompt_build", async (event, context) => {
+    input.host.on("inbound_claim", async (event, context) => {
         sequence += 1;
         await observeWithoutBlockingReply({
             maxLatencyMs: input.config.maxLatencyMs,
@@ -163,16 +182,25 @@ export function composeClawLoreRuntimeV1(input) {
                             ? context.agentId.trim()
                             : input.dependencies.agentId,
                         workspaceId: input.dependencies.workspaceId,
+                        requestedVisibility: shadowVisibility(event),
                         runtimeContext: context,
                         event,
+                        staticContext: {
+                            platform: event.channel,
+                            accountId: event.accountId,
+                            senderId: event.senderId,
+                            conversationId: event.conversationId,
+                            threadId: event.threadId,
+                            chatType: shadowChatType(event),
+                        },
                     },
                     retrieveCandidates: input.dependencies.retrieveCandidates,
                 },
             }),
         });
-        return undefined;
+        return { handled: false };
     }, { priority: -100 });
-    return { ...base, status: "registered", registeredHooks: ["before_prompt_build"] };
+    return { ...base, status: "registered", registeredHooks: ["inbound_claim"] };
 }
 export class InMemoryRuntimeShadowSinkV1 {
     receipts = [];
