@@ -1,0 +1,196 @@
+{
+  "ranking": {
+    "rows": [
+      {
+        "id": "gateway-recovery",
+        "content": "Gateway restart workflow",
+        "category": "fact",
+        "observedAt": 3,
+        "legacyMetadata": {
+          "l0_abstract": "OpenClaw recovery healthz",
+          "tags": ["service", "gateway"],
+          "sender_id": "must-not-be-indexed",
+          "source_session": "must-not-be-indexed"
+        }
+      },
+      {
+        "id": "health-guide",
+        "content": "OpenClaw recovery guide",
+        "category": "healthz",
+        "observedAt": 2,
+        "legacyMetadata": {
+          "l0_abstract": "Recovery notes",
+          "secret": "must-not-be-indexed"
+        }
+      },
+      {
+        "id": "unrelated",
+        "content": "Python queue lesson",
+        "category": "learning",
+        "observedAt": 1,
+        "legacyMetadata": {
+          "keywords": ["threading", "queue"]
+        }
+      }
+    ],
+    "queries": [
+      { "queryText": "healthz", "limit": 2 },
+      { "queryText": "OpenClaw recovery", "limit": 3 },
+      { "queryText": "queue", "limit": 2 }
+    ]
+  },
+  "promotion": {
+    "rows": [
+      {
+        "itemId": "manual-direct",
+        "lifecycle": "candidate",
+        "verification": "user_confirmed",
+        "classification": "explicit_manual",
+        "attribution": "registry_direct",
+        "address": {
+          "schemaVersion": 2,
+          "tenantId": "local",
+          "principalId": "telegram:default:joy",
+          "agentId": "main",
+          "workspaceId": "workspace-main",
+          "visibility": "private",
+          "retention": "durable"
+        },
+        "evidence": {
+          "identityEvidenceDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "resolvedPrincipalId": "telegram:default:joy"
+        }
+      },
+      {
+        "itemId": "task-direct",
+        "lifecycle": "candidate",
+        "verification": "tool_verified",
+        "classification": "task_experience",
+        "attribution": "runtime_principal",
+        "address": {
+          "schemaVersion": 2,
+          "tenantId": "local",
+          "principalId": "telegram:default:joy",
+          "agentId": "main",
+          "workspaceId": "workspace-main",
+          "visibility": "private",
+          "retention": "durable"
+        },
+        "evidence": {
+          "identityEvidenceDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "resolvedPrincipalId": "telegram:default:joy",
+          "sourceReceiptCount": 2
+        }
+      },
+      {
+        "itemId": "group-boundary",
+        "lifecycle": "candidate",
+        "verification": "user_confirmed",
+        "classification": "explicit_manual",
+        "attribution": "registry_conversation",
+        "address": {
+          "schemaVersion": 2,
+          "tenantId": "local",
+          "principalId": "conversation-owner",
+          "agentId": "main",
+          "workspaceId": "workspace-main",
+          "conversationId": "group-fixture",
+          "visibility": "conversation",
+          "retention": "durable"
+        },
+        "evidence": {
+          "boundaryEvidenceDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "resolvedConversationId": "group-fixture"
+        }
+      },
+      {
+        "itemId": "manual-unowned",
+        "lifecycle": "candidate",
+        "verification": "user_confirmed",
+        "classification": "explicit_manual",
+        "attribution": "none",
+        "address": {
+          "schemaVersion": 2,
+          "tenantId": "local",
+          "principalId": "legacy:unresolved",
+          "agentId": "main",
+          "workspaceId": "workspace-main",
+          "visibility": "private",
+          "retention": "durable"
+        }
+      },
+      {
+        "itemId": "system-unreviewed",
+        "lifecycle": "candidate",
+        "verification": "unverified",
+        "classification": "reflection_summary",
+        "attribution": "derived_system",
+        "address": {
+          "schemaVersion": 2,
+          "tenantId": "local",
+          "principalId": "legacy:unresolved",
+          "agentId": "main",
+          "workspaceId": "workspace-main",
+          "visibility": "private",
+          "retention": "durable"
+        }
+      },
+      {
+        "itemId": "opaque-source",
+        "lifecycle": "candidate",
+        "verification": "unverified",
+        "classification": "unknown_legacy",
+        "attribution": "opaque",
+        "address": {
+          "schemaVersion": 2,
+          "tenantId": "local",
+          "principalId": "legacy:unresolved",
+          "agentId": "main",
+          "workspaceId": "workspace-main",
+          "visibility": "private",
+          "retention": "durable"
+        }
+      },
+      {
+        "itemId": "disputed-source",
+        "lifecycle": "candidate",
+        "verification": "disputed",
+        "classification": "explicit_manual",
+        "attribution": "registry_direct",
+        "address": {
+          "schemaVersion": 2,
+          "tenantId": "local",
+          "principalId": "telegram:default:joy",
+          "agentId": "main",
+          "workspaceId": "workspace-main",
+          "visibility": "private",
+          "retention": "durable"
+        },
+        "evidence": {
+          "identityEvidenceDigest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "resolvedPrincipalId": "telegram:default:joy"
+        }
+      },
+      {
+        "itemId": "archived-source",
+        "lifecycle": "archived",
+        "verification": "user_confirmed",
+        "classification": "explicit_manual",
+        "attribution": "registry_direct",
+        "address": {
+          "schemaVersion": 2,
+          "tenantId": "local",
+          "principalId": "telegram:default:joy",
+          "agentId": "main",
+          "workspaceId": "workspace-main",
+          "visibility": "private",
+          "retention": "durable"
+        },
+        "evidence": {
+          "identityEvidenceDigest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "resolvedPrincipalId": "telegram:default:joy"
+        }
+      }
+    ]
+  }
+}
