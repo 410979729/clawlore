@@ -80,6 +80,9 @@ live probes. The temporary table was not persisted.
 - Package dry-run: 383 files.
 - Gateway remained active/running with `NRestarts=0`; healthz live; recent
   warning journal empty.
+- Generated `node_modules` was removed, the candidate repository is clean, and
+  `WORKSPACE_LAYOUT_OK` passed. State hygiene remains the same 68 unrelated
+  historical outside-workspace findings; this round added none.
 
 The r1 authorization is consumed and cannot authorize the corrected r2 plan.
 No compatibility projection currently exists. A new exact-digest approval is
