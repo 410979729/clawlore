@@ -43,6 +43,7 @@
     "smoke:clawlore-subagent-experience": "node --test tests/clawlore-subagent-experience.test.mjs",
     "smoke:clawlore-release-readiness": "node --test tests/clawlore-release-readiness.test.mjs",
     "smoke:clawlore-runtime-composition": "node scripts/clawlore-runtime-composition-smoke.mjs",
+    "audit:clawlore-shadow-observation": "node scripts/clawlore-shadow-observation-audit.mjs",
     "smoke:clawlore-snapshot": "node --test tests/clawlore-snapshot-restore.test.mjs",
     "smoke:clawlore-encrypted-snapshot": "node --test tests/clawlore-encrypted-snapshot-archive.test.mjs",
     "smoke:clawlore-migration-drill": "node --test tests/clawlore-legacy-migration-drill.test.mjs",

@@ -1,0 +1,127 @@
+import { readFile, stat } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
+
+const RECEIPT_KEYS = new Set([
+  "schemaVersion",
+  "traceId",
+  "status",
+  "principalHash",
+  "retrievalInvoked",
+  "candidateCount",
+  "selectedCount",
+  "usedTokens",
+  "stages",
+  "rejectionReasons",
+  "errorCode",
+  "createdAt",
+]);
+
+const STAGE_KEYS = new Set(["stage", "outcome", "detail"]);
+
+function countBy(values) {
+  const counts = {};
+  for (const value of values) counts[value] = (counts[value] ?? 0) + 1;
+  return Object.fromEntries(Object.entries(counts).sort(([left], [right]) => left.localeCompare(right)));
+}
+
+function stagePassed(receipt, stageName) {
+  return receipt.stages.some((stage) => stage.stage === stageName && stage.outcome === "pass");
+}
+
+function validateReceipt(receipt, lineNumber) {
+  const issues = [];
+  if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) {
+    return [`line_${lineNumber}:not_an_object`];
+  }
+  for (const key of Object.keys(receipt)) {
+    if (!RECEIPT_KEYS.has(key)) issues.push(`line_${lineNumber}:unexpected_receipt_key:${key}`);
+  }
+  if (receipt.schemaVersion !== 1) issues.push(`line_${lineNumber}:schema_version`);
+  if (!Array.isArray(receipt.stages)) issues.push(`line_${lineNumber}:stages_not_array`);
+  for (const stage of Array.isArray(receipt.stages) ? receipt.stages : []) {
+    if (!stage || typeof stage !== "object" || Array.isArray(stage)) {
+      issues.push(`line_${lineNumber}:stage_not_object`);
+      continue;
+    }
+    for (const key of Object.keys(stage)) {
+      if (!STAGE_KEYS.has(key)) issues.push(`line_${lineNumber}:unexpected_stage_key:${key}`);
+    }
+  }
+  for (const field of ["candidateCount", "selectedCount", "usedTokens"]) {
+    if (!Number.isInteger(receipt[field]) || receipt[field] < 0) {
+      issues.push(`line_${lineNumber}:invalid_${field}`);
+    }
+  }
+  if (typeof receipt.retrievalInvoked !== "boolean") {
+    issues.push(`line_${lineNumber}:invalid_retrievalInvoked`);
+  }
+  return issues;
+}
+
+export async function auditShadowObservation(traceFile) {
+  const [metadata, raw] = await Promise.all([stat(traceFile), readFile(traceFile, "utf8")]);
+  const mode = metadata.mode & 0o777;
+  const lines = raw.split(/\r?\n/).filter((line) => line.trim());
+  const receipts = [];
+  const issues = [];
+
+  for (const [index, line] of lines.entries()) {
+    try {
+      const receipt = JSON.parse(line);
+      issues.push(...validateReceipt(receipt, index + 1));
+      receipts.push(receipt);
+    } catch {
+      issues.push(`line_${index + 1}:invalid_json`);
+    }
+  }
+
+  if ((mode & 0o077) !== 0) issues.push(`trace_permissions:${mode.toString(8)}`);
+
+  const validReceipts = receipts.filter((receipt) => receipt && typeof receipt === "object");
+  const acceptedSamples = validReceipts.filter((receipt) =>
+    receipt.status === "completed"
+    && receipt.retrievalInvoked === true
+    && stagePassed(receipt, "identity")
+    && stagePassed(receipt, "policy_preflight"));
+  const latest = validReceipts.at(-1);
+
+  return {
+    schemaVersion: 1,
+    status: issues.length === 0 ? "pass" : "fail",
+    traceMode: mode.toString(8).padStart(3, "0"),
+    sampleCount: validReceipts.length,
+    statuses: countBy(validReceipts.map((receipt) => String(receipt.status))),
+    retrievalInvokedCount: validReceipts.filter((receipt) => receipt.retrievalInvoked === true).length,
+    identityPassCount: validReceipts.filter((receipt) => stagePassed(receipt, "identity")).length,
+    policyPassCount: validReceipts.filter((receipt) => stagePassed(receipt, "policy_preflight")).length,
+    acceptedSampleCount: acceptedSamples.length,
+    positiveCandidateSampleCount: acceptedSamples.filter((receipt) => receipt.candidateCount > 0).length,
+    maxCandidateCount: Math.max(0, ...validReceipts.map((receipt) => receipt.candidateCount ?? 0)),
+    maxSelectedCount: Math.max(0, ...validReceipts.map((receipt) => receipt.selectedCount ?? 0)),
+    latest: latest ? {
+      status: latest.status,
+      retrievalInvoked: latest.retrievalInvoked,
+      candidateCount: latest.candidateCount,
+      selectedCount: latest.selectedCount,
+      createdAt: latest.createdAt,
+    } : null,
+    issues,
+  };
+}
+
+function argument(name) {
+  const index = process.argv.indexOf(name);
+  return index >= 0 ? process.argv[index + 1] : undefined;
+}
+
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  const traceFile = argument("--trace-file");
+  if (!traceFile) {
+    process.stderr.write("usage: node scripts/clawlore-shadow-observation-audit.mjs --trace-file <path>\n");
+    process.exitCode = 2;
+  } else {
+    const result = await auditShadowObservation(traceFile);
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    if (result.status !== "pass") process.exitCode = 1;
+  }
+}

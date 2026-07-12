@@ -169,6 +169,9 @@ Updated: 2026-07-12
 
 ## Phase 6D — Read-only observation window
 
+- [x] Add a zero-write JSONL observation auditor that enforces private file
+      permissions, rejects unexpected/raw-payload fields, and reports redacted
+      identity/policy/retrieval/candidate aggregates.
 - [ ] Collect additional real direct-message shadow traces and verify stable
       identity/policy decisions, bounded candidate counts, and fail-open replies.
 - [ ] Exercise one authorized group-message boundary and prove it cannot acquire
@@ -344,6 +347,18 @@ Updated: 2026-07-12
 
 Run report:
 `projects/clawlore-v2/docs/clawlore-v2/eval/phase6c-live-shadow-run-2026-07-12.md`.
+
+## Phase 6D observation-audit verification
+
+- Focused audit tests: 3/3 PASS (safe aggregate, unexpected payload rejection,
+  group-readable permission rejection).
+- First live audit: PASS; mode 0600, samples 6, accepted samples 1, retrieval
+  invoked 1, issues 0, positive-candidate samples 0.
+- Full plugin tests: 152/152 PASS; typecheck/build/release gate PASS; pack scan
+  333 files.
+
+Run report:
+`projects/clawlore-v2/docs/clawlore-v2/eval/phase6d-shadow-observation-audit-run-2026-07-12.md`.
 
 ## Boundaries
 
