@@ -68,6 +68,14 @@ Gateway remained active/running with unchanged MainPID 4169210,
 `NRestarts=0`, healthz live, port 19021 listening, and no warning-or-higher unit
 entries after apply. No configuration change or service restart occurred.
 
+## Exit cleanup
+
+The two rejected parameter-check receipts, generated dependency tree, ignored
+lockfile, and empty restore-test directory were removed. The retained archive
+contains only six owner-only controls/evidence files. The candidate repository
+is clean and `WORKSPACE_LAYOUT_OK` passes. State hygiene still reports the same
+68 pre-existing findings outside the workspace; this rollout added none.
+
 ## Evidence and exit boundary
 
 Owner-only controls and evidence are retained under:
