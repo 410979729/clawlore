@@ -63,6 +63,14 @@ change requires a separate exact-plan operator decision and rollback controls.
   the start of the round, and no warning-or-higher unit log since the round
   began.
 
+## Exit cleanup
+
+Generated `node_modules` was removed. The isolated repository is clean and
+`WORKSPACE_LAYOUT_OK` passes. The workbench archive retains only its 0600 JSON
+receipt; no temporary SQLite, WAL, SHM, package, or scratch file remains.
+State hygiene still reports the same 68 unrelated historical findings outside
+the project, and this round added none.
+
 ## Next gate
 
 Do not bulk-assign the 166 review rows and do not promote any candidate. The
