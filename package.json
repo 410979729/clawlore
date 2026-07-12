@@ -47,6 +47,7 @@
     "preflight:clawlore-live-migration": "node scripts/clawlore-legacy-live-preflight.mjs",
     "snapshot:clawlore-encrypted-live": "node scripts/clawlore-encrypted-live-snapshot.mjs",
     "rollout:clawlore-live-v2-write": "node scripts/clawlore-live-v2-write-rollout.mjs",
+    "eval:clawlore-live-recall-parity": "node scripts/clawlore-live-recall-parity.mjs",
     "smoke:clawlore-snapshot": "node --test tests/clawlore-snapshot-restore.test.mjs",
     "smoke:clawlore-legacy-live-preflight": "node --test tests/clawlore-legacy-live-preflight.test.mjs",
     "smoke:clawlore-encrypted-snapshot": "node --test tests/clawlore-encrypted-snapshot-archive.test.mjs",
