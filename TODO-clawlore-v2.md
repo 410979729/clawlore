@@ -569,8 +569,29 @@ overlap below 0.8.
       ranking/control, vector, golden recall, and release gate; pack 415 files.
 - [x] Keep V1 fallback enabled and lifecycle mutation, ContextEngine, prompt
       mutation, final recall, configuration changes, and service restart off.
-- [ ] Generate a new read-only 660-candidate policy/evidence baseline before
+- [x] Generate a new read-only 660-candidate policy/evidence baseline before
       proposing any further lifecycle or cutover action.
+
+## Phase 7R — Read-only 660-candidate policy/evidence baseline
+
+- [x] Preserve the exact Phase 7L/7M 632-row assignment baseline and validate
+      all 90 registry-resolved evidence payloads.
+- [x] Require and bind the owner-only Phase 7Q acceptance before admitting the
+      28 appended V2 candidates into the new baseline.
+- [x] Validate the delta as 27 reflection summaries plus 1 operational
+      checkpoint, all candidate/unverified/legacy-identity debt and review-required.
+- [x] Verify V1/V2 and compatibility/current FTS/vector/relation projections
+      are 980/980 with no missing legacy backing and pending outbox 0.
+- [x] Cover all 660 candidates: 0 eligible, 504 hold, 156 quarantine,
+      automatic promotion 0, lifecycle rollout not selectable.
+- [x] Emit a 0600 redacted receipt with plan digest
+      `64f07394910eae30e8ea4e888ec17805400682931bc293c58ac7f8c39b18dc85`.
+- [x] Pass focused 6/6 and full 194/194 tests, typecheck, build, module,
+      ranking/control, vector, golden recall, and release gate; pack 416 files.
+- [x] Keep database/config/service/lifecycle/verification/address/runtime state
+      unchanged. No lifecycle or cutover approval is useful while eligible is 0.
+- [ ] Generate a new read-only remediation plan over the current 504 hold and
+      156 quarantine rows before proposing any evidence write.
 
 ## Phase 0 verification
 

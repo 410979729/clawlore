@@ -88,6 +88,15 @@
   cutover: lifecycle is still 0 active / 660 candidate / 320 archived. The next
   permissible action is a new read-only 660-candidate policy/evidence baseline;
   no prior approval authorizes lifecycle, ContextEngine, prompt, or final recall.
+- Phase 7R generated that new stage-4 baseline. It preserves the exact 632-row
+  Phase 7L/7M assignment state and admits the 28 Phase 7Q rows only by binding
+  the owner-only delta acceptance and validating their candidate/unverified/
+  legacy-identity-debt shape plus all four 980-row projections.
+- The resulting 660-row policy plan is 0 eligible / 504 hold / 156 quarantine,
+  automatic promotion 0. It authorizes no mutation and gives no reason to open
+  a lifecycle approval gate. The next plan-led step is read-only remediation of
+  the 504 hold and 156 quarantine lanes; any later evidence write needs a fresh
+  encrypted snapshot and a new exact approval.
 
 ## Naming matrix
 
