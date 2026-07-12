@@ -433,7 +433,7 @@ overlap below 0.8.
       final-recall, or service change.
 - [x] Pass focused 2/2 and full 178/178 tests, typecheck, build, module,
       ranking/control, vector, golden recall, and release gate; pack 389 files.
-- [ ] Obtain a separate exact-plan decision before writing any identity/
+- [x] Obtain a separate exact-plan decision before writing any identity/
       boundary evidence or changing lifecycle. The 166 assignment-review rows
       are not confirmed merely because registry evidence exists.
 
@@ -458,9 +458,34 @@ overlap below 0.8.
       `0f432fad09130287181fc811e8a61cc80f42ed6d10ace7d2d3c0077b9aec4e1c`.
 - [x] Pass focused 4/4, full 180/180, typecheck, build, module, ranking/control,
       vector, golden recall, and release gate; package scan 394 files.
-- [ ] Before any evidence write, require a fresh encrypted snapshot and a
+- [x] Before any evidence write, require a fresh encrypted snapshot and a
       separate exact rollout approval. The plan itself grants no write,
       lifecycle, ContextEngine, prompt, or final-recall authority.
+
+## Phase 7M — Approved live evidence assignment
+
+- [x] Add an exact-plan apply operator that validates owner-only plan,
+      approval, fresh encrypted snapshot, and live target evidence before
+      opening a write transaction.
+- [x] Treat unrelated sessions-registry additions as non-target drift while
+      requiring all 632 planned rows and all 90 target resolver digests to
+      remain exact; target drift fails closed before mutation.
+- [x] Create and restore-verify a fresh AES-256-GCM snapshot with 952 stable
+      V1 rows, integrity `ok`, foreign keys 0, and no plaintext/WAL/SHM restore
+      residue.
+- [x] Apply rollout `clawlore-v2-evidence-assignment-20260712-r1`, plan digest
+      `0f432fad09130287181fc811e8a61cc80f42ed6d10ace7d2d3c0077b9aec4e1c`.
+- [x] Write exactly 76 direct-principal and 14 conversation-boundary evidence
+      payloads; change 0 manual, external-source, quarantine, or non-target
+      evidence rows.
+- [x] Preserve V1/V2 952/952, lifecycle 0/632/320, all verification/address
+      state, compatibility 952, pending outbox 0, V1 fallback, configuration,
+      ContextEngine, prompt mutation, and final recall.
+- [x] Pass focused 4/4 and full 182/182 tests, typecheck, build, module,
+      ranking/control, vector, golden recall, and release gate; package scan
+      399 files.
+- [ ] Generate a new read-only post-assignment candidate plan before proposing
+      any lifecycle change. Phase 7M approval cannot authorize promotion.
 
 ## Phase 0 verification
 

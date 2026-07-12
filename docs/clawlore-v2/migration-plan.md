@@ -45,6 +45,13 @@
 - Applying that plan is not stage 7 cutover and requires a fresh encrypted
   snapshot plus an exact-plan approval. Evidence assignment cannot authorize
   lifecycle, ContextEngine, prompt mutation, or final recall.
+- Phase 7M consumed that exact approval and wrote registry-resolved evidence to
+  only the planned 76 direct-principal and 14 conversation-boundary source
+  rows. All 632 candidates preserved lifecycle and verification; the other 542
+  rows and every runtime/cutover control were unchanged. This remains stage 4.
+- The next permissible step is a new read-only candidate-policy preview that
+  explicitly understands the new evidence shape. It cannot reuse Phase 7M
+  approval or infer lifecycle authority from a successful evidence write.
 
 ## Naming matrix
 
