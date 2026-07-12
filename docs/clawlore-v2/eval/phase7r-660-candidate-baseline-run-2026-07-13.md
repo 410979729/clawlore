@@ -67,7 +67,10 @@ this baseline because its eligible set is empty.
 The repository intentionally has no lockfile. `npm ci` therefore rejected the
 first dependency restore; the existing no-lockfile install path was used, and
 development dependencies were explicitly included before typecheck/build.
-No lockfile is retained.
+No lockfile is retained. The generated dependency tree was removed after
+verification, the repository is clean, and `WORKSPACE_LAYOUT_OK` passes. State
+hygiene still reports the same 68 pre-existing outside-workspace findings;
+this round added none.
 
 ## Exit boundary
 
