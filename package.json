@@ -54,6 +54,7 @@
     "preview:clawlore-candidate-evidence": "node scripts/clawlore-candidate-evidence-remediation.mjs",
     "preview:clawlore-evidence-assignment": "node scripts/clawlore-evidence-assignment-plan.mjs",
     "preview:clawlore-post-assignment-candidates": "node scripts/clawlore-post-assignment-candidate-plan.mjs",
+    "preview:clawlore-v1-append-delta": "node scripts/clawlore-v1-append-delta-plan.mjs",
     "rollout:clawlore-evidence-assignment": "node scripts/clawlore-live-evidence-assignment.mjs",
     "rollout:clawlore-live-compatibility": "node scripts/clawlore-live-compatibility-backfill.mjs",
     "smoke:clawlore-snapshot": "node --test tests/clawlore-snapshot-restore.test.mjs",
