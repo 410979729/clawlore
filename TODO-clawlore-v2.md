@@ -336,14 +336,30 @@ overlap below 0.8.
       ContextEngine, prompt mutation, or final recall.
 - [x] Run focused 6/6, full 172/172, typecheck, build, module, vector, golden,
       and release gates; final package scan 373 files.
-- [ ] Obtain exact authorization for a fresh encrypted snapshot plus two
-      read-only live previews; no live preview was run in this round.
+- [x] Obtain exact authorization for a fresh encrypted snapshot plus two
+      read-only live previews and execute it without live mutation.
+- [x] Verify the compatibility preview covers V1/V2 952/952 with zero mapping
+      mismatch, zero existing projection rows, and the exact eight-field allowlist.
+- [x] Review the exact 632-row candidate plan: 0 eligible, 476 held, 156
+      quarantined, automatic promotion 0; do not request a lifecycle rollout.
 - [ ] After live plans exist, obtain a separate exact-digest approval for the
       compatibility projection backfill, if selected.
-- [ ] Review the exact live candidate plan and obtain a different exact-digest
-      approval for any lifecycle promotion batch, if selected.
-- [ ] Keep ContextEngine, prompt mutation, final recall cutover, and unapproved
+- [x] Keep ContextEngine, prompt mutation, final recall cutover, and unapproved
       live V2 mutations disabled.
+
+## Phase 7H verification
+
+- Fresh AES-256-GCM snapshot/restore: 952 stable rows, integrity ok, foreign
+  keys 0, plaintext/WAL/SHM residue 0.
+- Compatibility plan digest:
+  `5614ec9e30b9092dc65ef91b306b3254881723f48194bdb47167bdbee8089d8a`.
+- Candidate plan digest:
+  `d93c590f6c1d4437d9a3a5b1da1dc86d5793b92fbc59e7648030fdbd4ae1351b`.
+- Focused 8/8 and full 174/174 tests PASS; typecheck, build, module, vector,
+  golden recall, and release gate PASS; package scan 378 files.
+- Implementation commit: `fa7276f`.
+- No compatibility object, lifecycle mutation, ContextEngine, prompt mutation,
+  final recall cutover, configuration change, or Gateway restart occurred.
 
 ## Phase 0 verification
 
