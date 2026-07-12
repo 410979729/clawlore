@@ -363,6 +363,35 @@ overlap below 0.8.
 - Exit: repository clean, `WORKSPACE_LAYOUT_OK`; state hygiene remains the same
   68 unrelated historical outside-workspace findings.
 
+## Phase 7I — Compatibility apply, failed acceptance, rollback, corrected plan
+
+- [x] Add an exact-digest, 0600-approval-bound transactional compatibility
+      backfill executor and focused regression tests.
+- [x] Apply approved r1 as 952 projection rows while preserving V1/V2 truth,
+      lifecycle 0/632/320, pending outbox 0, and all runtime cutover denials.
+- [x] Reject completion after independent live FTS acceptance found minimum
+      Top-K overlap 0.6 and rank agreement 0.433333.
+- [x] Identify the root cause: r1 recomputed metadata from raw JSON while the
+      Phase 7F compatibility contract required persisted
+      `memory_truth.metadata_text`; 251 rows differed.
+- [x] Roll back the rebuildable projection in one transaction and verify no
+      compatibility object remains, integrity ok, foreign keys 0, and all
+      canonical/lifecycle/outbox counts unchanged.
+- [x] Bind the corrected plan and executor to
+      `memory_truth.metadata_text`; add a historical-drift regression fixture.
+- [x] Generate corrected r2 read-only preview with V1/V2 952/952, mapping
+      mismatch 0, existing projection 0, and plan digest
+      `ea045877e59a2b9d5afe726d75224f18b0849a4b3b746ca48175c8b391549697`.
+- [x] Prove the corrected connection-local projection restores minimum live
+      Top-K overlap/rank agreement to 1.0 across six fixed probes.
+- [x] Run focused 7/7, full 176/176, typecheck, build, module, ranking/control,
+      vector, golden, and release gates; package scan 383 files.
+- [ ] Obtain a new exact-digest approval for corrected rollout
+      `clawlore-v2-compatibility-backfill-20260712-r2`; r1 approval cannot be
+      reused and no live projection currently exists.
+- [x] Keep lifecycle mutation, ContextEngine, prompt mutation, final recall,
+      configuration changes, and service restart disabled.
+
 ## Phase 0 verification
 
 - Focused Memory Address V2 tests: 8/8 PASS.

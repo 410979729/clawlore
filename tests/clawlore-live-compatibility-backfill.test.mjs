@@ -35,7 +35,7 @@ async function fixture() {
   const db = new DatabaseSync(source);
   db.exec(`CREATE TABLE memory_truth(
     id TEXT PRIMARY KEY,text TEXT NOT NULL,category TEXT NOT NULL,scope TEXT NOT NULL,
-    timestamp REAL NOT NULL,metadata TEXT NOT NULL);
+    timestamp REAL NOT NULL,metadata TEXT NOT NULL,metadata_text TEXT NOT NULL);
     CREATE VIRTUAL TABLE memory_fts USING fts5(id UNINDEXED,text,metadata_text);
     ${TRUTH_V2_SCHEMA_SQL}
     CREATE VIRTUAL TABLE memory_fts_v2 USING fts5(item_id UNINDEXED,content,category);
@@ -43,17 +43,17 @@ async function fixture() {
     CREATE TABLE memory_relation_projection_v2(item_id TEXT PRIMARY KEY,state TEXT,verified_at TEXT);`);
   const now = "2026-07-12T12:00:00.000Z";
   const rows = [
-    { id: "one", text: "alpha memory", metadata: { l0_abstract: "searchable synopsis", sender_id: "private-id" } },
-    { id: "two", text: "beta memory", metadata: { tags: ["safe-tag"], raw_secret: "must-not-copy" } },
+    { id: "one", text: "alpha memory", metadataText: "searchable synopsis", metadata: { l0_abstract: "stale raw value", sender_id: "private-id" } },
+    { id: "two", text: "beta memory", metadataText: "safe-tag", metadata: { tags: ["stale-raw-tag"], raw_secret: "must-not-copy" } },
   ];
   for (const row of rows) {
     const itemId = `legacy:${row.id}`;
     const revisionId = `revision:${row.id}`;
     const address = { schemaVersion: 2, tenantId: "tenant", principalId: "legacy:unresolved", agentId: "main",
       visibility: "private", retention: "durable" };
-    db.prepare("INSERT INTO memory_truth VALUES (?,?,?,?,?,?)")
-      .run(row.id, row.text, "other", "agent:main", Date.parse(now), JSON.stringify(row.metadata));
-    db.prepare("INSERT INTO memory_fts VALUES (?,?,?)").run(row.id, row.text, "legacy");
+    db.prepare("INSERT INTO memory_truth VALUES (?,?,?,?,?,?,?)")
+      .run(row.id, row.text, "other", "agent:main", Date.parse(now), JSON.stringify(row.metadata), row.metadataText);
+    db.prepare("INSERT INTO memory_fts VALUES (?,?,?)").run(row.id, row.text, row.metadataText);
     db.prepare(`INSERT INTO memory_revisions
       (revision_id,item_id,revision_no,content,lifecycle,verification,valid_until,created_at)
       VALUES (?,?,1,?,'candidate','unverified',NULL,?)`).run(revisionId, itemId, row.text, now);
@@ -120,6 +120,7 @@ test("approved compatibility backfill is digest-bound and leaves canonical lifec
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM memory_fts_compat_v2 WHERE memory_fts_compat_v2 MATCH 'synopsis'").get().n, 1);
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM memory_fts_compat_v2 WHERE memory_fts_compat_v2 MATCH '\"private-id\"'").get().n, 0);
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM memory_fts_compat_v2 WHERE memory_fts_compat_v2 MATCH '\"must-not-copy\"'").get().n, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM memory_fts_compat_v2 WHERE memory_fts_compat_v2 MATCH '\"stale raw value\"'").get().n, 0);
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM memory_items WHERE lifecycle='candidate'").get().n, 2);
     db.close();
     await assert.rejects(() => executeLiveCompatibilityBackfillV1({

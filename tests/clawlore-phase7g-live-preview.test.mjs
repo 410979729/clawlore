@@ -31,7 +31,7 @@ async function fixture() {
   const db = new DatabaseSync(source);
   db.exec(`CREATE TABLE memory_truth(
     id TEXT PRIMARY KEY,text TEXT NOT NULL,category TEXT NOT NULL,scope TEXT NOT NULL,
-    timestamp REAL NOT NULL,metadata TEXT NOT NULL);
+    timestamp REAL NOT NULL,metadata TEXT NOT NULL,metadata_text TEXT NOT NULL);
     CREATE VIRTUAL TABLE memory_fts USING fts5(id UNINDEXED,text,metadata_text);
     ${TRUTH_V2_SCHEMA_SQL}
     CREATE VIRTUAL TABLE memory_fts_v2 USING fts5(item_id UNINDEXED,content,category);`);
@@ -48,8 +48,9 @@ async function fixture() {
     const address = { schemaVersion: 2, tenantId: "tenant", principalId: row.principalId, agentId: "main",
       ...(row.principalId === "legacy:unresolved" ? {} : { platform: "telegram", accountId: "default" }),
       visibility: "private", retention: "durable" };
-    db.prepare("INSERT INTO memory_truth VALUES (?,?,?,?,?,?)")
-      .run(row.id, row.text, "other", "agent:main", Date.parse(now), JSON.stringify(row.metadata));
+    const metadataText = [row.metadata.l0_abstract, ...(row.metadata.tags || [])].filter(Boolean).join("\n");
+    db.prepare("INSERT INTO memory_truth VALUES (?,?,?,?,?,?,?)")
+      .run(row.id, row.text, "other", "agent:main", Date.parse(now), JSON.stringify(row.metadata), metadataText);
     db.prepare("INSERT INTO memory_fts VALUES (?,?,?)").run(row.id, row.text, "fixture");
     db.prepare(`INSERT INTO memory_revisions
       (revision_id,item_id,revision_no,content,lifecycle,verification,valid_until,created_at)
@@ -90,6 +91,7 @@ test("live Phase 7G preview is snapshot-bound, complete, redacted, and query-onl
     assert.equal(result.compatibilityPlan.sourceRows, 2);
     assert.equal(result.compatibilityPlan.v2Rows, 2);
     assert.equal(result.compatibilityPlan.mappingMismatchRows, 0);
+    assert.equal(result.compatibilityPlan.bootstrapSource, "memory_truth.metadata_text");
     assert.equal(result.candidatePromotionPlan.rows.length, 2);
     assert.equal(result.candidatePromotionPlan.counts.eligible_for_operator_promotion, 1);
     assert.equal(result.candidatePromotionPlan.counts.quarantine, 1);

@@ -32,6 +32,7 @@ function compatibilityPlan(overrides = {}) {
     expectedProjectionRows: 8,
     mappingMismatchRows: 0,
     rawLegacyMetadataCopied: false,
+    bootstrapSource: "memory_truth.metadata_text",
     indexedLegacyMetadataFields: [
       "l0_abstract", "l1_overview", "l2_content", "keywords",
       "entities", "tags", "category", "tier",

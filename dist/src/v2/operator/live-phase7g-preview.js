@@ -76,13 +76,13 @@ export function buildLiveCompatibilityBackfillPlanV1(db) {
     LEFT JOIN memory_items i ON i.item_id='legacy:' || l.id WHERE i.item_id IS NULL`);
     const missingV1 = scalar(db, `SELECT COUNT(*) FROM memory_items i
     LEFT JOIN memory_truth l ON i.item_id='legacy:' || l.id WHERE l.id IS NULL`);
-    const rows = db.prepare(`SELECT l.id,l.metadata,i.item_id,i.content
+    const rows = db.prepare(`SELECT l.id,l.metadata_text,i.item_id,i.content
     FROM memory_truth l JOIN memory_items i ON i.item_id='legacy:' || l.id ORDER BY l.id`).all();
     const manifestDigest = hash(JSON.stringify(rows.map((row) => ({
         legacyIdSha256: hash(String(row.id)),
         itemIdSha256: hash(String(row.item_id)),
         contentSha256: hash(String(row.content)),
-        projectedMetadataSha256: hash(projectLegacySearchMetadataV1(String(row.metadata || "{}"))),
+        projectedMetadataSha256: hash(String(row.metadata_text || "")),
     }))));
     const plan = {
         schemaVersion: 1,
@@ -96,6 +96,7 @@ export function buildLiveCompatibilityBackfillPlanV1(db) {
         expectedProjectionRows: sourceRows,
         mappingMismatchRows: missingV1 + missingV2,
         rawLegacyMetadataCopied: false,
+        bootstrapSource: "memory_truth.metadata_text",
         indexedLegacyMetadataFields: [...PHASE7G_LEGACY_SEARCH_FIELD_ALLOWLIST_V1],
         planDigest: "",
         authorizesLiveMutation: false,

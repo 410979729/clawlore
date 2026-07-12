@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { PHASE7G_LEGACY_SEARCH_FIELD_ALLOWLIST_V1, validatePhase7GApprovalV1, } from "../application/phase7g-rollout-controls.js";
-import { buildLiveCompatibilityBackfillPlanV1, projectLegacySearchMetadataV1, } from "./live-phase7g-preview.js";
+import { buildLiveCompatibilityBackfillPlanV1, } from "./live-phase7g-preview.js";
 import { inspectLegacySqliteSnapshotV2 } from "./legacy-v1-snapshot.js";
 const require = createRequire(import.meta.url);
 const APPROVAL_MAX_BYTES = 128 * 1024;
@@ -108,7 +108,7 @@ export async function executeLiveCompatibilityBackfillV1(input) {
     const beforeItems = scalar(db, "SELECT COUNT(*) FROM memory_items");
     const beforeLifecycle = lifecycleCounts(db);
     const beforePendingOutbox = scalar(db, "SELECT COUNT(*) FROM projection_outbox WHERE processed_at IS NULL");
-    const rows = db.prepare(`SELECT i.item_id,i.content,l.metadata
+    const rows = db.prepare(`SELECT i.item_id,i.content,l.metadata_text
     FROM memory_truth l JOIN memory_items i ON i.item_id='legacy:' || l.id ORDER BY l.id`).all();
     const appliedAt = appliedAtDate.toISOString();
     try {
@@ -116,7 +116,7 @@ export async function executeLiveCompatibilityBackfillV1(input) {
         db.exec("CREATE VIRTUAL TABLE memory_fts_compat_v2 USING fts5(item_id UNINDEXED,content,metadata_text)");
         const insert = db.prepare("INSERT INTO memory_fts_compat_v2(item_id,content,metadata_text) VALUES (?,?,?)");
         for (const row of rows) {
-            insert.run(row.item_id, row.content, projectLegacySearchMetadataV1(row.metadata || "{}"));
+            insert.run(row.item_id, row.content, row.metadata_text || "");
         }
         db.exec("COMMIT");
     }

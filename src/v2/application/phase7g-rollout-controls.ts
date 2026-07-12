@@ -37,6 +37,7 @@ export interface CompatibilityBackfillPlanEvidenceV1 {
   expectedProjectionRows: number;
   mappingMismatchRows: number;
   rawLegacyMetadataCopied: false;
+  bootstrapSource: "memory_truth.metadata_text";
   indexedLegacyMetadataFields: string[];
   planDigest: string;
   authorizesLiveMutation: false;
@@ -169,6 +170,7 @@ export function buildPhase7GControlBundleV1(input: {
     || compatibility.emitsMemoryContent !== false
     || compatibility.sourceUnchanged !== true
     || compatibility.authorizesLiveMutation !== false
+    || compatibility.bootstrapSource !== "memory_truth.metadata_text"
   ) blockers.push("compatibility_plan_contract_invalid");
   if (!validDigest(compatibility.planDigest)) blockers.push("compatibility_plan_digest_invalid");
   if (
