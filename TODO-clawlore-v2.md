@@ -321,6 +321,30 @@ overlap below 0.8.
 - [ ] Keep ContextEngine, prompt mutation, final recall cutover, and unapproved
       live V2 mutations disabled.
 
+## Phase 7G — Rollout control isolation
+
+- [x] Require a fresh encrypted snapshot, verified restore, stable source
+      digest, and zero plaintext residue before either later live action.
+- [x] Bind compatibility planning to exact V1/V2 row coverage, zero mapping
+      mismatches, an absent destination projection, and the exact ordered
+      eight-field search allowlist.
+- [x] Bind promotion planning to the exact candidate-row count; reject partial
+      plans and archived rows in an actionable candidate batch.
+- [x] Require distinct rollout ids, modes, and plan digests for compatibility
+      backfill and candidate promotion.
+- [x] Prove one action's approval cannot authorize the other action or enable
+      ContextEngine, prompt mutation, or final recall.
+- [x] Run focused 6/6, full 172/172, typecheck, build, module, vector, golden,
+      and release gates; final package scan 373 files.
+- [ ] Obtain exact authorization for a fresh encrypted snapshot plus two
+      read-only live previews; no live preview was run in this round.
+- [ ] After live plans exist, obtain a separate exact-digest approval for the
+      compatibility projection backfill, if selected.
+- [ ] Review the exact live candidate plan and obtain a different exact-digest
+      approval for any lifecycle promotion batch, if selected.
+- [ ] Keep ContextEngine, prompt mutation, final recall cutover, and unapproved
+      live V2 mutations disabled.
+
 ## Phase 0 verification
 
 - Focused Memory Address V2 tests: 8/8 PASS.
