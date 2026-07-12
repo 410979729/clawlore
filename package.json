@@ -51,6 +51,7 @@
     "smoke:clawlore-ranking-promotion": "node scripts/clawlore-ranking-promotion-smoke.mjs",
     "smoke:clawlore-phase7g-controls": "node scripts/clawlore-phase7g-rollout-controls-smoke.mjs",
     "preview:clawlore-phase7g-live": "node scripts/clawlore-phase7g-live-preview.mjs",
+    "preview:clawlore-candidate-evidence": "node scripts/clawlore-candidate-evidence-remediation.mjs",
     "rollout:clawlore-live-compatibility": "node scripts/clawlore-live-compatibility-backfill.mjs",
     "smoke:clawlore-snapshot": "node --test tests/clawlore-snapshot-restore.test.mjs",
     "smoke:clawlore-legacy-live-preflight": "node --test tests/clawlore-legacy-live-preflight.test.mjs",
