@@ -13,6 +13,7 @@ const {
 const { planLegacyMigrationV2 } = jiti("../src/v2/migration/legacy-v2-migration.ts");
 const { previewLegacyMigrationV2 } = jiti("../src/v2/migration/legacy-v2-preview.ts");
 const { previewLegacySessionAttributionV2 } = jiti("../src/v2/migration/legacy-session-attribution-preview.ts");
+const { previewLegacyManualReviewV2 } = jiti("../src/v2/migration/legacy-manual-review-preview.ts");
 
 function parseArgs(argv) {
   const args = {};
@@ -49,6 +50,7 @@ try {
     defaults: { tenantId: args.tenant, agentId: args.agent, workspaceId: args.workspace },
   });
   const debtPreview = previewLegacyMigrationV2(snapshotPath);
+  const manualReview = previewLegacyManualReviewV2(snapshotPath);
   const sessionAttribution = args["sessions-registry"]
     ? previewLegacySessionAttributionV2({
       legacyPath: snapshotPath,
@@ -101,6 +103,7 @@ try {
           .map((kind) => [kind, plan.rows.filter((row) => row.verificationDebt === kind).length]),
       ),
       sessionAttribution,
+      manualReview,
     },
     nextGate: "encrypted_live_snapshot_and_separate_v2_write_approval",
   };

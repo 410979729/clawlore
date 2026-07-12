@@ -17,6 +17,7 @@ const {
 const { planLegacyMigrationV2 } = jiti("../src/v2/migration/legacy-v2-migration.ts");
 const { previewLegacyMigrationV2 } = jiti("../src/v2/migration/legacy-v2-preview.ts");
 const { previewLegacySessionAttributionV2 } = jiti("../src/v2/migration/legacy-session-attribution-preview.ts");
+const { previewLegacyManualReviewV2 } = jiti("../src/v2/migration/legacy-manual-review-preview.ts");
 
 function createLegacy(path) {
   const db = new DatabaseSync(path);
@@ -109,26 +110,70 @@ test("session attribution preview trusts registry keys only and never reads tran
     const group = "agent:main:telegram:group:conversation-1";
     insert(db, "direct", "Direct-scoped fact", { sessionKey: direct });
     insert(db, "group", "Conversation-scoped fact", { sessionKey: group });
+    insert(db, "direct-id", "Direct session-id fact", { sessionId: "direct-id" });
+    insert(db, "group-file", "Group session-file fact", { source_session: "group-id.jsonl" });
     insert(db, "forged", "Unregistered session reference", { sessionKey: "agent:main:telegram:default:direct:unknown" });
-    insert(db, "batch", "Batch reference", { source_session: "distillation-batch-1" });
+    insert(db, "batch", "Batch reference", { source: "session-summary", source_session: "distillation-batch-1" });
+    insert(db, "alias", "Legacy agent scope", { source: "auto-capture", source_session: "agent:main:main" });
+    insert(db, "opaque", "Opaque capture reference", { source: "auto-capture", source_session: "unknown" });
+    insert(db, "conflict", "Conflicting registry evidence", { sessionKey: direct, sessionId: "group-id" });
     insert(db, "none", "No session evidence", {});
     await writeFile(registryPath, JSON.stringify({
-      [direct]: { sessionId: "direct-id" },
-      [group]: { sessionId: "group-id" },
+      [direct]: { sessionId: "direct-id", sessionFile: join(root, "direct-id.jsonl") },
+      [group]: { sessionId: "group-id", sessionFile: join(root, "group-id.jsonl") },
     }), { mode: 0o600 });
     const preview = previewLegacySessionAttributionV2({
       legacyPath: path,
       sessionsRegistryPath: registryPath,
     });
     assert.deepEqual(preview.lanes, {
-      trustedPrivatePrincipal: 1,
-      trustedConversationBoundary: 1,
+      trustedPrivatePrincipal: 2,
+      trustedConversationBoundary: 2,
       trustedOtherSession: 0,
-      unresolvedSessionReference: 2,
+      conflictingRegistryEvidence: 1,
+      unresolvedSessionReference: 1,
+      legacyAgentScopeAlias: 1,
+      derivedSystemReference: 1,
+      opaqueUnverifiableReference: 1,
       noSessionReference: 1,
     });
-    assert.equal(preview.trustedCoverageRows, 2);
+    assert.deepEqual(preview.trustedEvidence, {
+      registryKey: 2,
+      registrySessionId: 1,
+      registrySessionFile: 1,
+    });
+    assert.equal(preview.trustedCoverageRows, 4);
     assert.equal(preview.transcriptContentRead, false);
+  } finally {
+    db.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("manual review preview never auto-activates agent-scoped rows without identity evidence", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clawlore-manual-review-"));
+  const path = join(root, "legacy.sqlite3");
+  const db = createLegacy(path);
+  try {
+    insert(db, "needs-operator", "Manual fact", { source: "manual", state: "confirmed" });
+    insert(db, "archived", "Archived manual fact", { source: "manual", state: "archived" });
+    insert(db, "attributed", "Attributed manual fact", { source: "manual_user", senderId: "user-1" });
+    insert(db, "automatic", "Automatic fact", { source: "auto-capture" });
+    const preview = previewLegacyManualReviewV2(path);
+    assert.deepEqual(preview, {
+      schemaVersion: 1,
+      readOnly: true,
+      contentRead: false,
+      manualRows: 3,
+      lanes: {
+        metadataPrincipalEvidence: 1,
+        preserveArchived: 1,
+        operatorIdentityAssignment: 1,
+        scopeReview: 0,
+        invalidMetadata: 0,
+      },
+      automaticActivationRows: 0,
+    });
   } finally {
     db.close();
     await rm(root, { recursive: true, force: true });
