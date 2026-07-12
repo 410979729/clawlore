@@ -48,9 +48,12 @@ function decisionFor(row) {
     }
     if ([
         "registry_other_boundary_review",
+        "assigned_private_evidence_review",
+        "assigned_conversation_evidence_review",
         "derived_system_evidence_review",
         "known_source_evidence_review",
         "unresolved_session_review",
+        "legacy_provenance_hold_review",
     ].includes(row.lane)) {
         return { decision: "await_external_source_receipt" };
     }
