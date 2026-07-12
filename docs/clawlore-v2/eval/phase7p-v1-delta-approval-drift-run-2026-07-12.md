@@ -64,14 +64,15 @@ Live exit remains read-only:
 
 The fresh owner-only read-only receipt is:
 
-`workspace/archive/clawlore-phase7p-v1-delta-20260712_235203/v1-append-delta-preview-fresh-20260712.json`
+`workspace/archive/clawlore-phase7p-v1-delta-20260712_235203/v1-append-delta-preview-r2-20260712.json`
 
 It is mode 0600. No snapshot or approval artifact exists in that directory.
 
 ## Exit boundary
 
-The 28-row plan is a new approval subject. The Phase 7O 27-row approval cannot
+The 28-row plan is a new approval subject under rollout
+`clawlore-v2-v1-delta-migration-20260712-r2`. The Phase 7O r1 approval cannot
 be reused or widened. Any later write requires a fresh encrypted snapshot and
-a new exact approval bound to the 28-row digest and both classifications.
+a new exact r2 approval bound to the 28-row digest and both classifications.
 ContextEngine, prompt mutation, lifecycle promotion, and final recall remain
 outside scope.

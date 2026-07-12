@@ -73,8 +73,8 @@
   mandatory live replan found V1/V2 980/952 and 28 delta rows (27 reflection
   summaries plus 1 operational checkpoint), changing the digest to
   `6f1e6ac9...421d35`. The old approval therefore failed closed before snapshot
-  or write. The new 28-row plan remains non-authorizing and all rows remain
-  candidate/unverified with legacy-identity debt.
+  or write. The new 28-row plan is isolated under rollout r2, remains
+  non-authorizing, and all rows remain candidate/unverified with legacy-identity debt.
 - A later approved delta apply now has an executable transaction path, but it
   may run only after a fresh encrypted snapshot and a new exact approval for
   the 28-row digest. Existing V2 canonical/lifecycle/verification/evidence,
