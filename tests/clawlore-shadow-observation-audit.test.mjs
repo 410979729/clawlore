@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { auditShadowObservation } from "../scripts/clawlore-shadow-observation-audit.mjs";
+import {
+  auditShadowObservation,
+  writeShadowObservationReceipt,
+} from "../scripts/clawlore-shadow-observation-audit.mjs";
 
 function receipt(overrides = {}) {
   return {
@@ -109,5 +112,34 @@ test("shadow observation gate requires direct, group-boundary, and positive samp
       thresholds: { directSamples: 3, groupSamples: 1, positiveCandidateSamples: 1 },
       blockers: [],
     });
+  });
+});
+
+test("shadow observation receipt is private and never authorizes V2 writes", async () => {
+  await withTrace([receipt()], 0o600, async (traceFile) => {
+    const audit = await auditShadowObservation(traceFile);
+    const receiptFile = join(tmpdir(), `clawlore-shadow-receipt-${process.pid}-${Date.now()}.json`);
+    try {
+      const receipt = await writeShadowObservationReceipt(
+        receiptFile,
+        audit,
+        () => new Date("2026-07-12T06:45:00.000Z"),
+      );
+      assert.equal((await stat(receiptFile)).mode & 0o777, 0o600);
+      assert.equal(receipt.decision, "observe");
+      assert.deepEqual(receipt.safety, {
+        writesEnabled: false,
+        promptMutationEnabled: false,
+        contextEngineEnabled: false,
+        authorizesV2Writes: false,
+        separateOperatorApprovalRequired: true,
+      });
+      const serialized = await readFile(receiptFile, "utf8");
+      assert.equal(serialized.includes("traceId"), false);
+      assert.equal(serialized.includes("principalHash"), false);
+      assert.equal(serialized.includes("messageText"), false);
+    } finally {
+      await rm(receiptFile, { force: true });
+    }
   });
 });

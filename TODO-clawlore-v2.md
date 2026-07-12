@@ -172,11 +172,11 @@ Updated: 2026-07-12
 - [x] Add a zero-write JSONL observation auditor that enforces private file
       permissions, rejects unexpected/raw-payload fields, and reports redacted
       identity/policy/retrieval/candidate aggregates.
-- [ ] Collect additional real direct-message shadow traces and verify stable
+- [x] Collect additional real direct-message shadow traces and verify stable
       identity/policy decisions, bounded candidate counts, and fail-open replies.
 - [ ] Exercise one authorized group-message boundary and prove it cannot acquire
       private-principal visibility.
-- [ ] Add a redacted observation summary and explicit go/no-go receipt for the
+- [x] Add a redacted observation summary and explicit go/no-go receipt for the
       separately approved V2-write phase.
 
 ## Phase 7 — Separately approved V2 write migration
@@ -356,6 +356,14 @@ Run report:
   invoked 1, issues 0, positive-candidate samples 0.
 - Full plugin tests: 152/152 PASS; typecheck/build/release gate PASS; pack scan
   333 files.
+- Post-restart direct observation: 3/3 accepted direct/private samples; identity
+  and policy pass 3/3, retrieval invoked 3/3, positive-candidate samples 3/3,
+  maximum candidate count 5, and trace issues 0.
+- Private observation receipt: mode 0600, decision `observe`, blocker
+  `group_boundary_sample_missing`; it explicitly sets writes, prompt mutation,
+  and ContextEngine false and `authorizesV2Writes=false`.
+- Receipt regression bundle: focused 5/5, full 154/154, typecheck/build/release
+  gate PASS; pack scan 334 files.
 
 Run report:
 `projects/clawlore-v2/docs/clawlore-v2/eval/phase6d-shadow-observation-audit-run-2026-07-12.md`.

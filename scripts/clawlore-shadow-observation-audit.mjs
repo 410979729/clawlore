@@ -1,4 +1,5 @@
-import { readFile, stat } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const RECEIPT_KEYS = new Set([
@@ -145,6 +146,49 @@ export async function auditShadowObservation(traceFile) {
   };
 }
 
+export async function writeShadowObservationReceipt(receiptFile, audit, now = () => new Date()) {
+  const receipt = {
+    schemaVersion: 1,
+    kind: "clawlore_shadow_observation_v1",
+    generatedAt: now().toISOString(),
+    decision: audit.goNoGo.decision,
+    thresholds: audit.goNoGo.thresholds,
+    blockers: audit.goNoGo.blockers,
+    observation: {
+      traceIntegrityStatus: audit.status,
+      traceMode: audit.traceMode,
+      sampleCount: audit.sampleCount,
+      acceptedDirectSampleCount: audit.acceptedDirectSampleCount,
+      acceptedGroupSampleCount: audit.acceptedGroupSampleCount,
+      positiveCandidateSampleCount: audit.positiveCandidateSampleCount,
+      maxCandidateCount: audit.maxCandidateCount,
+      maxSelectedCount: audit.maxSelectedCount,
+      latest: audit.latest,
+      issues: audit.issues,
+    },
+    safety: {
+      writesEnabled: false,
+      promptMutationEnabled: false,
+      contextEngineEnabled: false,
+      authorizesV2Writes: false,
+      separateOperatorApprovalRequired: true,
+    },
+  };
+  const directory = dirname(receiptFile);
+  const temporary = `${receiptFile}.tmp-${process.pid}-${Date.now()}`;
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  try {
+    await writeFile(temporary, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });
+    await chmod(temporary, 0o600);
+    await rename(temporary, receiptFile);
+    await chmod(receiptFile, 0o600);
+  } catch (error) {
+    await rm(temporary, { force: true });
+    throw error;
+  }
+  return receipt;
+}
+
 function argument(name) {
   const index = process.argv.indexOf(name);
   return index >= 0 ? process.argv[index + 1] : undefined;
@@ -152,11 +196,13 @@ function argument(name) {
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   const traceFile = argument("--trace-file");
+  const receiptFile = argument("--receipt-file");
   if (!traceFile) {
-    process.stderr.write("usage: node scripts/clawlore-shadow-observation-audit.mjs --trace-file <path>\n");
+    process.stderr.write("usage: node scripts/clawlore-shadow-observation-audit.mjs --trace-file <path> [--receipt-file <path>]\n");
     process.exitCode = 2;
   } else {
     const result = await auditShadowObservation(traceFile);
+    if (receiptFile) await writeShadowObservationReceipt(receiptFile, result);
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     if (result.status !== "pass") process.exitCode = 1;
   }
