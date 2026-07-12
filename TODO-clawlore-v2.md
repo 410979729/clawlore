@@ -437,6 +437,31 @@ overlap below 0.8.
       boundary evidence or changing lifecycle. The 166 assignment-review rows
       are not confirmed merely because registry evidence exists.
 
+## Phase 7L — Exact read-only evidence-assignment plan
+
+- [x] Map the round back to migration stage 4 and bind it to the exact Phase 7K
+      remediation receipt, Phase 7H/7J promotion baseline, current candidate
+      state, and owner-only sessions registry.
+- [x] Add an exact, query-only planner that emits hashed item/state/evidence
+      digests and resolver codes without memory text, transcript content, or
+      raw principal/conversation/session identifiers.
+- [x] Propose evidence assignment for exactly 76 direct-principal and 14
+      conversation-boundary rows; keep 76 manual rows unassigned, hold 179
+      rows for external source receipts, and retain 287 quarantine rows.
+- [x] Preserve lifecycle=`candidate` and current verification for all 632 rows;
+      automatic promotion and lifecycle/verification changes remain 0.
+- [x] Fail closed on remediation/baseline checksum drift, registry evidence
+      drift, incomplete candidate coverage, missing resolver evidence, or live
+      state changes during planning.
+- [x] Generate the owner-only live plan for proposed rollout
+      `clawlore-v2-evidence-assignment-20260712-r1`, digest
+      `0f432fad09130287181fc811e8a61cc80f42ed6d10ace7d2d3c0077b9aec4e1c`.
+- [x] Pass focused 4/4, full 180/180, typecheck, build, module, ranking/control,
+      vector, golden recall, and release gate; package scan 394 files.
+- [ ] Before any evidence write, require a fresh encrypted snapshot and a
+      separate exact rollout approval. The plan itself grants no write,
+      lifecycle, ContextEngine, prompt, or final-recall authority.
+
 ## Phase 0 verification
 
 - Focused Memory Address V2 tests: 8/8 PASS.

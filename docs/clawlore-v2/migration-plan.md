@@ -38,6 +38,13 @@
   Registry matches create a review queue, not confirmed ownership or promotion
   authority. ContextEngine, prompt mutation, and final recall remain later,
   separately approved gates.
+- Phase 7L remains in stage 4: it turns the review queue into an exact,
+  non-authorizing evidence-assignment plan. Only 90 registry-resolved rows are
+  proposed for evidence writes; every one remains candidate with its current
+  verification. The other 542 rows are explicitly held or quarantined.
+- Applying that plan is not stage 7 cutover and requires a fresh encrypted
+  snapshot plus an exact-plan approval. Evidence assignment cannot authorize
+  lifecycle, ContextEngine, prompt mutation, or final recall.
 
 ## Naming matrix
 
