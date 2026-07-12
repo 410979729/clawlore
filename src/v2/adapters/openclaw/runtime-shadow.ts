@@ -18,6 +18,8 @@ export interface RuntimeShadowReceiptV1 {
   traceId: string;
   status: "disabled" | "completed" | "skipped" | "failed";
   principalHash?: string;
+  ingressKind?: "direct" | "group" | "channel" | "unknown";
+  visibility?: "private" | "conversation" | "project" | "team" | "global";
   retrievalInvoked: boolean;
   candidateCount: number;
   selectedCount: number;
@@ -89,10 +91,12 @@ export async function runDefaultOffRuntimeShadow(params: {
   now?: () => Date;
 }): Promise<RuntimeShadowReceiptV1> {
   const createdAt = (params.now?.() ?? new Date()).toISOString();
+  const ingress = params.input.ingressKind ? { ingressKind: params.input.ingressKind } : {};
   if (!params.config.enabled) {
     return {
       schemaVersion: 1,
       traceId: params.input.traceId,
+      ...ingress,
       status: "disabled",
       retrievalInvoked: false,
       candidateCount: 0,
@@ -110,6 +114,10 @@ export async function runDefaultOffRuntimeShadow(params: {
     receipt = {
       schemaVersion: 1,
       traceId: params.input.traceId,
+      ...ingress,
+      ...(result.retrievalBoundary?.visibility
+        ? { visibility: result.retrievalBoundary.visibility }
+        : {}),
       status: result.pack ? "completed" : "skipped",
       principalHash: result.identity.address
         ? shortHash(result.identity.address.principalId)
@@ -126,6 +134,7 @@ export async function runDefaultOffRuntimeShadow(params: {
     receipt = {
       schemaVersion: 1,
       traceId: params.input.traceId,
+      ...ingress,
       status: "failed",
       retrievalInvoked: false,
       candidateCount: 0,

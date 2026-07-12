@@ -34,6 +34,7 @@ export interface CompatibilityRetrievalRequestV1 {
 
 export interface CompatibilityContextShadowInput {
   traceId: string;
+  ingressKind?: "direct" | "group" | "channel" | "unknown";
   availableTokens: number;
   queryText?: string;
   identity: IdentityResolverInput;

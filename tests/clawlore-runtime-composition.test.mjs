@@ -201,6 +201,8 @@ test("approved fixture shadow registers one observer and never mutates prompt or
   assert.equal(sink.receipts[0].status, "completed");
   assert.equal(sink.receipts[0].selectedCount, 1);
   assert.equal(sink.receipts[0].retrievalInvoked, true);
+  assert.equal(sink.receipts[0].ingressKind, "direct");
+  assert.equal(sink.receipts[0].visibility, "private");
   assert.match(sink.receipts[0].traceId, /^clawlore-shadow-[a-f0-9]{20}$/);
   const serialized = JSON.stringify(sink.receipts);
   assert.doesNotMatch(serialized, /joy-secret-id|private-session-id|private prompt|Simplified Chinese/);
@@ -243,6 +245,8 @@ test("trusted message_received preserves group sender and conversation boundarie
   assert.equal(boundary.conversationId, "group-conversation");
   assert.equal(boundary.threadId, "topic-7");
   assert.equal(sink.receipts[0].retrievalInvoked, true);
+  assert.equal(sink.receipts[0].ingressKind, "group");
+  assert.equal(sink.receipts[0].visibility, "conversation");
 });
 
 test("unknown message_received chat type fails toward conversation scope", async () => {

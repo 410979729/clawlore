@@ -48,10 +48,12 @@ export class JsonlRuntimeShadowTraceSink {
 }
 export async function runDefaultOffRuntimeShadow(params) {
     const createdAt = (params.now?.() ?? new Date()).toISOString();
+    const ingress = params.input.ingressKind ? { ingressKind: params.input.ingressKind } : {};
     if (!params.config.enabled) {
         return {
             schemaVersion: 1,
             traceId: params.input.traceId,
+            ...ingress,
             status: "disabled",
             retrievalInvoked: false,
             candidateCount: 0,
@@ -68,6 +70,10 @@ export async function runDefaultOffRuntimeShadow(params) {
         receipt = {
             schemaVersion: 1,
             traceId: params.input.traceId,
+            ...ingress,
+            ...(result.retrievalBoundary?.visibility
+                ? { visibility: result.retrievalBoundary.visibility }
+                : {}),
             status: result.pack ? "completed" : "skipped",
             principalHash: result.identity.address
                 ? shortHash(result.identity.address.principalId)
@@ -85,6 +91,7 @@ export async function runDefaultOffRuntimeShadow(params) {
         receipt = {
             schemaVersion: 1,
             traceId: params.input.traceId,
+            ...ingress,
             status: "failed",
             retrievalInvoked: false,
             candidateCount: 0,

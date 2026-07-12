@@ -6,6 +6,8 @@ const RECEIPT_KEYS = new Set([
   "traceId",
   "status",
   "principalHash",
+  "ingressKind",
+  "visibility",
   "retrievalInvoked",
   "candidateCount",
   "selectedCount",
@@ -55,6 +57,14 @@ function validateReceipt(receipt, lineNumber) {
   if (typeof receipt.retrievalInvoked !== "boolean") {
     issues.push(`line_${lineNumber}:invalid_retrievalInvoked`);
   }
+  if (receipt.ingressKind !== undefined
+      && !["direct", "group", "channel", "unknown"].includes(receipt.ingressKind)) {
+    issues.push(`line_${lineNumber}:invalid_ingressKind`);
+  }
+  if (receipt.visibility !== undefined
+      && !["private", "conversation", "project", "team", "global"].includes(receipt.visibility)) {
+    issues.push(`line_${lineNumber}:invalid_visibility`);
+  }
   return issues;
 }
 
@@ -83,6 +93,17 @@ export async function auditShadowObservation(traceFile) {
     && receipt.retrievalInvoked === true
     && stagePassed(receipt, "identity")
     && stagePassed(receipt, "policy_preflight"));
+  const acceptedDirectSamples = acceptedSamples.filter((receipt) =>
+    receipt.ingressKind === "direct" && receipt.visibility === "private");
+  const acceptedGroupSamples = acceptedSamples.filter((receipt) =>
+    receipt.ingressKind === "group" && receipt.visibility === "conversation");
+  const positiveCandidateSamples = acceptedSamples.filter((receipt) => receipt.candidateCount > 0);
+  const gateBlockers = [];
+  if (issues.length > 0) gateBlockers.push("trace_integrity_failed");
+  if (validReceipts.some((receipt) => receipt.status === "failed")) gateBlockers.push("failed_receipt_present");
+  if (acceptedDirectSamples.length < 3) gateBlockers.push("insufficient_direct_samples");
+  if (acceptedGroupSamples.length < 1) gateBlockers.push("group_boundary_sample_missing");
+  if (positiveCandidateSamples.length < 1) gateBlockers.push("positive_candidate_sample_missing");
   const latest = validReceipts.at(-1);
 
   return {
@@ -91,11 +112,15 @@ export async function auditShadowObservation(traceFile) {
     traceMode: mode.toString(8).padStart(3, "0"),
     sampleCount: validReceipts.length,
     statuses: countBy(validReceipts.map((receipt) => String(receipt.status))),
+    ingressKinds: countBy(validReceipts.map((receipt) => String(receipt.ingressKind ?? "legacy_unknown"))),
+    visibilities: countBy(validReceipts.map((receipt) => String(receipt.visibility ?? "legacy_unknown"))),
     retrievalInvokedCount: validReceipts.filter((receipt) => receipt.retrievalInvoked === true).length,
     identityPassCount: validReceipts.filter((receipt) => stagePassed(receipt, "identity")).length,
     policyPassCount: validReceipts.filter((receipt) => stagePassed(receipt, "policy_preflight")).length,
     acceptedSampleCount: acceptedSamples.length,
-    positiveCandidateSampleCount: acceptedSamples.filter((receipt) => receipt.candidateCount > 0).length,
+    acceptedDirectSampleCount: acceptedDirectSamples.length,
+    acceptedGroupSampleCount: acceptedGroupSamples.length,
+    positiveCandidateSampleCount: positiveCandidateSamples.length,
     maxCandidateCount: Math.max(0, ...validReceipts.map((receipt) => receipt.candidateCount ?? 0)),
     maxSelectedCount: Math.max(0, ...validReceipts.map((receipt) => receipt.selectedCount ?? 0)),
     latest: latest ? {
@@ -103,8 +128,19 @@ export async function auditShadowObservation(traceFile) {
       retrievalInvoked: latest.retrievalInvoked,
       candidateCount: latest.candidateCount,
       selectedCount: latest.selectedCount,
+      ingressKind: latest.ingressKind ?? "legacy_unknown",
+      visibility: latest.visibility ?? "legacy_unknown",
       createdAt: latest.createdAt,
     } : null,
+    goNoGo: {
+      decision: gateBlockers.length === 0 ? "go" : "observe",
+      thresholds: {
+        directSamples: 3,
+        groupSamples: 1,
+        positiveCandidateSamples: 1,
+      },
+      blockers: gateBlockers,
+    },
     issues,
   };
 }

@@ -184,6 +184,7 @@ export function composeClawLoreRuntimeV1(input) {
                 now: input.dependencies.now,
                 input: {
                     traceId: opaqueTraceId(sequence, event, context),
+                    ingressKind: chatType ?? "unknown",
                     availableTokens: numericBudget(event, context, input.config.tokenBudget),
                     queryText: shadowQueryText(event, context, input.config.maxQueryChars),
                     identity: {
