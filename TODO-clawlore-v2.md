@@ -386,11 +386,33 @@ overlap below 0.8.
       Top-K overlap/rank agreement to 1.0 across six fixed probes.
 - [x] Run focused 7/7, full 176/176, typecheck, build, module, ranking/control,
       vector, golden, and release gates; package scan 383 files.
-- [ ] Obtain a new exact-digest approval for corrected rollout
-      `clawlore-v2-compatibility-backfill-20260712-r2`; r1 approval cannot be
-      reused and no live projection currently exists.
+- [x] Obtain and execute the new exact-digest approval for corrected rollout
+      `clawlore-v2-compatibility-backfill-20260712-r2`; r1 approval was not
+      reused.
 - [x] Keep lifecycle mutation, ContextEngine, prompt mutation, final recall,
       configuration changes, and service restart disabled.
+
+## Phase 7J — Corrected compatibility backfill acceptance
+
+- [x] Refresh the expired encrypted snapshot and verify 952 stable rows,
+      integrity ok, foreign keys 0, and no plaintext/WAL/SHM residue.
+- [x] Regenerate the r2 read-only preview under the same rollout id and prove
+      the plan digest remains
+      `ea045877e59a2b9d5afe726d75224f18b0849a4b3b746ca48175c8b391549697`.
+- [x] Apply 952 compatibility rows from persisted
+      `memory_truth.metadata_text` with zero canonical, lifecycle, or outbox
+      changes and without copying raw metadata.
+- [x] Independently verify six fixed live queries at minimum Top-K overlap 1.0
+      and rank agreement 1.0; metadata-text mismatches are 0.
+- [x] Fix the repeated-apply regression fixture to reuse its injected clock;
+      focused 10/10 and full 176/176 tests now pass.
+- [x] Pass typecheck, build, module, vector, golden recall, release gate, and a
+      384-file package scan.
+- [x] Verify live V1/V2 remain 952/952, lifecycle 0/632/320, pending outbox 0,
+      Gateway active/running and healthz live, with unchanged config/MainPID
+      and no warning logs since apply.
+- [x] Preserve V1 fallback and keep lifecycle mutation, ContextEngine, prompt
+      mutation, and final recall cutover disabled.
 
 ## Phase 0 verification
 

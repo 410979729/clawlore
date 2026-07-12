@@ -129,6 +129,7 @@ test("approved compatibility backfill is digest-bound and leaves canonical lifec
       approvalPath: paths.approvalPath,
       rolloutId: "clawlore-v2-compat-fixture-r1",
       planDigest: paths.preview.compatibilityPlan.planDigest,
+      now: () => new Date("2026-07-12T12:12:00.000Z"),
     }), /already exists/);
   } finally {
     await rm(paths.root, { recursive: true, force: true });
