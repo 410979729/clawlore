@@ -62,7 +62,7 @@ export async function inspectSqliteSnapshotV2(path, createdAt = new Date().toISO
         db.close();
     }
 }
-async function onlineBackup(sourcePath, destinationPath) {
+export async function createOnlineSqliteBackupV2(sourcePath, destinationPath) {
     if (existsSync(destinationPath))
         throw new Error("backup destination already exists");
     mkdirSync(dirname(destinationPath), { recursive: true });
@@ -81,7 +81,7 @@ async function onlineBackup(sourcePath, destinationPath) {
 }
 export async function createVerifiedSqliteSnapshotV2(input) {
     const createdAt = (input.now?.() ?? new Date()).toISOString();
-    await onlineBackup(input.sourcePath, input.destinationPath);
+    await createOnlineSqliteBackupV2(input.sourcePath, input.destinationPath);
     try {
         return await inspectSqliteSnapshotV2(input.destinationPath, createdAt);
     }
@@ -99,7 +99,7 @@ export async function restoreVerifiedSqliteSnapshotV2(input) {
     if (JSON.stringify(source.tableCounts) !== JSON.stringify(input.expected.tableCounts)) {
         throw new Error("snapshot table-count manifest mismatch");
     }
-    await onlineBackup(input.snapshotPath, input.destinationPath);
+    await createOnlineSqliteBackupV2(input.snapshotPath, input.destinationPath);
     try {
         const restored = await inspectSqliteSnapshotV2(input.destinationPath, (input.now?.() ?? new Date()).toISOString());
         if (restored.truthSchemaVersion !== source.truthSchemaVersion

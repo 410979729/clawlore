@@ -142,6 +142,10 @@ test("legacy migration preview is read-only and preserves verification debt", as
     assert.deepEqual(preview.classifications, { explicit_manual: 1, auto_capture: 1, unknown_legacy: 1 });
     assert.equal(preview.verificationDebt, 2);
     assert.equal(preview.invalidMetadataRows, 1);
+    assert.deepEqual(preview.attributionLanes, {
+      manual_operator_review: 1,
+      unattributed_quarantine: 2,
+    });
     assert.equal(after, before);
   } finally {
     await rm(root, { recursive: true, force: true });

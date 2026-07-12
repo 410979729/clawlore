@@ -77,7 +77,7 @@ export async function inspectSqliteSnapshotV2(path: string, createdAt = new Date
   }
 }
 
-async function onlineBackup(sourcePath: string, destinationPath: string): Promise<void> {
+export async function createOnlineSqliteBackupV2(sourcePath: string, destinationPath: string): Promise<void> {
   if (existsSync(destinationPath)) throw new Error("backup destination already exists");
   mkdirSync(dirname(destinationPath), { recursive: true });
   const { backup } = require("node:sqlite") as {
@@ -100,7 +100,7 @@ export async function createVerifiedSqliteSnapshotV2(input: {
   now?: () => Date;
 }): Promise<SqliteSnapshotManifestV2> {
   const createdAt = (input.now?.() ?? new Date()).toISOString();
-  await onlineBackup(input.sourcePath, input.destinationPath);
+  await createOnlineSqliteBackupV2(input.sourcePath, input.destinationPath);
   try {
     return await inspectSqliteSnapshotV2(input.destinationPath, createdAt);
   } catch (error) {
@@ -121,7 +121,7 @@ export async function restoreVerifiedSqliteSnapshotV2(input: {
   if (JSON.stringify(source.tableCounts) !== JSON.stringify(input.expected.tableCounts)) {
     throw new Error("snapshot table-count manifest mismatch");
   }
-  await onlineBackup(input.snapshotPath, input.destinationPath);
+  await createOnlineSqliteBackupV2(input.snapshotPath, input.destinationPath);
   try {
     const restored = await inspectSqliteSnapshotV2(
       input.destinationPath,

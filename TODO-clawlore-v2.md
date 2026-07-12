@@ -189,6 +189,23 @@ Updated: 2026-07-12
       relation/Experience projection convergence and rollback evidence.
 - [ ] Keep ContextEngine and final recall cutover disabled until a later gate.
 
+## Phase 7A — Read-only live migration preflight
+
+- [x] Add WAL-consistent legacy 1.x online snapshot inspection and verified
+      restore-to-new-location without requiring Truth V2 tables.
+- [x] Add AES-256-GCM legacy snapshot archive support with a 0600 file
+      SecretRef and plaintext/WAL/SHM cleanup on all paths.
+- [x] Run migration planning only against a temporary verified copy and prove
+      live logical truth stayed stable during the preview.
+- [x] Emit a 0600 redacted receipt that explicitly denies V2-write authority.
+- [x] Split 951 live rows into source and attribution-debt review lanes.
+- [ ] Resolve the 382-row session-attribution lane from verifiable session
+      metadata; do not infer identity from transcript text or nicknames.
+- [ ] Review 77 manual rows and keep 194 unattributed rows quarantined unless
+      stronger provenance appears.
+- [ ] Select an approved persistent SecretRef and create/restore-test the
+      actual encrypted live snapshot before requesting V2-write approval.
+
 ## Phase 0 verification
 
 - Focused Memory Address V2 tests: 8/8 PASS.

@@ -44,8 +44,11 @@
     "smoke:clawlore-release-readiness": "node --test tests/clawlore-release-readiness.test.mjs",
     "smoke:clawlore-runtime-composition": "node scripts/clawlore-runtime-composition-smoke.mjs",
     "audit:clawlore-shadow-observation": "node scripts/clawlore-shadow-observation-audit.mjs",
+    "preflight:clawlore-live-migration": "node scripts/clawlore-legacy-live-preflight.mjs",
     "smoke:clawlore-snapshot": "node --test tests/clawlore-snapshot-restore.test.mjs",
+    "smoke:clawlore-legacy-live-preflight": "node --test tests/clawlore-legacy-live-preflight.test.mjs",
     "smoke:clawlore-encrypted-snapshot": "node --test tests/clawlore-encrypted-snapshot-archive.test.mjs",
+    "smoke:clawlore-encrypted-legacy-snapshot": "node --test tests/clawlore-encrypted-legacy-snapshot.test.mjs",
     "smoke:clawlore-migration-drill": "node --test tests/clawlore-legacy-migration-drill.test.mjs",
     "smoke:vector-repair": "node scripts/smoke-vector-repair.mjs",
     "release:gate": "SCOPE_RECALL_ALLOW_NESTED_GIT_ROOT=1 node scripts/release-gate.mjs"

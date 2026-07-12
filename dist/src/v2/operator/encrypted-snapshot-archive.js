@@ -4,6 +4,7 @@ import { appendFile, chmod, mkdir, open, readFile, rm, stat, writeFile } from "n
 import { dirname } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { createVerifiedSqliteSnapshotV2, inspectSqliteSnapshotV2, restoreVerifiedSqliteSnapshotV2, } from "./sqlite-snapshot.js";
+import { createVerifiedLegacySqliteSnapshotV2, inspectLegacySqliteSnapshotV2, restoreVerifiedLegacySqliteSnapshotV2, } from "./legacy-v1-snapshot.js";
 const MAGIC = Buffer.from("CLAWLORE2\n", "ascii");
 const HEADER_LENGTH_BYTES = 4;
 const AUTH_TAG_BYTES = 16;
@@ -153,11 +154,60 @@ export async function createEncryptedSnapshotArchiveV2(input) {
         await removeSqliteFiles(plaintextPath);
     }
 }
+export async function createEncryptedLegacySnapshotArchiveV2(input) {
+    const createdAt = (input.now?.() ?? new Date()).toISOString();
+    const plaintextPath = `${input.archivePath}.plaintext-${process.pid}-${randomBytes(8).toString("hex")}.sqlite`;
+    await mkdir(dirname(input.archivePath), { recursive: true });
+    try {
+        const snapshot = await createVerifiedLegacySqliteSnapshotV2({
+            sourcePath: input.sourcePath,
+            destinationPath: plaintextPath,
+            now: () => new Date(createdAt),
+        });
+        const resolved = await input.keyProvider.current();
+        const key = normalizeKey(resolved.key);
+        const iv = randomBytes(12);
+        const header = {
+            schemaVersion: 1,
+            algorithm: "aes-256-gcm",
+            keyId: resolved.keyId,
+            iv: iv.toString("base64"),
+            snapshot,
+        };
+        await writeFile(input.archivePath, encodeHeader(header), { flag: "wx", mode: 0o600 });
+        try {
+            const cipher = createCipheriv("aes-256-gcm", key, iv, { authTagLength: AUTH_TAG_BYTES });
+            await pipeline(createReadStream(plaintextPath), cipher, createWriteStream(input.archivePath, { flags: "a", mode: 0o600 }));
+            await appendFile(input.archivePath, cipher.getAuthTag());
+            await chmod(input.archivePath, 0o600);
+        }
+        catch (error) {
+            await rm(input.archivePath, { force: true });
+            throw error;
+        }
+        const info = await stat(input.archivePath);
+        return {
+            schemaVersion: 1,
+            createdAt,
+            algorithm: "aes-256-gcm",
+            keyId: resolved.keyId,
+            archiveSha256: await sha256File(input.archivePath),
+            bytes: info.size,
+            snapshot,
+        };
+    }
+    finally {
+        await removeSqliteFiles(plaintextPath);
+    }
+}
 export async function restoreEncryptedSnapshotArchiveV2(input) {
     if (await sha256File(input.archivePath) !== input.expected.archiveSha256) {
         throw new Error("encrypted snapshot archive checksum mismatch");
     }
     const parsed = await readHeader(input.archivePath);
+    if ("profile" in parsed.header.snapshot) {
+        throw new Error("encrypted snapshot archive contains a legacy profile");
+    }
     if (parsed.header.keyId !== input.expected.keyId
         || parsed.header.snapshot.sha256 !== input.expected.snapshot.sha256
         || parsed.header.snapshot.truthSchemaVersion !== input.expected.snapshot.truthSchemaVersion) {
@@ -184,6 +234,53 @@ export async function restoreEncryptedSnapshotArchiveV2(input) {
         if (decrypted.sha256 !== parsed.header.snapshot.sha256)
             throw new Error("decrypted snapshot checksum mismatch");
         return await restoreVerifiedSqliteSnapshotV2({
+            snapshotPath: plaintextPath,
+            destinationPath: input.destinationPath,
+            expected: parsed.header.snapshot,
+            now: input.now,
+        });
+    }
+    finally {
+        await removeSqliteFiles(plaintextPath);
+    }
+}
+export async function restoreEncryptedLegacySnapshotArchiveV2(input) {
+    if (await sha256File(input.archivePath) !== input.expected.archiveSha256) {
+        throw new Error("encrypted legacy snapshot archive checksum mismatch");
+    }
+    const parsed = await readHeader(input.archivePath);
+    if (!("profile" in parsed.header.snapshot)
+        || parsed.header.snapshot.profile !== "scope-recall-legacy-v1") {
+        throw new Error("encrypted snapshot archive does not contain a legacy profile");
+    }
+    if (parsed.header.keyId !== input.expected.keyId
+        || parsed.header.snapshot.sha256 !== input.expected.snapshot.sha256
+        || parsed.header.snapshot.schemaDigest !== input.expected.snapshot.schemaDigest
+        || parsed.header.snapshot.memoryTruth.logicalDigest !== input.expected.snapshot.memoryTruth.logicalDigest) {
+        throw new Error("encrypted legacy snapshot archive manifest mismatch");
+    }
+    const resolved = await input.keyProvider.resolve(parsed.header.keyId);
+    const key = normalizeKey(resolved.key);
+    const iv = Buffer.from(parsed.header.iv, "base64");
+    if (iv.length !== 12)
+        throw new Error("invalid snapshot archive IV");
+    const plaintextPath = `${input.destinationPath}.decrypt-${process.pid}-${randomBytes(8).toString("hex")}.sqlite`;
+    await mkdir(dirname(input.destinationPath), { recursive: true });
+    try {
+        const decipher = createDecipheriv("aes-256-gcm", key, iv, { authTagLength: AUTH_TAG_BYTES });
+        decipher.setAuthTag(parsed.authTag);
+        try {
+            await pipeline(createReadStream(input.archivePath, { start: parsed.ciphertextStart, end: parsed.ciphertextEnd }), decipher, createWriteStream(plaintextPath, { flags: "wx", mode: 0o600 }));
+        }
+        catch (error) {
+            await removeSqliteFiles(plaintextPath);
+            throw new Error("encrypted legacy snapshot archive authentication failed", { cause: error });
+        }
+        const decrypted = await inspectLegacySqliteSnapshotV2(plaintextPath, parsed.header.snapshot.createdAt);
+        if (decrypted.sha256 !== parsed.header.snapshot.sha256) {
+            throw new Error("decrypted legacy snapshot checksum mismatch");
+        }
+        return await restoreVerifiedLegacySqliteSnapshotV2({
             snapshotPath: plaintextPath,
             destinationPath: input.destinationPath,
             expected: parsed.header.snapshot,

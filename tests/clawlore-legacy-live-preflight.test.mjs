@@ -1,0 +1,119 @@
+import assert from "node:assert/strict";
+import { appendFile, mkdtemp, rm } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { createJiti } from "jiti";
+
+const require = createRequire(import.meta.url);
+const { DatabaseSync } = require("node:sqlite");
+const jiti = createJiti(import.meta.url);
+const {
+  createVerifiedLegacySqliteSnapshotV2,
+  inspectLegacySqliteSnapshotV2,
+  restoreVerifiedLegacySqliteSnapshotV2,
+} = jiti("../src/v2/operator/legacy-v1-snapshot.ts");
+const { planLegacyMigrationV2 } = jiti("../src/v2/migration/legacy-v2-migration.ts");
+const { previewLegacyMigrationV2 } = jiti("../src/v2/migration/legacy-v2-preview.ts");
+
+function createLegacy(path) {
+  const db = new DatabaseSync(path);
+  db.exec(`PRAGMA journal_mode=WAL;
+    CREATE TABLE memory_truth (
+      id TEXT PRIMARY KEY, text TEXT NOT NULL, category TEXT NOT NULL,
+      scope TEXT NOT NULL, timestamp INTEGER NOT NULL, metadata TEXT NOT NULL
+    );`);
+  return db;
+}
+
+function insert(db, id, text, metadata = {}) {
+  db.prepare(`INSERT INTO memory_truth(id,text,category,scope,timestamp,metadata)
+    VALUES(?,?,?,?,?,?)`).run(id, text, "fact", "agent:main", 1_783_000_000, JSON.stringify(metadata));
+}
+
+test("legacy live preflight snapshots WAL truth consistently and plans only from the copy", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clawlore-legacy-preflight-"));
+  const sourcePath = join(root, "legacy.sqlite3");
+  const snapshotPath = join(root, "snapshot.sqlite3");
+  const restoredPath = join(root, "restored.sqlite3");
+  const db = createLegacy(sourcePath);
+  try {
+    insert(db, "before", "Verified source fact", { source: "manual_user", senderId: "user-1" });
+    const sourceBefore = await inspectLegacySqliteSnapshotV2(sourcePath);
+    const snapshot = await createVerifiedLegacySqliteSnapshotV2({ sourcePath, destinationPath: snapshotPath });
+    insert(db, "after", "Later write must not enter the point-in-time copy");
+
+    assert.equal(snapshot.profile, "scope-recall-legacy-v1");
+    assert.equal(snapshot.integrity, "ok");
+    assert.equal(snapshot.memoryTruth.rowCount, 1);
+    assert.equal(snapshot.memoryTruth.logicalDigest, sourceBefore.memoryTruth.logicalDigest);
+
+    const plan = planLegacyMigrationV2({
+      legacyPath: snapshotPath,
+      defaults: { tenantId: "tenant-test", agentId: "agent-test", workspaceId: "workspace-test" },
+    });
+    assert.equal(plan.totalRows, 1);
+    assert.equal(plan.rows.some((row) => row.legacyId === "after"), false);
+    const debt = previewLegacyMigrationV2(snapshotPath);
+    assert.deepEqual(debt.attributionLanes, { resolved_principal: 1 });
+
+    const restored = await restoreVerifiedLegacySqliteSnapshotV2({
+      snapshotPath, destinationPath: restoredPath, expected: snapshot,
+    });
+    assert.equal(restored.memoryTruth.logicalDigest, snapshot.memoryTruth.logicalDigest);
+    assert.equal(restored.memoryTruth.rowCount, 1);
+  } finally {
+    db.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("legacy debt preview separates system, session, manual, and quarantine lanes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clawlore-legacy-lanes-"));
+  const path = join(root, "legacy.sqlite3");
+  const db = createLegacy(path);
+  try {
+    insert(db, "digest", "Nightly digest", { source: "nightly_digest" });
+    insert(db, "checkpoint", "Pressure checkpoint", { source: "session-pressure-guard" });
+    insert(db, "session", "Captured session fact", { source: "auto-capture", source_session: "opaque-session" });
+    insert(db, "resolved", "Runtime attributed fact", { source: "auto-capture", senderId: "user-1" });
+    insert(db, "unknown", "Unknown legacy fact", {});
+    const preview = previewLegacyMigrationV2(path);
+    assert.deepEqual(preview.classifications, {
+      operational_checkpoint: 1,
+      reflection_summary: 1,
+      auto_capture: 2,
+      unknown_legacy: 1,
+    });
+    assert.deepEqual(preview.attributionLanes, {
+      system_generated_review: 2,
+      session_attribution_review: 1,
+      resolved_principal: 1,
+      unattributed_quarantine: 1,
+    });
+  } finally {
+    db.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("legacy restore rejects a tampered snapshot before creating a destination", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clawlore-legacy-tamper-"));
+  const sourcePath = join(root, "legacy.sqlite3");
+  const snapshotPath = join(root, "snapshot.sqlite3");
+  const destinationPath = join(root, "restored.sqlite3");
+  const db = createLegacy(sourcePath);
+  try {
+    insert(db, "truth", "Tamper detection fixture");
+    const snapshot = await createVerifiedLegacySqliteSnapshotV2({ sourcePath, destinationPath: snapshotPath });
+    await appendFile(snapshotPath, "tamper");
+    await assert.rejects(
+      () => restoreVerifiedLegacySqliteSnapshotV2({ snapshotPath, destinationPath, expected: snapshot }),
+      /checksum mismatch/,
+    );
+  } finally {
+    db.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
