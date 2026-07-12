@@ -79,6 +79,15 @@
   may run only after a fresh encrypted snapshot and a new exact approval for
   the 28-row digest. Existing V2 canonical/lifecycle/verification/evidence,
   V1 fallback, ContextEngine, prompt mutation, and final recall stay immutable.
+- Phase 7Q consumed the exact r2 approval only after reproducing the authorized
+  digest and verifying a fresh encrypted snapshot. It appended exactly 28
+  candidate/unverified rows and converged compatibility/current FTS/vector/
+  relation projections plus 84 processed outbox receipts. V1/V2 are now
+  980/980 and existing canonical/lifecycle/verification/evidence changes are 0.
+- This closes the known append-only parity blocker but does not advance stage 7
+  cutover: lifecycle is still 0 active / 660 candidate / 320 archived. The next
+  permissible action is a new read-only 660-candidate policy/evidence baseline;
+  no prior approval authorizes lifecycle, ContextEngine, prompt, or final recall.
 
 ## Naming matrix
 

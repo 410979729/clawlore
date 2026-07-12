@@ -1,6 +1,6 @@
 # ClawLore 2.0 TODO
 
-Updated: 2026-07-12
+Updated: 2026-07-13
 
 ## Phase 0
 
@@ -546,8 +546,31 @@ overlap below 0.8.
       ranking/control, vector, golden recall, and release gate; pack 414 files.
 - [x] Preserve live V2 952, lifecycle 0/632/320, all projections 952, pending
       outbox 0, V1 fallback, ContextEngine, prompt, and final recall boundaries.
-- [ ] Obtain a new exact r2 approval for the 28-row plan before creating a fresh
+- [x] Obtain a new exact r2 approval for the 28-row plan before creating a fresh
       encrypted snapshot or running the delta apply operator.
+
+## Phase 7Q — Approved 28-row append-only delta apply
+
+- [x] Recompute the live plan with the exact Phase 7P defaults and reproduce
+      digest `6f1e6ac9764dc3e2e5fd7796075a360696ae484f7b308b6d1fa2cfa59b421d35`.
+- [x] Reject an initial wrong-workspace parameter check before snapshot or
+      mutation; remove its temporary receipts during cleanup.
+- [x] Create and restore-verify a fresh AES-256-GCM snapshot with V1 980,
+      integrity `ok`, foreign keys 0, and no plaintext/WAL/SHM residue.
+- [x] Append exactly 27 reflection summaries and 1 operational checkpoint as
+      candidate/unverified/legacy-identity-debt rows.
+- [x] Preserve all existing canonical/lifecycle/verification/evidence state;
+      existing-row changes are 0.
+- [x] Converge compatibility/current FTS/vector/relation projections to 980
+      each and add exactly 84 processed outbox receipts with pending 0.
+- [x] Independently verify V1/V2 980/980, lifecycle 0/660/320, SQL integrity,
+      foreign keys, rollout ledger, V1 doctor, and SQL/vector scope parity.
+- [x] Pass focused 6/6 and full 192/192 tests, typecheck, build, module,
+      ranking/control, vector, golden recall, and release gate; pack 415 files.
+- [x] Keep V1 fallback enabled and lifecycle mutation, ContextEngine, prompt
+      mutation, final recall, configuration changes, and service restart off.
+- [ ] Generate a new read-only 660-candidate policy/evidence baseline before
+      proposing any further lifecycle or cutover action.
 
 ## Phase 0 verification
 
