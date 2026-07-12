@@ -12,6 +12,7 @@ const {
 } = jiti("../src/v2/operator/legacy-v1-snapshot.ts");
 const { planLegacyMigrationV2 } = jiti("../src/v2/migration/legacy-v2-migration.ts");
 const { previewLegacyMigrationV2 } = jiti("../src/v2/migration/legacy-v2-preview.ts");
+const { previewLegacySessionAttributionV2 } = jiti("../src/v2/migration/legacy-session-attribution-preview.ts");
 
 function parseArgs(argv) {
   const args = {};
@@ -48,6 +49,12 @@ try {
     defaults: { tenantId: args.tenant, agentId: args.agent, workspaceId: args.workspace },
   });
   const debtPreview = previewLegacyMigrationV2(snapshotPath);
+  const sessionAttribution = args["sessions-registry"]
+    ? previewLegacySessionAttributionV2({
+      legacyPath: snapshotPath,
+      sessionsRegistryPath: resolve(args["sessions-registry"]),
+    })
+    : null;
   const sourceAfter = await inspectLegacySqliteSnapshotV2(sourcePath);
   const sourceStableDuringPreview = sourceBefore.memoryTruth.rowCount === sourceAfter.memoryTruth.rowCount
     && sourceBefore.memoryTruth.logicalDigest === sourceAfter.memoryTruth.logicalDigest
@@ -93,6 +100,7 @@ try {
           .sort()
           .map((kind) => [kind, plan.rows.filter((row) => row.verificationDebt === kind).length]),
       ),
+      sessionAttribution,
     },
     nextGate: "encrypted_live_snapshot_and_separate_v2_write_approval",
   };

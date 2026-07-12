@@ -29,6 +29,9 @@ The persisted receipt explicitly records `authorizesV2Writes=false`.
 - Added attribution lanes for resolved runtime principals, session-attribution
   review, manual operator review, system-generated review, and unattributed
   quarantine.
+- Added a registry-bound session attribution preview. It trusts only exact keys
+  present in `sessions.json`, distinguishes direct-principal and conversation
+  boundaries, and records `transcriptContentRead=false`.
 
 ## Live read-only evidence
 
@@ -42,24 +45,27 @@ The live preflight passed on a verified 1.x copy:
   unknown legacy `206`, explicit manual `77`, operational checkpoint `59`.
 - Attribution lanes: system-generated review `298`, session-attribution review
   `382`, unattributed quarantine `194`, manual operator review `77`.
+- Session registry coverage: trusted direct principal `77`, trusted
+  conversation boundary `15`, unresolved session reference `290`, no session
+  reference `569`; total trusted coverage `92/951`.
 - Every row currently carries `legacy_identity` debt. The result is therefore
   a no-go for V2 writes, not a migration approval.
 
 The private redacted receipt is stored at:
 
-`workspace/archive/clawlore-live-shadow-20260712_032634/controls/phase7-live-migration-preflight-v2.json`
+`workspace/archive/clawlore-live-shadow-20260712_032634/controls/phase7-live-migration-preflight-v3.json`
 
 ## Verification
 
-- Legacy live preflight tests: 3/3 PASS.
+- Legacy live preflight tests: 4/4 PASS.
 - Legacy encrypted snapshot test: 1/1 PASS.
 - Existing Truth V2 encrypted snapshot tests: 3/3 PASS.
-- Full tests: 158/158 PASS.
+- Full tests: 159/159 PASS.
 - Module boundaries: 2/2 PASS.
 - Typecheck and build: PASS.
 - Vector repair smoke: PASS.
 - Golden recall: 1.0; forbidden violations `0`; prompt-budget exceeded `0`.
-- Release gate: PASS; pack scan `339` files.
+- Release gate: PASS; pack scan `342` files.
 - Persisted receipt mode: `0600`; temporary plaintext residue: none.
 
 ## Remaining gates

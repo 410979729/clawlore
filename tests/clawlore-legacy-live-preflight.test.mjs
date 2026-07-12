@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { appendFile, mkdtemp, rm } from "node:fs/promises";
+import { appendFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +16,7 @@ const {
 } = jiti("../src/v2/operator/legacy-v1-snapshot.ts");
 const { planLegacyMigrationV2 } = jiti("../src/v2/migration/legacy-v2-migration.ts");
 const { previewLegacyMigrationV2 } = jiti("../src/v2/migration/legacy-v2-preview.ts");
+const { previewLegacySessionAttributionV2 } = jiti("../src/v2/migration/legacy-session-attribution-preview.ts");
 
 function createLegacy(path) {
   const db = new DatabaseSync(path);
@@ -92,6 +93,42 @@ test("legacy debt preview separates system, session, manual, and quarantine lane
       resolved_principal: 1,
       unattributed_quarantine: 1,
     });
+  } finally {
+    db.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("session attribution preview trusts registry keys only and never reads transcript content", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clawlore-session-attribution-"));
+  const path = join(root, "legacy.sqlite3");
+  const registryPath = join(root, "sessions.json");
+  const db = createLegacy(path);
+  try {
+    const direct = "agent:main:telegram:default:direct:user-1";
+    const group = "agent:main:telegram:group:conversation-1";
+    insert(db, "direct", "Direct-scoped fact", { sessionKey: direct });
+    insert(db, "group", "Conversation-scoped fact", { sessionKey: group });
+    insert(db, "forged", "Unregistered session reference", { sessionKey: "agent:main:telegram:default:direct:unknown" });
+    insert(db, "batch", "Batch reference", { source_session: "distillation-batch-1" });
+    insert(db, "none", "No session evidence", {});
+    await writeFile(registryPath, JSON.stringify({
+      [direct]: { sessionId: "direct-id" },
+      [group]: { sessionId: "group-id" },
+    }), { mode: 0o600 });
+    const preview = previewLegacySessionAttributionV2({
+      legacyPath: path,
+      sessionsRegistryPath: registryPath,
+    });
+    assert.deepEqual(preview.lanes, {
+      trustedPrivatePrincipal: 1,
+      trustedConversationBoundary: 1,
+      trustedOtherSession: 0,
+      unresolvedSessionReference: 2,
+      noSessionReference: 1,
+    });
+    assert.equal(preview.trustedCoverageRows, 2);
+    assert.equal(preview.transcriptContentRead, false);
   } finally {
     db.close();
     await rm(root, { recursive: true, force: true });

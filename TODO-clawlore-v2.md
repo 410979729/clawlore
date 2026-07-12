@@ -199,6 +199,9 @@ Updated: 2026-07-12
       live logical truth stayed stable during the preview.
 - [x] Emit a 0600 redacted receipt that explicitly denies V2-write authority.
 - [x] Split 951 live rows into source and attribution-debt review lanes.
+- [x] Add registry-bound session attribution preview without reading transcript
+      content; exact live coverage is 77 direct-principal rows plus 15
+      conversation-boundary rows.
 - [ ] Resolve the 382-row session-attribution lane from verifiable session
       metadata; do not infer identity from transcript text or nicknames.
 - [ ] Review 77 manual rows and keep 194 unattributed rows quarantined unless
