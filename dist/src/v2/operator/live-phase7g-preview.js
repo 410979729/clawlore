@@ -55,7 +55,7 @@ function strings(value) {
         .filter((entry) => typeof entry === "string" && Boolean(entry.trim()))
         .map((entry) => entry.trim().slice(0, 4096));
 }
-function projectedLegacyMetadata(value) {
+export function projectLegacySearchMetadataV1(value) {
     const metadata = parseRecord(value);
     return PHASE7G_LEGACY_SEARCH_FIELD_ALLOWLIST_V1
         .flatMap((field) => strings(metadata[field]))
@@ -65,7 +65,7 @@ function scalar(db, sql, ...args) {
     const row = db.prepare(sql).get(...args);
     return Number(Object.values(row)[0] ?? 0);
 }
-function compatibilityPlan(db) {
+export function buildLiveCompatibilityBackfillPlanV1(db) {
     const sourceRows = scalar(db, "SELECT COUNT(*) FROM memory_truth");
     const v2Rows = scalar(db, "SELECT COUNT(*) FROM memory_items");
     const projectionExists = Boolean(db.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type IN ('table','view') AND name='memory_fts_compat_v2'").get());
@@ -82,7 +82,7 @@ function compatibilityPlan(db) {
         legacyIdSha256: hash(String(row.id)),
         itemIdSha256: hash(String(row.item_id)),
         contentSha256: hash(String(row.content)),
-        projectedMetadataSha256: hash(projectedLegacyMetadata(String(row.metadata || "{}"))),
+        projectedMetadataSha256: hash(projectLegacySearchMetadataV1(String(row.metadata || "{}"))),
     }))));
     const plan = {
         schemaVersion: 1,
@@ -166,7 +166,7 @@ export async function createLivePhase7GPreviewV1(input) {
     let promotion;
     try {
         db.exec("PRAGMA query_only=ON; PRAGMA busy_timeout=10000;");
-        compatibility = compatibilityPlan(db);
+        compatibility = buildLiveCompatibilityBackfillPlanV1(db);
         promotion = promotionPlan(db);
     }
     finally {
