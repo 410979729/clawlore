@@ -102,6 +102,28 @@ function publicPlan(rows) {
 export function planLegacyMigrationV2(input) {
     return publicPlan(planRows(input));
 }
+export function buildLegacyMigrationBatchV2(input) {
+    const rows = planRows(input);
+    return {
+        plan: publicPlan(rows),
+        rows: rows.map(({ source, plan }) => {
+            const meta = metadata(source.metadata);
+            const mapping = mapLegacyAddress({ id: source.id, scope: source.scope, metadata: meta }, input.defaults);
+            return {
+                legacyId: source.id,
+                content: source.text,
+                category: source.category || "other",
+                address: mapping.address,
+                lifecycle: plan.lifecycle,
+                verification: plan.verification,
+                observedAt: observedAt(source, meta),
+                classification: plan.classification,
+                reviewRequired: plan.reviewRequired,
+                verificationDebt: plan.verificationDebt,
+            };
+        }),
+    };
+}
 export async function applyLegacyMigrationV2(input) {
     if (input.approved !== true)
         throw new Error("migration apply requires explicit approval");

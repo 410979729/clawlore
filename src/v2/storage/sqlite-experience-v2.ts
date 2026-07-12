@@ -13,6 +13,43 @@ import type {
 const require = createRequire(import.meta.url);
 type DatabaseSync = any;
 
+export const EXPERIENCE_V2_SCHEMA_SQL = `
+  CREATE TABLE IF NOT EXISTS subagent_snapshots_v2 (
+    snapshot_id TEXT PRIMARY KEY,parent_session_id TEXT NOT NULL,child_session_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,mode TEXT NOT NULL,status TEXT NOT NULL,payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_subagent_snapshot_run_v2
+    ON subagent_snapshots_v2(parent_session_id,child_session_id,run_id);
+  CREATE TABLE IF NOT EXISTS subagent_scratch_v2 (
+    scratch_id TEXT PRIMARY KEY,snapshot_id TEXT NOT NULL,child_session_id TEXT NOT NULL,
+    retention TEXT NOT NULL,lifecycle TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL,
+    FOREIGN KEY(snapshot_id) REFERENCES subagent_snapshots_v2(snapshot_id)
+  );
+  CREATE TABLE IF NOT EXISTS experience_episodes_v2 (
+    episode_id TEXT PRIMARY KEY,snapshot_id TEXT NOT NULL,parent_session_id TEXT NOT NULL,
+    child_session_id TEXT NOT NULL,run_id TEXT NOT NULL,task_class TEXT NOT NULL,outcome TEXT NOT NULL,
+    parent_verification TEXT NOT NULL,lifecycle TEXT NOT NULL,payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+    FOREIGN KEY(snapshot_id) REFERENCES subagent_snapshots_v2(snapshot_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_experience_episode_review_v2
+    ON experience_episodes_v2(task_class,parent_verification,lifecycle);
+  CREATE TABLE IF NOT EXISTS procedural_playbooks_v2 (
+    playbook_id TEXT PRIMARY KEY,version INTEGER NOT NULL,task_class TEXT NOT NULL,
+    lifecycle TEXT NOT NULL,operator_reviewed INTEGER NOT NULL,predecessor_id TEXT,
+    superseded_by TEXT,payload_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_playbook_lifecycle_v2
+    ON procedural_playbooks_v2(task_class,lifecycle);
+  CREATE TABLE IF NOT EXISTS experience_events_v2 (
+    event_id TEXT PRIMARY KEY,entity_type TEXT NOT NULL,entity_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,actor TEXT NOT NULL,reason TEXT NOT NULL,created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_experience_event_entity_v2
+    ON experience_events_v2(entity_type,entity_id,created_at);
+`;
+
 function parseJson<T>(value: unknown): T {
   return JSON.parse(String(value)) as T;
 }
@@ -142,42 +179,7 @@ export class SqliteExperienceStoreV2 implements ExperienceStoreV2Port {
   }
 
   private ensureSchema(): void {
-    this.requireDb().exec(`
-      CREATE TABLE IF NOT EXISTS subagent_snapshots_v2 (
-        snapshot_id TEXT PRIMARY KEY,parent_session_id TEXT NOT NULL,child_session_id TEXT NOT NULL,
-        run_id TEXT NOT NULL,mode TEXT NOT NULL,status TEXT NOT NULL,payload_json TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      );
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_subagent_snapshot_run_v2
-        ON subagent_snapshots_v2(parent_session_id,child_session_id,run_id);
-      CREATE TABLE IF NOT EXISTS subagent_scratch_v2 (
-        scratch_id TEXT PRIMARY KEY,snapshot_id TEXT NOT NULL,child_session_id TEXT NOT NULL,
-        retention TEXT NOT NULL,lifecycle TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL,
-        FOREIGN KEY(snapshot_id) REFERENCES subagent_snapshots_v2(snapshot_id)
-      );
-      CREATE TABLE IF NOT EXISTS experience_episodes_v2 (
-        episode_id TEXT PRIMARY KEY,snapshot_id TEXT NOT NULL,parent_session_id TEXT NOT NULL,
-        child_session_id TEXT NOT NULL,run_id TEXT NOT NULL,task_class TEXT NOT NULL,outcome TEXT NOT NULL,
-        parent_verification TEXT NOT NULL,lifecycle TEXT NOT NULL,payload_json TEXT NOT NULL,
-        created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
-        FOREIGN KEY(snapshot_id) REFERENCES subagent_snapshots_v2(snapshot_id)
-      );
-      CREATE INDEX IF NOT EXISTS idx_experience_episode_review_v2
-        ON experience_episodes_v2(task_class,parent_verification,lifecycle);
-      CREATE TABLE IF NOT EXISTS procedural_playbooks_v2 (
-        playbook_id TEXT PRIMARY KEY,version INTEGER NOT NULL,task_class TEXT NOT NULL,
-        lifecycle TEXT NOT NULL,operator_reviewed INTEGER NOT NULL,predecessor_id TEXT,
-        superseded_by TEXT,payload_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_playbook_lifecycle_v2
-        ON procedural_playbooks_v2(task_class,lifecycle);
-      CREATE TABLE IF NOT EXISTS experience_events_v2 (
-        event_id TEXT PRIMARY KEY,entity_type TEXT NOT NULL,entity_id TEXT NOT NULL,
-        event_type TEXT NOT NULL,actor TEXT NOT NULL,reason TEXT NOT NULL,created_at TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_experience_event_entity_v2
-        ON experience_events_v2(entity_type,entity_id,created_at);
-    `);
+    this.requireDb().exec(EXPERIENCE_V2_SCHEMA_SQL);
   }
 
   private requireDb(): DatabaseSync {

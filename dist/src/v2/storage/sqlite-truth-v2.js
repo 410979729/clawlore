@@ -4,6 +4,53 @@ import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import { validateMemoryAddress } from "../domain/memory-address.js";
 const PROJECTIONS = ["fts", "vector", "relations"];
+export const TRUTH_V2_SCHEMA_SQL = `
+  CREATE TABLE IF NOT EXISTS clawlore_schema (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS memory_items (
+    item_id TEXT PRIMARY KEY,current_revision_id TEXT NOT NULL,revision_no INTEGER NOT NULL,
+    content TEXT NOT NULL,category TEXT NOT NULL,address_json TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,principal_id TEXT NOT NULL,agent_id TEXT NOT NULL,
+    visibility TEXT NOT NULL,retention TEXT NOT NULL,workspace_id TEXT,project_id TEXT,
+    conversation_id TEXT,thread_id TEXT,customer_id TEXT,task_id TEXT,
+    lifecycle TEXT NOT NULL,verification TEXT NOT NULL,valid_until TEXT,
+    created_at TEXT NOT NULL,updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS memory_revisions (
+    revision_id TEXT PRIMARY KEY,item_id TEXT NOT NULL,revision_no INTEGER NOT NULL,
+    content TEXT NOT NULL,lifecycle TEXT NOT NULL,verification TEXT NOT NULL,valid_until TEXT,
+    created_at TEXT NOT NULL,UNIQUE(item_id,revision_no)
+  );
+  CREATE TABLE IF NOT EXISTS memory_sources (
+    source_id TEXT PRIMARY KEY,revision_id TEXT NOT NULL,source_type TEXT NOT NULL,
+    external_id TEXT,observed_at TEXT NOT NULL,evidence_json TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS memory_acl (
+    acl_id TEXT PRIMARY KEY,item_id TEXT NOT NULL,owner_principal_id TEXT NOT NULL,
+    visibility TEXT NOT NULL,policy_json TEXT NOT NULL,created_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS memory_relations (
+    relation_id TEXT PRIMARY KEY,from_revision_id TEXT NOT NULL,to_revision_id TEXT NOT NULL,
+    relation_type TEXT NOT NULL,created_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS memory_events (
+    event_id TEXT PRIMARY KEY,item_id TEXT NOT NULL,revision_id TEXT,event_type TEXT NOT NULL,
+    actor TEXT NOT NULL,reason TEXT NOT NULL,created_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS projection_outbox (
+    outbox_id TEXT PRIMARY KEY,item_id TEXT NOT NULL,revision_id TEXT,operation TEXT NOT NULL,
+    projection TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,available_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,processed_at TEXT,last_error TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_memory_access ON memory_items
+    (tenant_id,principal_id,agent_id,visibility,lifecycle,verification);
+  CREATE INDEX IF NOT EXISTS idx_memory_conversation ON memory_items
+    (tenant_id,conversation_id,thread_id,lifecycle);
+  CREATE INDEX IF NOT EXISTS idx_memory_project ON memory_items
+    (tenant_id,project_id,customer_id,lifecycle);
+  CREATE INDEX IF NOT EXISTS idx_outbox_pending ON projection_outbox
+    (processed_at,available_at,projection);
+  INSERT OR IGNORE INTO clawlore_schema(version,applied_at) VALUES (2,datetime('now'));
+`;
 const require = createRequire(import.meta.url);
 const DEFAULT_CLOCK = {
     now: () => new Date(),
@@ -364,53 +411,7 @@ export class SqliteTruthStoreV2 {
         ];
     }
     ensureSchema() {
-        this.requireDb().exec(`
-      CREATE TABLE IF NOT EXISTS clawlore_schema (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS memory_items (
-        item_id TEXT PRIMARY KEY,current_revision_id TEXT NOT NULL,revision_no INTEGER NOT NULL,
-        content TEXT NOT NULL,category TEXT NOT NULL,address_json TEXT NOT NULL,
-        tenant_id TEXT NOT NULL,principal_id TEXT NOT NULL,agent_id TEXT NOT NULL,
-        visibility TEXT NOT NULL,retention TEXT NOT NULL,workspace_id TEXT,project_id TEXT,
-        conversation_id TEXT,thread_id TEXT,customer_id TEXT,task_id TEXT,
-        lifecycle TEXT NOT NULL,verification TEXT NOT NULL,valid_until TEXT,
-        created_at TEXT NOT NULL,updated_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS memory_revisions (
-        revision_id TEXT PRIMARY KEY,item_id TEXT NOT NULL,revision_no INTEGER NOT NULL,
-        content TEXT NOT NULL,lifecycle TEXT NOT NULL,verification TEXT NOT NULL,valid_until TEXT,
-        created_at TEXT NOT NULL,UNIQUE(item_id,revision_no)
-      );
-      CREATE TABLE IF NOT EXISTS memory_sources (
-        source_id TEXT PRIMARY KEY,revision_id TEXT NOT NULL,source_type TEXT NOT NULL,
-        external_id TEXT,observed_at TEXT NOT NULL,evidence_json TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS memory_acl (
-        acl_id TEXT PRIMARY KEY,item_id TEXT NOT NULL,owner_principal_id TEXT NOT NULL,
-        visibility TEXT NOT NULL,policy_json TEXT NOT NULL,created_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS memory_relations (
-        relation_id TEXT PRIMARY KEY,from_revision_id TEXT NOT NULL,to_revision_id TEXT NOT NULL,
-        relation_type TEXT NOT NULL,created_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS memory_events (
-        event_id TEXT PRIMARY KEY,item_id TEXT NOT NULL,revision_id TEXT,event_type TEXT NOT NULL,
-        actor TEXT NOT NULL,reason TEXT NOT NULL,created_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS projection_outbox (
-        outbox_id TEXT PRIMARY KEY,item_id TEXT NOT NULL,revision_id TEXT,operation TEXT NOT NULL,
-        projection TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,available_at TEXT NOT NULL,
-        created_at TEXT NOT NULL,processed_at TEXT,last_error TEXT
-      );
-      CREATE INDEX IF NOT EXISTS idx_memory_access ON memory_items
-        (tenant_id,principal_id,agent_id,visibility,lifecycle,verification);
-      CREATE INDEX IF NOT EXISTS idx_memory_conversation ON memory_items
-        (tenant_id,conversation_id,thread_id,lifecycle);
-      CREATE INDEX IF NOT EXISTS idx_memory_project ON memory_items
-        (tenant_id,project_id,customer_id,lifecycle);
-      CREATE INDEX IF NOT EXISTS idx_outbox_pending ON projection_outbox
-        (processed_at,available_at,projection);
-      INSERT OR IGNORE INTO clawlore_schema(version,applied_at) VALUES (2,datetime('now'));
-    `);
+        this.requireDb().exec(TRUTH_V2_SCHEMA_SQL);
     }
     requireDb() {
         if (!this.db)

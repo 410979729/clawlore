@@ -49,6 +49,19 @@ export interface LegacyMigrationApplyReceiptV2 {
   appliedAt: string;
 }
 
+export interface LegacyMigrationBatchRowV2 {
+  legacyId: string;
+  content: string;
+  category: string;
+  address: ReturnType<typeof mapLegacyAddress>["address"];
+  lifecycle: MemoryLifecycleV2;
+  verification: MemoryVerificationV2;
+  observedAt: string;
+  classification: string;
+  reviewRequired: boolean;
+  verificationDebt: string;
+}
+
 function openLegacyReadOnly(path: string): DatabaseSync {
   const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: new (path: string, options: object) => DatabaseSync };
   return new DatabaseSync(path, { readOnly: true });
@@ -151,6 +164,32 @@ export function planLegacyMigrationV2(input: {
   defaults: { tenantId: string; agentId: string; workspaceId?: string };
 }): LegacyMigrationPlanV2 {
   return publicPlan(planRows(input));
+}
+
+export function buildLegacyMigrationBatchV2(input: {
+  legacyPath: string;
+  defaults: { tenantId: string; agentId: string; workspaceId?: string };
+}): { plan: LegacyMigrationPlanV2; rows: LegacyMigrationBatchRowV2[] } {
+  const rows = planRows(input);
+  return {
+    plan: publicPlan(rows),
+    rows: rows.map(({ source, plan }) => {
+      const meta = metadata(source.metadata);
+      const mapping = mapLegacyAddress({ id: source.id, scope: source.scope, metadata: meta }, input.defaults);
+      return {
+        legacyId: source.id,
+        content: source.text,
+        category: source.category || "other",
+        address: mapping.address,
+        lifecycle: plan.lifecycle,
+        verification: plan.verification,
+        observedAt: observedAt(source, meta),
+        classification: plan.classification,
+        reviewRequired: plan.reviewRequired,
+        verificationDebt: plan.verificationDebt,
+      };
+    }),
+  };
 }
 
 export async function applyLegacyMigrationV2(input: {
