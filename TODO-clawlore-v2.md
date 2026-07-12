@@ -229,6 +229,12 @@ Updated: 2026-07-12
 - Live V2 schema/writes, configuration, prompt mutation, ContextEngine, and
   Gateway were unchanged. No persistent key or encrypted live archive was
   created in this round.
+- Exit live check: Gateway active/running, healthz live, port 19021 listening,
+  recent warning-or-higher journal empty, and live V2 table count 0.
+- Cleanup removed generated `node_modules` and the superseded v4 receipt; the
+  repository is clean and only the 0600 v5 evidence receipt remains.
+- State hygiene still reports the same 68 unrelated outside-workspace findings;
+  none was created or modified by this bundle.
 
 ## Phase 0 verification
 

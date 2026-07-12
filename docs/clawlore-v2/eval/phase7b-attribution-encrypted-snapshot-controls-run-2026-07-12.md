@@ -60,6 +60,15 @@ The 0600 redacted evidence receipt is:
 - Golden recall: 1.0; forbidden violations `0`; prompt-budget exceeded `0`.
 - Release gate: PASS; package scan `348` files.
 - Implementation commit: `3692f99`.
+- Exit live check: Gateway `active/running`, healthz live, port `19021`
+  listening, no warning-or-higher unit log in the last 20 minutes, live truth
+  rows `952`, and V2 table count `0`.
+- Cleanup removed generated `node_modules` and the superseded v4 preflight
+  receipt. The candidate repository is clean; only the 0600 v5 evidence receipt
+  remains.
+- State hygiene remains non-PASS with 68 unrelated outside-workspace findings
+  (historical config/session residue and foreign plugin-cache docs). This bundle
+  added none and did not clean unrelated state.
 
 ## Remaining gates
 
