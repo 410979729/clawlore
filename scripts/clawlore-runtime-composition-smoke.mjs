@@ -96,17 +96,18 @@ const hookResult = await shadowHost.hooks[0].handler(
     runId: "run-1",
     messageId: "message-1",
     content: "do not persist this prompt",
-    channel: "telegram",
-    accountId: "default",
     senderId: "fixture-user",
-    conversationId: "fixture-user",
-    isGroup: false,
   },
   {
-    agentId: "main", sessionId: "fixture-session", tokenBudget: 128,
+    channelId: "telegram",
+    accountId: "default",
+    conversationId: "fixture-user",
+    sessionKey: "agent:main:telegram:default:direct:fixture-user",
+    sessionId: "fixture-session",
+    tokenBudget: 128,
   },
 );
-assert.deepEqual(hookResult, { handled: false });
+assert.equal(hookResult, undefined);
 assert.equal(sink.receipts.length, 1);
 assert.equal(sink.receipts[0].status, "completed");
 assert.equal(sink.receipts[0].selectedCount, 1);

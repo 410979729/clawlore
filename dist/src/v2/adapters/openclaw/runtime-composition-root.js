@@ -43,19 +43,27 @@ function shadowQueryText(event, context, maxChars) {
     const value = candidates.find((candidate) => typeof candidate === "string" && candidate.trim());
     return typeof value === "string" ? value.trim().slice(0, maxChars) : "";
 }
-function shadowChatType(event) {
+function shadowChatType(event, context) {
     if (event.isGroup === true)
         return "group";
     if (event.isGroup === false)
         return "direct";
+    const sessionKey = [context.sessionKey, event.sessionKey]
+        .find((value) => typeof value === "string" && value.trim());
+    if (typeof sessionKey === "string") {
+        const match = sessionKey.match(/:(direct|group|channel):/i);
+        if (match?.[1])
+            return match[1].toLowerCase();
+    }
+    const metadata = record(event.metadata);
+    if (metadata.guildId || metadata.groupId || metadata.channelName)
+        return "group";
     return undefined;
 }
-function shadowVisibility(event) {
-    if (event.isGroup === true)
-        return "conversation";
-    if (event.isGroup === false)
-        return "private";
-    return undefined;
+function shadowVisibility(chatType) {
+    // Unknown ingress types fail toward conversation scope so a group message
+    // can never be treated as a private-memory request.
+    return chatType === "direct" ? "private" : "conversation";
 }
 function validApproval(approval, readiness) {
     if (!approval || !readiness)
@@ -163,8 +171,10 @@ export function composeClawLoreRuntimeV1(input) {
             ? new JsonlRuntimeShadowTraceSink(input.config.traceFile, input.config.maxTraceBytes)
             : undefined);
     let sequence = 0;
-    input.host.on("inbound_claim", async (event, context) => {
+    input.host.on("message_received", async (event, context) => {
         sequence += 1;
+        const metadata = record(event.metadata);
+        const chatType = shadowChatType(event, context);
         await observeWithoutBlockingReply({
             maxLatencyMs: input.config.maxLatencyMs,
             onError: input.dependencies.onObserverError,
@@ -182,25 +192,25 @@ export function composeClawLoreRuntimeV1(input) {
                             ? context.agentId.trim()
                             : input.dependencies.agentId,
                         workspaceId: input.dependencies.workspaceId,
-                        requestedVisibility: shadowVisibility(event),
+                        requestedVisibility: shadowVisibility(chatType),
                         runtimeContext: context,
                         event,
                         staticContext: {
-                            platform: event.channel,
-                            accountId: event.accountId,
-                            senderId: event.senderId,
-                            conversationId: event.conversationId,
-                            threadId: event.threadId,
-                            chatType: shadowChatType(event),
+                            platform: context.channelId ?? metadata.originatingChannel
+                                ?? metadata.provider ?? metadata.surface,
+                            accountId: context.accountId,
+                            senderId: event.senderId ?? context.senderId ?? metadata.senderId,
+                            conversationId: context.conversationId ?? metadata.originatingTo,
+                            threadId: event.threadId ?? metadata.threadId,
+                            chatType: chatType ?? "unknown",
                         },
                     },
                     retrieveCandidates: input.dependencies.retrieveCandidates,
                 },
             }),
         });
-        return { handled: false };
     }, { priority: -100 });
-    return { ...base, status: "registered", registeredHooks: ["inbound_claim"] };
+    return { ...base, status: "registered", registeredHooks: ["message_received"] };
 }
 export class InMemoryRuntimeShadowSinkV1 {
     receipts = [];

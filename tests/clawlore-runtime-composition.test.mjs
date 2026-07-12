@@ -62,9 +62,9 @@ class FixtureHost {
     this.hooks.push({ event, handler, options });
   }
 
-  async emitInboundClaim(event, context) {
+  async emitMessageReceived(event, context) {
     const results = [];
-    for (const hook of this.hooks.filter((item) => item.event === "inbound_claim")) {
+    for (const hook of this.hooks.filter((item) => item.event === "message_received")) {
       results.push(await hook.handler(event, context));
     }
     return results;
@@ -170,7 +170,7 @@ test("approved fixture shadow registers one observer and never mutates prompt or
   });
 
   assert.equal(receipt.status, "registered");
-  assert.deepEqual(receipt.registeredHooks, ["inbound_claim"]);
+  assert.deepEqual(receipt.registeredHooks, ["message_received"]);
   assert.equal(receipt.contextEngine.selected, "compatibility");
   assert.equal(receipt.contextEngineRegistered, false);
   assert.equal(receipt.toolRegistrations, 0);
@@ -179,25 +179,23 @@ test("approved fixture shadow registers one observer and never mutates prompt or
   assert.equal(host.hooks.length, 1);
   assert.equal(host.hooks[0].options.priority, -100);
 
-  const hookResults = await host.emitInboundClaim(
+  const hookResults = await host.emitMessageReceived(
     {
       runId: "private-run-id",
       messageId: "raw-message-id",
       content: "private prompt must not enter the trace",
-      channel: "telegram",
-      accountId: "default",
       senderId: "joy-secret-id",
-      conversationId: "joy-secret-id",
-      isGroup: false,
     },
     {
-      agentId: "main",
-      sessionKey: "private-session-id",
+      channelId: "telegram",
+      accountId: "default",
+      conversationId: "joy-secret-id",
+      sessionKey: "agent:main:telegram:default:direct:joy-secret-id",
       sessionId: "private-session-id",
       tokenBudget: 128,
     },
   );
-  assert.deepEqual(hookResults, [{ handled: false }]);
+  assert.deepEqual(hookResults, [undefined]);
   assert.equal(retrievalCalls, 1);
   assert.equal(sink.receipts.length, 1);
   assert.equal(sink.receipts[0].status, "completed");
@@ -208,7 +206,7 @@ test("approved fixture shadow registers one observer and never mutates prompt or
   assert.doesNotMatch(serialized, /joy-secret-id|private-session-id|private prompt|Simplified Chinese/);
 });
 
-test("trusted inbound claim preserves group sender and conversation boundaries", async () => {
+test("trusted message_received preserves group sender and conversation boundaries", async () => {
   const host = new FixtureHost();
   const sink = new InMemoryRuntimeShadowSinkV1();
   let boundary;
@@ -226,24 +224,50 @@ test("trusted inbound claim preserves group sender and conversation boundaries",
     approval: approval(),
   });
 
-  const results = await host.emitInboundClaim({
+  const results = await host.emitMessageReceived({
     runId: "group-run",
     messageId: "group-message",
     content: "group query",
-    channel: "telegram",
-    accountId: "default",
     senderId: "group-sender",
-    conversationId: "group-conversation",
     threadId: "topic-7",
-    isGroup: true,
-  }, { agentId: "main", sessionKey: "group-session" });
+  }, {
+    channelId: "telegram",
+    accountId: "default",
+    conversationId: "group-conversation",
+    sessionKey: "agent:main:telegram:group:group-conversation",
+  });
 
-  assert.deepEqual(results, [{ handled: false }]);
+  assert.deepEqual(results, [undefined]);
   assert.equal(boundary.principalId, "telegram:default:group-sender");
   assert.equal(boundary.visibility, "conversation");
   assert.equal(boundary.conversationId, "group-conversation");
   assert.equal(boundary.threadId, "topic-7");
   assert.equal(sink.receipts[0].retrievalInvoked, true);
+});
+
+test("unknown message_received chat type fails toward conversation scope", async () => {
+  const host = new FixtureHost();
+  let boundary;
+  composeClawLoreRuntimeV1({
+    config: normalizeClawLoreRuntimeConfigV1({ mode: "shadow" }),
+    host,
+    dependencies: dependencies({
+      retrieveCandidates: async (request) => {
+        boundary = request.boundary;
+        return [];
+      },
+    }),
+    readiness: readiness(),
+    approval: approval(),
+  });
+
+  await host.emitMessageReceived(
+    { content: "unknown surface query", senderId: "user-unknown" },
+    { channelId: "custom", accountId: "default", conversationId: "room-1" },
+  );
+
+  assert.equal(boundary.visibility, "conversation");
+  assert.equal(boundary.conversationId, "room-1");
 });
 
 test("native ContextEngine request remains blocked even when fixture host is capable", () => {
@@ -276,18 +300,20 @@ test("shadow observer fails open when retrieval times out or trace persistence f
     approval: approval(),
   });
   const startedAt = Date.now();
-  const timeoutResults = await timeoutHost.emitInboundClaim(
+  const timeoutResults = await timeoutHost.emitMessageReceived(
     {
       messageId: "timeout-message",
       content: "timeout retrieval query",
-      channel: "telegram",
       senderId: "user-1",
-      conversationId: "user-1",
-      isGroup: false,
     },
-    { agentId: "main" },
+    {
+      channelId: "telegram",
+      accountId: "default",
+      conversationId: "user-1",
+      sessionKey: "agent:main:telegram:default:direct:user-1",
+    },
   );
-  assert.deepEqual(timeoutResults, [{ handled: false }]);
+  assert.deepEqual(timeoutResults, [undefined]);
   assert.ok(Date.now() - startedAt < 250);
   assert.deepEqual(errors, ["shadow_observer_timeout"]);
 
@@ -302,17 +328,19 @@ test("shadow observer fails open when retrieval times out or trace persistence f
     readiness: readiness(),
     approval: approval(),
   });
-  const sinkResults = await sinkHost.emitInboundClaim(
+  const sinkResults = await sinkHost.emitMessageReceived(
     {
       messageId: "sink-message",
       content: "sink failure query",
-      channel: "telegram",
       senderId: "user-1",
-      conversationId: "user-1",
-      isGroup: false,
     },
-    { agentId: "main" },
+    {
+      channelId: "telegram",
+      accountId: "default",
+      conversationId: "user-1",
+      sessionKey: "agent:main:telegram:default:direct:user-1",
+    },
   );
-  assert.deepEqual(sinkResults, [{ handled: false }]);
+  assert.deepEqual(sinkResults, [undefined]);
   assert.deepEqual(errors, ["shadow_observer_timeout", "shadow_observer_failed"]);
 });

@@ -39,16 +39,16 @@ export interface RuntimeRolloutApprovalV1 {
   approvedAt: string;
 }
 
-export type InboundClaimHandlerV1 = (
+export type MessageReceivedHandlerV1 = (
   event: Record<string, unknown>,
   context: Record<string, unknown>,
-) => Promise<{ handled: false }>;
+) => Promise<void>;
 
 export interface OpenClawRuntimeHostV1 {
   capabilities?: Partial<ContextEngineHostCapabilitiesV2>;
   on(
-    event: "inbound_claim",
-    handler: InboundClaimHandlerV1,
+    event: "message_received",
+    handler: MessageReceivedHandlerV1,
     options?: { priority?: number },
   ): void;
 }
@@ -57,7 +57,7 @@ export interface RuntimeCompositionReceiptV1 {
   schemaVersion: 1;
   status: "disabled" | "blocked" | "registered";
   requestedMode: ClawLoreRuntimeModeV1;
-  registeredHooks: Array<"inbound_claim">;
+  registeredHooks: Array<"message_received">;
   toolRegistrations: 0;
   writeEnabled: false;
   promptMutationEnabled: false;
@@ -125,16 +125,31 @@ function shadowQueryText(
   return typeof value === "string" ? value.trim().slice(0, maxChars) : "";
 }
 
-function shadowChatType(event: Record<string, unknown>): "direct" | "group" | undefined {
+function shadowChatType(
+  event: Record<string, unknown>,
+  context: Record<string, unknown>,
+): "direct" | "group" | "channel" | undefined {
   if (event.isGroup === true) return "group";
   if (event.isGroup === false) return "direct";
+
+  const sessionKey = [context.sessionKey, event.sessionKey]
+    .find((value) => typeof value === "string" && value.trim());
+  if (typeof sessionKey === "string") {
+    const match = sessionKey.match(/:(direct|group|channel):/i);
+    if (match?.[1]) return match[1].toLowerCase() as "direct" | "group" | "channel";
+  }
+
+  const metadata = record(event.metadata);
+  if (metadata.guildId || metadata.groupId || metadata.channelName) return "group";
   return undefined;
 }
 
-function shadowVisibility(event: Record<string, unknown>): "private" | "conversation" | undefined {
-  if (event.isGroup === true) return "conversation";
-  if (event.isGroup === false) return "private";
-  return undefined;
+function shadowVisibility(
+  chatType: ReturnType<typeof shadowChatType>,
+): "private" | "conversation" {
+  // Unknown ingress types fail toward conversation scope so a group message
+  // can never be treated as a private-memory request.
+  return chatType === "direct" ? "private" : "conversation";
 }
 
 function validApproval(
@@ -263,8 +278,10 @@ export function composeClawLoreRuntimeV1(input: {
       ? new JsonlRuntimeShadowTraceSink(input.config.traceFile, input.config.maxTraceBytes)
       : undefined);
   let sequence = 0;
-  input.host.on("inbound_claim", async (event, context) => {
+  input.host.on("message_received", async (event, context) => {
     sequence += 1;
+    const metadata = record(event.metadata);
+    const chatType = shadowChatType(event, context);
     await observeWithoutBlockingReply({
       maxLatencyMs: input.config.maxLatencyMs,
       onError: input.dependencies.onObserverError,
@@ -282,26 +299,26 @@ export function composeClawLoreRuntimeV1(input: {
               ? context.agentId.trim()
               : input.dependencies.agentId,
             workspaceId: input.dependencies.workspaceId,
-            requestedVisibility: shadowVisibility(event),
+            requestedVisibility: shadowVisibility(chatType),
             runtimeContext: context,
             event,
             staticContext: {
-              platform: event.channel,
-              accountId: event.accountId,
-              senderId: event.senderId,
-              conversationId: event.conversationId,
-              threadId: event.threadId,
-              chatType: shadowChatType(event),
+              platform: context.channelId ?? metadata.originatingChannel
+                ?? metadata.provider ?? metadata.surface,
+              accountId: context.accountId,
+              senderId: event.senderId ?? context.senderId ?? metadata.senderId,
+              conversationId: context.conversationId ?? metadata.originatingTo,
+              threadId: event.threadId ?? metadata.threadId,
+              chatType: chatType ?? "unknown",
             },
           },
           retrieveCandidates: input.dependencies.retrieveCandidates,
         },
       }),
     });
-    return { handled: false };
   }, { priority: -100 });
 
-  return { ...base, status: "registered", registeredHooks: ["inbound_claim"] };
+  return { ...base, status: "registered", registeredHooks: ["message_received"] };
 }
 
 export class InMemoryRuntimeShadowSinkV1 implements RuntimeShadowTraceSink {
