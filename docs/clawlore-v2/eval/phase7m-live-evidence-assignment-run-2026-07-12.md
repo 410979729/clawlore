@@ -88,6 +88,14 @@ then passed. Generated dependency and package artifacts are removed during
 exit cleanup; the encrypted snapshot, approval, and acceptance receipts are
 retained as audit/rollback evidence.
 
+Exit cleanup removed `node_modules` and the generated ignored lockfile. The
+repository is clean and `WORKSPACE_LAYOUT_OK` passes. State hygiene still
+reports the same 68 unrelated historical findings outside the project; this
+round added none. An initial archive inventory used a project-relative path
+from the wrong working directory and failed read-only; the absolute-path rerun
+confirmed exactly four retained owner-only artifacts and no SQLite/WAL/SHM
+restore residue.
+
 ## Exit boundary
 
 The 90 rows now carry registry-resolved evidence but remain candidates with
