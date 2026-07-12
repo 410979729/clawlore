@@ -285,11 +285,11 @@ Updated: 2026-07-12
       non-injectable.
 - [x] Keep shadow-read readiness separate from cutover readiness and keep every
       receipt non-authorizing.
-- [ ] Resolve native FTS ranking overlap below 0.8 in a fixture-only design;
+- [x] Resolve native FTS ranking overlap below 0.8 in a fixture-only design;
       current minimum is 0.6 because the indexed fields differ.
-- [ ] Define and review an evidence-backed promotion policy for the 632
+- [x] Define and review an evidence-backed promotion policy for the 632
       candidate rows; do not bulk-promote or infer identity.
-- [ ] Keep ContextEngine, prompt mutation, final recall cutover, and unapproved
+- [x] Keep ContextEngine, prompt mutation, final recall cutover, and unapproved
       live V2 mutations disabled.
 
 Phase 7E verification: focused 2/2 and full 166/166 tests PASS; typecheck,
@@ -314,11 +314,11 @@ overlap below 0.8.
       agreement to 1.0 while the intentionally divergent current lane is below 0.8.
 - [x] Run focused 3/3, full 169/169, typecheck, build, module, vector, golden,
       and release gates; final package scan 369 files.
-- [ ] Run a read-only live compatibility-backfill preview under a new rollout;
+- [x] Run a read-only live compatibility-backfill preview under a new rollout;
       this requires a fresh encrypted snapshot and separate operator approval.
-- [ ] Build the live 632-row candidate review plan from address-bound evidence;
+- [x] Build the live 632-row candidate review plan from address-bound evidence;
       do not promote any row without an exact-digest operator approval.
-- [ ] Keep ContextEngine, prompt mutation, final recall cutover, and unapproved
+- [x] Keep ContextEngine, prompt mutation, final recall cutover, and unapproved
       live V2 mutations disabled.
 
 ## Phase 7G — Rollout control isolation
@@ -342,7 +342,7 @@ overlap below 0.8.
       mismatch, zero existing projection rows, and the exact eight-field allowlist.
 - [x] Review the exact 632-row candidate plan: 0 eligible, 476 held, 156
       quarantined, automatic promotion 0; do not request a lifecycle rollout.
-- [ ] After live plans exist, obtain a separate exact-digest approval for the
+- [x] After live plans exist, obtain a separate exact-digest approval for the
       compatibility projection backfill, if selected.
 - [x] Keep ContextEngine, prompt mutation, final recall cutover, and unapproved
       live V2 mutations disabled.
@@ -413,6 +413,29 @@ overlap below 0.8.
       and no warning logs since apply.
 - [x] Preserve V1 fallback and keep lifecycle mutation, ContextEngine, prompt
       mutation, and final recall cutover disabled.
+
+## Phase 7K — Read-only candidate evidence remediation workbench
+
+- [x] Re-anchor the next round to the migration plan, TODO/project/day handoff,
+      and the exact Phase 7H/7J candidate plan digest instead of treating
+      compatibility completion as cutover authority.
+- [x] Add a query-only live workbench that reads candidate metadata, V2 address
+      state, source classification, and the sessions registry; it reads no
+      memory text or transcript content and emits no raw identifiers.
+- [x] Fail closed when the owner-only baseline preview is invalid, the current
+      candidate set differs from its 632 hashed ids, or live counts change
+      during planning.
+- [x] Split all 632 candidates into 166 assignment-review rows, 179 source/
+      receipt evidence-review rows, and 287 quarantine rows; mutation-ready and
+      automatic-promotion rows remain 0.
+- [x] Preserve V1 fallback and the 952-row compatibility projection; make no
+      lifecycle, canonical truth, outbox, configuration, prompt, ContextEngine,
+      final-recall, or service change.
+- [x] Pass focused 2/2 and full 178/178 tests, typecheck, build, module,
+      ranking/control, vector, golden recall, and release gate; pack 389 files.
+- [ ] Obtain a separate exact-plan decision before writing any identity/
+      boundary evidence or changing lifecycle. The 166 assignment-review rows
+      are not confirmed merely because registry evidence exists.
 
 ## Phase 0 verification
 

@@ -25,6 +25,20 @@
 8. Roll back by restoring the pre-apply snapshot and configuration pointer;
    never attempt an in-place reverse rewrite of partially migrated rows.
 
+## Execution ledger discipline
+
+- This plan remains the stage-order authority. Current completion and evidence
+  live in `TODO-clawlore-v2.md`, the project handoff, dated run reports, and the
+  current day log; a later phase must map back to one of the stages above.
+- The current Phase 7D write and Phase 7J compatibility work complete additive
+  schema/write and projection-compatibility portions of stages 3, 5, and 6.
+- Stage 7 cutover is still blocked: compatibility ranking is healthy, but the
+  live V2 lifecycle remains 0 active / 632 candidate / 320 archived.
+- Candidate evidence remediation belongs to stage 4 quality/policy comparison.
+  Registry matches create a review queue, not confirmed ownership or promotion
+  authority. ContextEngine, prompt mutation, and final recall remain later,
+  separately approved gates.
+
 ## Naming matrix
 
 | Surface | 1.x transition | 2.0 decision point |
