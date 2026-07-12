@@ -508,6 +508,26 @@ overlap below 0.8.
 - [x] Preserve all live evidence/lifecycle/verification/address/config/runtime
       state and keep V1 fallback, ContextEngine, prompt, and final recall unchanged.
 
+## Phase 7O — Append-only V1 delta migration preview
+
+- [x] Add an owner-only, query-only delta planner bound to the Phase 7N
+      candidate receipt; emit hashes/counts only and never memory content or raw ids.
+- [x] Keep the existing 952 V2 rows and exact 632-row candidate baseline fixed;
+      reject any V2 row that loses its legacy backing.
+- [x] Classify the 27 append-only V1 rows as 27 reflection summaries, 27
+      unverified, 27 legacy-identity debt, and 27 operator-review required.
+- [x] Propose 0 active / 27 candidate / 0 archived rows; legacy metadata state
+      `active` does not override unresolved identity and verification debt.
+- [x] Plan 27 Truth/compatibility/FTS/vector/relation rows and 81 processed
+      outbox projection receipts under rollout
+      `clawlore-v2-v1-delta-migration-20260712-r1`.
+- [x] Generate owner-only plan digest
+      `28957730237f1b4a272cd1a103c1114db30411f153e6bc21fd01aa49afd0ac1a`.
+- [x] Pass focused 3/3 and full 189/189 tests, typecheck, build, module,
+      ranking/control, vector, golden recall, and release gate; pack 409 files.
+- [ ] Before any delta write, require a fresh encrypted snapshot and a separate
+      exact rollout approval. The preview authorizes no write or cutover.
+
 ## Phase 0 verification
 
 - Focused Memory Address V2 tests: 8/8 PASS.

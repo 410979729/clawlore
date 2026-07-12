@@ -61,6 +61,14 @@
   invalidate the exact 632-row candidate review, but they are a separate stage
   4/5 parity blocker and prohibit final recall cutover until a new migration/
   projection plan handles them under its own approval.
+- Phase 7O mapped those 27 rows in a new non-authorizing delta preview. Every
+  row is a reflection summary with unresolved legacy identity and unverified
+  evidence, so the only safe proposed lifecycle is candidate (0 active / 27
+  candidate / 0 archived). Existing V2 candidate state remains out of scope.
+- Applying the delta would add Truth, compatibility FTS, current FTS, vector
+  fallback, relation projection, and processed outbox receipts atomically. It
+  requires a fresh encrypted snapshot and a separate exact-digest approval;
+  the read-only plan cannot authorize a write or final recall cutover.
 
 ## Naming matrix
 
