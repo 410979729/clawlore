@@ -52,12 +52,70 @@ async function fixture() {
   await writeFile(baseline, JSON.stringify({
     phase: "clawlore-phase7g-live-preview",
     candidatePromotionPlan: {
-      planDigest: sha256("baseline"),
+      planDigest: sha256(JSON.stringify(baselineRows)),
       rows: baselineRows,
       authorizesLiveMutation: false,
     },
   }), { mode: 0o600 });
   return { root, source, registry, baseline };
+}
+
+async function upgradeToCurrentBaseline(paths) {
+  const db = new DatabaseSync(paths.source);
+  db.exec(`CREATE TABLE memory_fts_compat_v2(item_id TEXT PRIMARY KEY);
+    CREATE TABLE memory_fts_v2(item_id TEXT PRIMARY KEY);
+    CREATE TABLE memory_vector_projection_v2(item_id TEXT PRIMARY KEY);
+    CREATE TABLE memory_relation_projection_v2(item_id TEXT PRIMARY KEY);`);
+  for (const row of db.prepare("SELECT item_id FROM memory_items").all()) {
+    db.prepare("INSERT INTO memory_fts_compat_v2 VALUES (?)").run(row.item_id);
+    db.prepare("INSERT INTO memory_fts_v2 VALUES (?)").run(row.item_id);
+    db.prepare("INSERT INTO memory_vector_projection_v2 VALUES (?)").run(row.item_id);
+    db.prepare("INSERT INTO memory_relation_projection_v2 VALUES (?)").run(row.item_id);
+  }
+  for (const [id, kind] of [["direct", "direct-principal"], ["group", "conversation-boundary"]]) {
+    const row = db.prepare("SELECT evidence_json FROM memory_sources WHERE source_id=?").get(`source:${id}`);
+    const evidence = JSON.parse(row.evidence_json);
+    evidence.registryResolvedEvidenceV1 = { evidenceKind: kind };
+    db.prepare("UPDATE memory_sources SET evidence_json=? WHERE source_id=?")
+      .run(JSON.stringify(evidence), `source:${id}`);
+  }
+  db.close();
+  const dispositions = {
+    direct: "hold_candidate",
+    group: "hold_candidate",
+    manual: "hold_candidate",
+    system: "hold_candidate",
+    alias: "hold_candidate",
+    opaque: "quarantine",
+    unknown: "quarantine",
+  };
+  const baselineRows = Object.entries(dispositions).map(([id, disposition]) => ({
+    itemIdSha256: sha256(`legacy:${id}`),
+    disposition,
+    reasonCodes: ["fixture"],
+  }));
+  await writeFile(paths.baseline, JSON.stringify({
+    phase: "clawlore-post-assignment-candidate-plan",
+    source: {
+      v1Rows: 7,
+      v2Rows: 7,
+      candidateRows: 7,
+      activeRows: 0,
+      archivedRows: 0,
+      compatibilityRows: 7,
+      currentFtsRows: 7,
+      vectorRows: 7,
+      relationRows: 7,
+      pendingOutboxRows: 0,
+    },
+    decision: { lifecycleRolloutSelectable: false, eligibleRows: 0 },
+    candidatePromotionPlan: {
+      planDigest: sha256(JSON.stringify(baselineRows)),
+      rows: baselineRows,
+      authorizesLiveMutation: false,
+      automaticPromotionRows: 0,
+    },
+  }), { mode: 0o600 });
 }
 
 test("candidate evidence remediation creates a redacted query-only workbench", async () => {
@@ -105,7 +163,58 @@ test("candidate evidence remediation fails closed when the baseline candidate se
       sourcePath: paths.source,
       sessionsRegistryPath: paths.registry,
       baselinePreviewPath: paths.baseline,
-    }), /no longer matches baseline/);
+    }), /baseline promotion preview contract is invalid|no longer matches baseline/);
+  } finally {
+    await rm(paths.root, { recursive: true, force: true });
+  }
+});
+
+test("candidate evidence remediation preserves the current hold/quarantine baseline", async () => {
+  const paths = await fixture();
+  try {
+    await upgradeToCurrentBaseline(paths);
+    const plan = createLiveCandidateEvidenceRemediationPlanV1({
+      sourcePath: paths.source,
+      sessionsRegistryPath: paths.registry,
+      baselinePreviewPath: paths.baseline,
+    });
+    assert.equal(plan.baselinePhase, "clawlore-post-assignment-candidate-plan");
+    assert.equal(plan.counts.assigned_private_evidence_review, 1);
+    assert.equal(plan.counts.assigned_conversation_evidence_review, 1);
+    assert.equal(plan.counts.manual_principal_assignment_review, 1);
+    assert.equal(plan.counts.derived_system_evidence_review, 1);
+    assert.equal(plan.counts.legacy_provenance_hold_review, 1);
+    assert.equal(plan.counts.opaque_reference_quarantine, 1);
+    assert.equal(plan.counts.unknown_legacy_quarantine, 1);
+    assert.deepEqual(plan.summary, {
+      assignmentReviewRows: 1,
+      evidenceReviewRows: 4,
+      quarantineRows: 2,
+      policyHoldRows: 5,
+      policyQuarantineRows: 2,
+      mutationReadyRows: 0,
+    });
+    assert.equal(plan.source.currentFtsRows, 7);
+    assert.equal(plan.source.vectorRows, 7);
+    assert.equal(plan.source.relationRows, 7);
+    assert.equal(plan.authorizesLifecycleMutation, false);
+  } finally {
+    await rm(paths.root, { recursive: true, force: true });
+  }
+});
+
+test("candidate evidence remediation rejects current baseline projection drift", async () => {
+  const paths = await fixture();
+  try {
+    await upgradeToCurrentBaseline(paths);
+    const db = new DatabaseSync(paths.source);
+    db.prepare("DELETE FROM memory_vector_projection_v2 WHERE item_id=?").run("legacy:direct");
+    db.close();
+    assert.throws(() => createLiveCandidateEvidenceRemediationPlanV1({
+      sourcePath: paths.source,
+      sessionsRegistryPath: paths.registry,
+      baselinePreviewPath: paths.baseline,
+    }), /live source no longer matches/);
   } finally {
     await rm(paths.root, { recursive: true, force: true });
   }

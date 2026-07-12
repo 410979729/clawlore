@@ -10,10 +10,14 @@ export type CandidateEvidenceRemediationLaneV1 =
   | "registry_private_assignment_review"
   | "registry_conversation_assignment_review"
   | "registry_other_boundary_review"
+  | "assigned_private_evidence_review"
+  | "assigned_conversation_evidence_review"
   | "manual_principal_assignment_review"
   | "derived_system_evidence_review"
   | "known_source_evidence_review"
   | "unresolved_session_review"
+  | "legacy_provenance_hold_review"
+  | "policy_quarantine_review"
   | "conflicting_registry_quarantine"
   | "legacy_agent_alias_quarantine"
   | "opaque_reference_quarantine"
@@ -33,12 +37,17 @@ interface RegistryIndex {
   sessionFiles: Map<string, string | null>;
 }
 
+type PromotionDisposition = "hold_candidate" | "quarantine";
+
 interface BaselinePreviewV1 {
-  phase: "clawlore-phase7g-live-preview";
+  phase: "clawlore-phase7g-live-preview" | "clawlore-post-assignment-candidate-plan";
+  source?: CandidateEvidenceRemediationPlanV1["source"];
+  decision?: { lifecycleRolloutSelectable: false; eligibleRows: 0 };
   candidatePromotionPlan: {
     planDigest: string;
-    rows: Array<{ itemIdSha256: string }>;
+    rows: Array<{ itemIdSha256: string; disposition?: PromotionDisposition }>;
     authorizesLiveMutation: false;
+    automaticPromotionRows?: 0;
   };
 }
 
@@ -53,6 +62,7 @@ export interface CandidateEvidenceRemediationPlanV1 {
   automaticPromotionRows: 0;
   authorizesLifecycleMutation: false;
   requiresOperatorReview: true;
+  baselinePhase: BaselinePreviewV1["phase"];
   baselinePromotionPlanDigest: string;
   baselinePreviewSha256: string;
   source: {
@@ -62,6 +72,9 @@ export interface CandidateEvidenceRemediationPlanV1 {
     activeRows: number;
     archivedRows: number;
     compatibilityRows: number;
+    currentFtsRows?: number;
+    vectorRows?: number;
+    relationRows?: number;
     pendingOutboxRows: number;
   };
   counts: Record<CandidateEvidenceRemediationLaneV1, number>;
@@ -69,6 +82,8 @@ export interface CandidateEvidenceRemediationPlanV1 {
     assignmentReviewRows: number;
     evidenceReviewRows: number;
     quarantineRows: number;
+    policyHoldRows?: number;
+    policyQuarantineRows?: number;
     mutationReadyRows: 0;
   };
   rows: Array<{
@@ -183,6 +198,13 @@ function classification(row: CandidateRow, metadata: Record<string, unknown>): s
   return "unknown_legacy";
 }
 
+function assignedEvidenceKind(row: CandidateRow): "direct-principal" | "conversation-boundary" | undefined {
+  const evidence = parseRecord(row.evidence_json).registryResolvedEvidenceV1;
+  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) return undefined;
+  const kind = (evidence as Record<string, unknown>).evidenceKind;
+  return kind === "direct-principal" || kind === "conversation-boundary" ? kind : undefined;
+}
+
 function laneFor(row: CandidateRow, registry: RegistryIndex): {
   lane: CandidateEvidenceRemediationLaneV1;
   evidenceDigest?: string;
@@ -270,16 +292,61 @@ function laneFor(row: CandidateRow, registry: RegistryIndex): {
   };
 }
 
+function policyBoundLaneFor(
+  row: CandidateRow,
+  registry: RegistryIndex,
+  disposition?: PromotionDisposition,
+): ReturnType<typeof laneFor> {
+  if (!disposition) return laneFor(row, registry);
+  const metadata = parseRecord(row.metadata);
+  const kind = classification(row, metadata);
+  if (disposition === "quarantine") {
+    const raw = laneFor(row, registry);
+    if (kind === "unknown_legacy") {
+      return {
+        lane: "unknown_legacy_quarantine",
+        requiredActions: ["retain_quarantine", "require_external_provenance_before_reconsideration"],
+      };
+    }
+    if (raw.lane.endsWith("_quarantine")) return raw;
+    return {
+      lane: "policy_quarantine_review",
+      requiredActions: ["retain_quarantine", "resolve_policy_quarantine_reasons"],
+    };
+  }
+  const assigned = assignedEvidenceKind(row);
+  if (assigned === "direct-principal") {
+    return {
+      lane: "assigned_private_evidence_review",
+      requiredActions: ["review_address_resolution", "attach_source_receipt", "operator_review", "keep_candidate_until_verified"],
+    };
+  }
+  if (assigned === "conversation-boundary") {
+    return {
+      lane: "assigned_conversation_evidence_review",
+      requiredActions: ["review_address_resolution", "attach_source_receipt", "operator_review", "keep_candidate_until_verified"],
+    };
+  }
+  const raw = laneFor(row, registry);
+  if (raw.lane.endsWith("_quarantine")) {
+    return {
+      lane: "legacy_provenance_hold_review",
+      requiredActions: ["review_policy_hold_reasons", "attach_external_provenance", "keep_candidate_until_verified"],
+    };
+  }
+  return raw;
+}
+
 function scalar(db: DatabaseSync, sql: string): number {
   const row = db.prepare(sql).get() as Record<string, unknown>;
   return Number(Object.values(row)[0] ?? 0);
 }
 
-function sourceState(db: DatabaseSync): CandidateEvidenceRemediationPlanV1["source"] {
+function sourceState(db: DatabaseSync, includeAllProjections = false): CandidateEvidenceRemediationPlanV1["source"] {
   const compatibilityExists = Boolean(db.prepare(
     "SELECT 1 AS ok FROM sqlite_master WHERE type IN ('table','view') AND name='memory_fts_compat_v2'",
   ).get());
-  return {
+  const source: CandidateEvidenceRemediationPlanV1["source"] = {
     v1Rows: scalar(db, "SELECT COUNT(*) FROM memory_truth"),
     v2Rows: scalar(db, "SELECT COUNT(*) FROM memory_items"),
     candidateRows: scalar(db, "SELECT COUNT(*) FROM memory_items WHERE lifecycle='candidate'"),
@@ -288,6 +355,28 @@ function sourceState(db: DatabaseSync): CandidateEvidenceRemediationPlanV1["sour
     compatibilityRows: compatibilityExists ? scalar(db, "SELECT COUNT(*) FROM memory_fts_compat_v2") : 0,
     pendingOutboxRows: scalar(db, "SELECT COUNT(*) FROM projection_outbox WHERE processed_at IS NULL"),
   };
+  if (includeAllProjections) {
+    source.currentFtsRows = scalar(db, "SELECT COUNT(*) FROM memory_fts_v2");
+    source.vectorRows = scalar(db, "SELECT COUNT(*) FROM memory_vector_projection_v2");
+    source.relationRows = scalar(db, "SELECT COUNT(*) FROM memory_relation_projection_v2");
+  }
+  return source;
+}
+
+function sourceMatchesBaseline(
+  live: CandidateEvidenceRemediationPlanV1["source"],
+  baseline: CandidateEvidenceRemediationPlanV1["source"],
+): boolean {
+  return live.v1Rows === baseline.v1Rows
+    && live.v2Rows === baseline.v2Rows
+    && live.candidateRows === baseline.candidateRows
+    && live.activeRows === baseline.activeRows
+    && live.archivedRows === baseline.archivedRows
+    && live.compatibilityRows === baseline.compatibilityRows
+    && live.currentFtsRows === baseline.currentFtsRows
+    && live.vectorRows === baseline.vectorRows
+    && live.relationRows === baseline.relationRows
+    && live.pendingOutboxRows === baseline.pendingOutboxRows;
 }
 
 export function createLiveCandidateEvidenceRemediationPlanV1(input: {
@@ -298,11 +387,21 @@ export function createLiveCandidateEvidenceRemediationPlanV1(input: {
   const baselineLoaded = privateJson(input.baselinePreviewPath);
   const baseline = baselineLoaded.value as BaselinePreviewV1;
   if (
-    baseline.phase !== "clawlore-phase7g-live-preview"
+    !["clawlore-phase7g-live-preview", "clawlore-post-assignment-candidate-plan"].includes(baseline.phase)
     || baseline.candidatePromotionPlan?.authorizesLiveMutation !== false
     || !/^[a-f0-9]{64}$/i.test(baseline.candidatePromotionPlan?.planDigest ?? "")
     || !Array.isArray(baseline.candidatePromotionPlan?.rows)
+    || (baseline.phase === "clawlore-post-assignment-candidate-plan"
+      && hash(JSON.stringify(baseline.candidatePromotionPlan.rows)) !== baseline.candidatePromotionPlan.planDigest)
   ) throw new Error("baseline promotion preview contract is invalid");
+  const policyBound = baseline.phase === "clawlore-post-assignment-candidate-plan";
+  if (policyBound && (
+    baseline.decision?.eligibleRows !== 0
+    || baseline.decision?.lifecycleRolloutSelectable !== false
+    || baseline.candidatePromotionPlan.automaticPromotionRows !== 0
+    || !baseline.source
+    || baseline.candidatePromotionPlan.rows.some((row) => !["hold_candidate", "quarantine"].includes(row.disposition ?? ""))
+  )) throw new Error("current candidate baseline is not a zero-eligible remediation input");
   const registry = loadRegistry(input.sessionsRegistryPath);
   const { DatabaseSync } = require("node:sqlite") as {
     DatabaseSync: new (path: string, options: { readOnly: boolean }) => DatabaseSync;
@@ -310,7 +409,7 @@ export function createLiveCandidateEvidenceRemediationPlanV1(input: {
   const db = new DatabaseSync(input.sourcePath, { readOnly: true });
   try {
     db.exec("PRAGMA query_only=ON; PRAGMA busy_timeout=10000;");
-    const before = sourceState(db);
+    const before = sourceState(db, policyBound);
     const sourceRows = db.prepare(`SELECT i.item_id,i.lifecycle,i.verification,l.metadata,
       COALESCE((SELECT s.evidence_json FROM memory_sources s
         WHERE s.revision_id=i.current_revision_id ORDER BY s.source_id LIMIT 1),'{}') AS evidence_json
@@ -321,31 +420,59 @@ export function createLiveCandidateEvidenceRemediationPlanV1(input: {
     if (baselineHashes.size !== sourceRows.length || sourceRows.some((row) => !baselineHashes.has(hash(row.item_id)))) {
       throw new Error("live candidate set no longer matches baseline promotion preview");
     }
-    const rows = sourceRows.map((row) => ({ itemIdSha256: hash(row.item_id), ...laneFor(row, registry) }));
+    if (policyBound && !sourceMatchesBaseline(before, baseline.source!)) {
+      throw new Error("live source no longer matches current candidate baseline");
+    }
+    const dispositions = new Map(baseline.candidatePromotionPlan.rows.map((row) => [row.itemIdSha256, row.disposition]));
+    const rows = sourceRows.map((row) => ({
+      itemIdSha256: hash(row.item_id),
+      ...policyBoundLaneFor(row, registry, dispositions.get(hash(row.item_id))),
+    }));
     const counts = Object.fromEntries([
       "registry_private_assignment_review", "registry_conversation_assignment_review",
-      "registry_other_boundary_review", "manual_principal_assignment_review",
+      "registry_other_boundary_review", "assigned_private_evidence_review",
+      "assigned_conversation_evidence_review", "manual_principal_assignment_review",
       "derived_system_evidence_review", "known_source_evidence_review",
-      "unresolved_session_review", "conflicting_registry_quarantine",
+      "unresolved_session_review", "legacy_provenance_hold_review", "policy_quarantine_review",
+      "conflicting_registry_quarantine",
       "legacy_agent_alias_quarantine", "opaque_reference_quarantine",
       "unknown_legacy_quarantine",
     ].map((lane) => [lane, rows.filter((row) => row.lane === lane).length])) as Record<CandidateEvidenceRemediationLaneV1, number>;
-    const after = sourceState(db);
+    const after = sourceState(db, policyBound);
     if (JSON.stringify(before) !== JSON.stringify(after)) throw new Error("live candidate state changed during read-only planning");
     const assignmentReviewRows = counts.registry_private_assignment_review
       + counts.registry_conversation_assignment_review
       + counts.registry_other_boundary_review
       + counts.manual_principal_assignment_review;
-    const evidenceReviewRows = counts.derived_system_evidence_review
+    const evidenceReviewRows = counts.assigned_private_evidence_review
+      + counts.assigned_conversation_evidence_review
+      + counts.derived_system_evidence_review
       + counts.known_source_evidence_review
-      + counts.unresolved_session_review;
+      + counts.unresolved_session_review
+      + counts.legacy_provenance_hold_review;
     const quarantineRows = rows.length - assignmentReviewRows - evidenceReviewRows;
+    const policyHoldRows = policyBound
+      ? baseline.candidatePromotionPlan.rows.filter((row) => row.disposition === "hold_candidate").length
+      : undefined;
+    const policyQuarantineRows = policyBound
+      ? baseline.candidatePromotionPlan.rows.filter((row) => row.disposition === "quarantine").length
+      : undefined;
+    if (policyBound && (assignmentReviewRows + evidenceReviewRows !== policyHoldRows || quarantineRows !== policyQuarantineRows)) {
+      throw new Error("remediation lanes do not preserve baseline policy dispositions");
+    }
     const planCore = {
+      baselinePhase: baseline.phase,
       baselinePromotionPlanDigest: baseline.candidatePromotionPlan.planDigest,
       baselinePreviewSha256: baselineLoaded.sha256,
       source: before,
       counts,
-      summary: { assignmentReviewRows, evidenceReviewRows, quarantineRows, mutationReadyRows: 0 as const },
+      summary: {
+        assignmentReviewRows,
+        evidenceReviewRows,
+        quarantineRows,
+        ...(policyBound ? { policyHoldRows, policyQuarantineRows } : {}),
+        mutationReadyRows: 0 as const,
+      },
       rows,
     };
     return {
