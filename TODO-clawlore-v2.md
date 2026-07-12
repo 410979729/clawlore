@@ -152,6 +152,40 @@ Updated: 2026-07-12
 - [x] Reject native ContextEngine activation even when the fixture host advertises all capabilities.
 - [x] Add five focused tests and a machine-readable fixture-host smoke.
 
+## Phase 6C — Live read-only shadow acceptance
+
+- [x] Integrate the approved composition root into the live plugin without
+      enabling V2 writes, prompt mutation, or ContextEngine.
+- [x] Replace the plugin-bound-only `inbound_claim` observer with the generic
+      `message_received` ingress and preserve direct/group scope boundaries.
+- [x] Deploy matching source/dist artifacts and verify their hashes against the
+      isolated release candidate.
+- [x] Verify the live Gateway, health endpoint, runtime registration receipt,
+      redacted trace permissions, and zero V2 tables.
+- [x] Prove one real Joy Telegram direct message passes identity and policy and
+      invokes retrieval without injecting or writing anything.
+- [x] Re-run the 149-test suite, typecheck, build, runtime/module/vector smokes,
+      golden recall, and release gate.
+
+## Phase 6D — Read-only observation window
+
+- [ ] Collect additional real direct-message shadow traces and verify stable
+      identity/policy decisions, bounded candidate counts, and fail-open replies.
+- [ ] Exercise one authorized group-message boundary and prove it cannot acquire
+      private-principal visibility.
+- [ ] Add a redacted observation summary and explicit go/no-go receipt for the
+      separately approved V2-write phase.
+
+## Phase 7 — Separately approved V2 write migration
+
+- [ ] Create and verify a live encrypted snapshot before any schema change.
+- [ ] Run the migration preview against a verified copy and adjudicate identity
+      and scope debt before apply.
+- [ ] Require a fresh V2-write readiness receipt plus separate operator approval.
+- [ ] Apply additive V2 schema/writes with V1 fallback, then verify SQL/FTS/vector/
+      relation/Experience projection convergence and rollback evidence.
+- [ ] Keep ContextEngine and final recall cutover disabled until a later gate.
+
 ## Phase 0 verification
 
 - Focused Memory Address V2 tests: 8/8 PASS.
@@ -294,10 +328,28 @@ Updated: 2026-07-12
 - Golden recall: 1.0; forbidden violations 0; prompt-budget exceeded 0.
 - Live extension/config/database/hooks/ContextEngine/Gateway: unchanged.
 
+## Phase 6C verification
+
+- Live Gateway: `active/running`; port 19021 `/healthz` returned live.
+- Runtime receipt: `registered`, mode `shadow`, hooks 1, writes false, prompt
+  mutation false, ContextEngine false.
+- Registered observer: `message_received`; live source/dist hashes match the
+  isolated candidate.
+- Real Telegram direct trace: identity pass, policy pass, retrieval invoked,
+  candidates 0, selected 0; trace file remains 0600 and contains no raw message
+  or principal identifier.
+- Live V2 table count: 0 across the complete Truth/Experience V2 table set.
+- Full plugin tests: 149/149 PASS; typecheck/build/runtime composition/module
+  boundary/vector repair/golden recall/release gate PASS; pack scan 330 files.
+
+Run report:
+`projects/clawlore-v2/docs/clawlore-v2/eval/phase6c-live-shadow-run-2026-07-12.md`.
+
 ## Boundaries
 
-- Do not edit or deploy to the live extension without a separate live rollout approval.
-- Do not open or mutate the live memory database.
-- Do not select the ContextEngine slot or restart Gateway.
+- Phase 6C authorizes only the currently deployed read-only shadow observer.
+- Do not mutate the live memory database or enable V2 writes without the
+  separate Phase 7 readiness and operator-approval gate.
+- Do not select the ContextEngine slot or enable prompt mutation.
 - Do not rename package, CLI, config root, tools, or data paths.
 - Do not replace the three legacy prompt hooks until shadow comparison passes.
