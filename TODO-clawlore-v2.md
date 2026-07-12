@@ -174,7 +174,7 @@ Updated: 2026-07-12
       identity/policy/retrieval/candidate aggregates.
 - [x] Collect additional real direct-message shadow traces and verify stable
       identity/policy decisions, bounded candidate counts, and fail-open replies.
-- [ ] Exercise one authorized group-message boundary and prove it cannot acquire
+- [x] Exercise one authorized group-message boundary and prove it cannot acquire
       private-principal visibility.
 - [x] Add a redacted observation summary and explicit go/no-go receipt for the
       separately approved V2-write phase.
@@ -379,9 +379,14 @@ Run report:
 - Post-restart direct observation: 3/3 accepted direct/private samples; identity
   and policy pass 3/3, retrieval invoked 3/3, positive-candidate samples 3/3,
   maximum candidate count 5, and trace issues 0.
-- Private observation receipt: mode 0600, decision `observe`, blocker
-  `group_boundary_sample_missing`; it explicitly sets writes, prompt mutation,
-  and ContextEngine false and `authorizesV2Writes=false`.
+- Authorized Telegram group observation: `group` / `conversation`, identity
+  pass, `same_conversation` policy pass, retrieval invoked, 6 candidates, 0
+  selected, and explicit `private_principal_mismatch` rejection.
+- Final observation receipt: mode 0600, decision `go`, no blockers; 6 accepted
+  direct/private samples, 1 accepted group/conversation sample, 6 positive
+  candidate samples, maximum candidate count 6, issues 0. It explicitly keeps
+  writes, prompt mutation, and ContextEngine false and
+  `authorizesV2Writes=false`.
 - Receipt regression bundle: focused 5/5, full 154/154, typecheck/build/release
   gate PASS; pack scan 334 files.
 

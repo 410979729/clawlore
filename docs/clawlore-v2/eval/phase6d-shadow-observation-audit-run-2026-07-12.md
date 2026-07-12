@@ -2,9 +2,9 @@
 
 ## Outcome
 
-PASS for the read-only observation-audit and private receipt slice. Phase 6D
-remains open only because one authorized real group-boundary sample has not yet
-been collected.
+PASS. The read-only observation window is closed with real direct/private and
+authorized group/conversation evidence. This decision does not authorize V2
+writes, prompt mutation, ContextEngine, or Phase 7 activation.
 
 ## Delivered bundle
 
@@ -38,17 +38,30 @@ The one accepted record is the real Joy Telegram direct message used for Phase
 6C acceptance. No live configuration, database, prompt, or ContextEngine state
 was changed by this slice.
 
-After the Phase 6D runtime restart, three real Joy Telegram direct/private
-samples passed identity and policy and invoked retrieval. All three returned
-bounded positive candidate counts; the latest returned 5 candidates, selected
-0, and changed no prompt. The live trace has 12 total records, remains 0600,
-and has no schema/privacy issues. The seven pre-restart records remain
-`legacy_unknown` and do not count toward direct or group thresholds.
+At the direct-only checkpoint after the Phase 6D runtime restart, three real Joy
+Telegram direct/private samples passed identity and policy and invoked
+retrieval. All three returned bounded positive candidate counts; the latest
+returned 5 candidates, selected 0, and changed no prompt. That checkpoint had
+12 total records at mode 0600 with no schema/privacy issues. Its seven
+`legacy_unknown` records did not count toward direct or group thresholds.
 
-The current private receipt is stored under the rollout controls directory as
-`phase6d-observation.json`. Its decision is `observe`; its only blocker is
-`group_boundary_sample_missing`. It explicitly keeps writes, prompt mutation,
-and ContextEngine disabled and does not authorize Phase 7.
+Joy's authorized Telegram group message at 16:38:41 CST produced a completed
+live record with `ingressKind=group`, `visibility=conversation`, identity pass,
+`same_conversation` policy pass, retrieval invoked, 6 bounded candidates, and
+0 selected. The policy receipt explicitly recorded
+`private_principal_mismatch`, proving private-principal candidates were rejected
+rather than exposed to the group boundary.
+
+The final live audit contains 16 records: 10 completed and 6 skipped. It has 10
+accepted samples, including 6 direct/private and 1 group/conversation sample;
+6 accepted samples returned positive bounded candidate counts, the maximum was
+6, selected remained 0, and issues remained 0. The trace remains mode 0600.
+
+The private receipt is stored under the rollout controls directory as
+`phase6d-observation.json`. It was regenerated atomically at mode 0600 with
+decision `go` and no blockers. Its safety section still sets writes, prompt
+mutation, ContextEngine, and `authorizesV2Writes` to false and requires separate
+operator approval.
 
 ## Verification
 
@@ -59,8 +72,6 @@ and ContextEngine disabled and does not authorize Phase 7.
 
 ## Remaining work
 
-Collect one authorized real group event and prove the receipt records
-group/conversation visibility without private-principal visibility. It must not
-be fabricated from a continuation or fixture. Then regenerate the receipt and
-close Phase 6D only if the decision becomes `go` with no issues. The later
-V2-write gate remains separate and disabled.
+Phase 6D has no remaining observation-boundary work. The later V2-write gate is
+separate and remains disabled pending the Phase 7 migration, attribution,
+encrypted-snapshot, rollback, readiness-receipt, and operator-approval gates.

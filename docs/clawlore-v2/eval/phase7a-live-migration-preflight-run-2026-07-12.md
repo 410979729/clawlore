@@ -70,13 +70,10 @@ The private redacted receipt is stored at:
 
 ## Remaining gates
 
-1. Obtain one real authorized group/conversation ingress sample to close the
-   Phase 6D boundary window; the earlier unknown/conversation trace has no
-   matching Telegram group ingress evidence and is not accepted.
-2. Resolve the session-attribution lane only from verifiable session metadata;
+1. Resolve the session-attribution lane only from verifiable session metadata;
    do not infer identity from text or nicknames.
-3. Review the manual lane and keep unattributed rows quarantined.
-4. Select an approved persistent SecretRef, then create and restore-test the
+2. Review the manual lane and keep unattributed rows quarantined.
+3. Select an approved persistent SecretRef, then create and restore-test the
    actual encrypted live snapshot.
-5. Require a fresh V2-write readiness receipt plus separate operator approval
+4. Require a fresh V2-write readiness receipt plus separate operator approval
    before any additive schema or write activation.
