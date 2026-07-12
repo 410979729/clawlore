@@ -97,6 +97,10 @@
   a lifecycle approval gate. The next plan-led step is read-only remediation of
   the 504 hold and 156 quarantine lanes; any later evidence write needs a fresh
   encrypted snapshot and a new exact approval.
+- Phase 7S preserves that 504/156 policy split while refining the 504 holds into
+  77 assignment-review and 427 evidence-review rows. Only one new registry-
+  direct row is proposed for evidence assignment; the exact plan keeps the
+  other 659 rows unchanged and grants no write/lifecycle/runtime authority.
 
 ## Naming matrix
 

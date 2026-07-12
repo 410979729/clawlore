@@ -590,8 +590,21 @@ overlap below 0.8.
       ranking/control, vector, golden recall, and release gate; pack 416 files.
 - [x] Keep database/config/service/lifecycle/verification/address/runtime state
       unchanged. No lifecycle or cutover approval is useful while eligible is 0.
-- [ ] Generate a new read-only remediation plan over the current 504 hold and
+- [x] Generate a new read-only remediation plan over the current 504 hold and
       156 quarantine rows before proposing any evidence write.
+
+## Phase 7S — Policy-bound remediation and one-row exact evidence plan
+
+- [x] Preserve the Phase 7R 504 hold / 156 quarantine dispositions exactly.
+- [x] Split holds into 77 assignment-review and 427 evidence-review rows;
+      mutation-ready rows remain 0.
+- [x] Generate an exact non-authorizing plan for 1 new registry-direct evidence
+      assignment; keep 503 holds and 156 quarantines unchanged.
+- [x] Pass focused 4/4, affected 8/8, full 196/196, typecheck/build/module/
+      ranking/control/vector/golden/release; pack 417.
+- [ ] Before the one-row evidence write, require a fresh encrypted snapshot and
+      exact approval bound to digest
+      `5bcbfbfabd64638188cdb68ed58de0d6fb0ee79ef14f2859c21bd12dbb027c05`.
 
 ## Phase 0 verification
 
