@@ -69,6 +69,16 @@
   fallback, relation projection, and processed outbox receipts atomically. It
   requires a fresh encrypted snapshot and a separate exact-digest approval;
   the read-only plan cannot authorize a write or final recall cutover.
+- Phase 7P consumed the exact 27-row approval only as a pre-apply gate. The
+  mandatory live replan found V1/V2 980/952 and 28 delta rows (27 reflection
+  summaries plus 1 operational checkpoint), changing the digest to
+  `6f1e6ac9...421d35`. The old approval therefore failed closed before snapshot
+  or write. The new 28-row plan remains non-authorizing and all rows remain
+  candidate/unverified with legacy-identity debt.
+- A later approved delta apply now has an executable transaction path, but it
+  may run only after a fresh encrypted snapshot and a new exact approval for
+  the 28-row digest. Existing V2 canonical/lifecycle/verification/evidence,
+  V1 fallback, ContextEngine, prompt mutation, and final recall stay immutable.
 
 ## Naming matrix
 

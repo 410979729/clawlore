@@ -528,6 +528,26 @@ overlap below 0.8.
 - [ ] Before any delta write, require a fresh encrypted snapshot and a separate
       exact rollout approval. The preview authorizes no write or cutover.
 
+## Phase 7P — Exact-approval drift rejection and delta apply gate
+
+- [x] Add an exact-digest delta apply operator and CLI that require owner-only
+      plan/approval controls plus a fresh encrypted snapshot before mutation.
+- [x] Protect all existing canonical, lifecycle, verification, source-evidence,
+      ACL, and event rows with pre/post transaction digests.
+- [x] Atomically bind later approved rows to Truth, compatibility/current FTS,
+      vector fallback, relation projection, and processed outbox convergence.
+- [x] Fail closed on the approved 27-row plan because live V1 grew to 980 and
+      the delta changed to 28 rows before snapshot or write.
+- [x] Generate a new owner-only read-only plan: 27 reflection summaries plus 1
+      operational checkpoint, all candidate/unverified/legacy-identity debt;
+      digest `6f1e6ac9764dc3e2e5fd7796075a360696ae484f7b308b6d1fa2cfa59b421d35`.
+- [x] Pass focused 6/6 and full 192/192 tests, typecheck, build, module,
+      ranking/control, vector, golden recall, and release gate; pack 414 files.
+- [x] Preserve live V2 952, lifecycle 0/632/320, all projections 952, pending
+      outbox 0, V1 fallback, ContextEngine, prompt, and final recall boundaries.
+- [ ] Obtain a new exact approval for the 28-row plan before creating a fresh
+      encrypted snapshot or running the delta apply operator.
+
 ## Phase 0 verification
 
 - Focused Memory Address V2 tests: 8/8 PASS.
