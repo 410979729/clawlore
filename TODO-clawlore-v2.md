@@ -254,9 +254,8 @@ Updated: 2026-07-12
       smoke, golden recall, and 349-file package scan PASS.
 - [x] Verify Gateway active/running, healthz live, port 19021 listening, recent
       warnings empty, and V2 table count still 0.
-- [ ] Wait for a separate explicit V2-write approval. Current readiness records
-      `authorizesV2Writes=false`, `operatorApprovalPresent=false`, and
-      `writeActivationAllowed=false`.
+- [x] Obtain the separate V2-write approval; Phase 7D applied the exact approved
+      rollout while the readiness receipt itself remained non-authorizing.
 
 ## Phase 7D — Approved additive live V2 write rollout
 
@@ -273,6 +272,32 @@ Updated: 2026-07-12
       warning logs, repository cleanliness, and owner-only rollout receipts.
 - [x] Keep live runtime mode `shadow`, compatibility ContextEngine, V1 reads,
       and the existing shadow approval pointers unchanged; no restart occurred.
+
+## Phase 7E — Live read-only V1/V2 recall parity
+
+- [x] Add a query-only V1/V2 corpus, FTS, vector-fallback, ranking, and policy
+      parity inspector that emits no query or memory content.
+- [x] Distinguish content normalization from substantive mutation; 13 rows are
+      trim-only and substantive mismatches are 0.
+- [x] Prove the common content/category lane has Top-K overlap and rank agreement
+      1.0 across six fixed live queries.
+- [x] Prove V2 forbidden-scope leakage is 0 and candidate-only rows remain
+      non-injectable.
+- [x] Keep shadow-read readiness separate from cutover readiness and keep every
+      receipt non-authorizing.
+- [ ] Resolve native FTS ranking overlap below 0.8 in a fixture-only design;
+      current minimum is 0.6 because the indexed fields differ.
+- [ ] Define and review an evidence-backed promotion policy for the 632
+      candidate rows; do not bulk-promote or infer identity.
+- [ ] Keep ContextEngine, prompt mutation, final recall cutover, and unapproved
+      live V2 mutations disabled.
+
+Phase 7E verification: focused 2/2 and full 166/166 tests PASS; typecheck,
+build, module boundaries, vector smoke, golden recall, and release gate PASS;
+pack scan 359 files. Live decision is `shadowReadReady=true` and
+`cutoverReady=false` with no shadow blockers and three cutover blockers:
+no active V2 memory, no injectable V2 recall evidence, and native ranking
+overlap below 0.8.
 
 ## Phase 0 verification
 
