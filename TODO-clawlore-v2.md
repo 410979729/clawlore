@@ -299,6 +299,28 @@ pack scan 359 files. Live decision is `shadowReadReady=true` and
 no active V2 memory, no injectable V2 recall evidence, and native ranking
 overlap below 0.8.
 
+## Phase 7F — Fixture ranking compatibility and promotion policy
+
+- [x] Reproduce the native-field mismatch in a synthetic three-lane FTS fixture.
+- [x] Define a rebuildable `memory_fts_compat_v2` projection that preserves V1
+      `content + metadata_text` semantics without changing canonical V2 truth.
+- [x] Restrict legacy auxiliary search input to the historical eight-field
+      allowlist; do not copy raw metadata or arbitrary sender/session fields.
+- [x] Add an address-bound candidate review policy for private, conversation,
+      project, and broad-scope evidence.
+- [x] Keep automatic promotion at zero and emit only hashed ids, dispositions,
+      reason codes, counts, and a plan digest.
+- [x] Prove the fixture compatibility lane restores minimum overlap/rank
+      agreement to 1.0 while the intentionally divergent current lane is below 0.8.
+- [x] Run focused 3/3, full 169/169, typecheck, build, module, vector, golden,
+      and release gates; final package scan 369 files.
+- [ ] Run a read-only live compatibility-backfill preview under a new rollout;
+      this requires a fresh encrypted snapshot and separate operator approval.
+- [ ] Build the live 632-row candidate review plan from address-bound evidence;
+      do not promote any row without an exact-digest operator approval.
+- [ ] Keep ContextEngine, prompt mutation, final recall cutover, and unapproved
+      live V2 mutations disabled.
+
 ## Phase 0 verification
 
 - Focused Memory Address V2 tests: 8/8 PASS.
