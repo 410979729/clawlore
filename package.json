@@ -53,6 +53,7 @@
     "preview:clawlore-phase7g-live": "node scripts/clawlore-phase7g-live-preview.mjs",
     "preview:clawlore-candidate-evidence": "node scripts/clawlore-candidate-evidence-remediation.mjs",
     "preview:clawlore-evidence-assignment": "node scripts/clawlore-evidence-assignment-plan.mjs",
+    "rollout:clawlore-evidence-assignment": "node scripts/clawlore-live-evidence-assignment.mjs",
     "rollout:clawlore-live-compatibility": "node scripts/clawlore-live-compatibility-backfill.mjs",
     "smoke:clawlore-snapshot": "node --test tests/clawlore-snapshot-restore.test.mjs",
     "smoke:clawlore-legacy-live-preflight": "node --test tests/clawlore-legacy-live-preflight.test.mjs",
