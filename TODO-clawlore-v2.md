@@ -360,6 +360,8 @@ overlap below 0.8.
 - Implementation commit: `fa7276f`.
 - No compatibility object, lifecycle mutation, ContextEngine, prompt mutation,
   final recall cutover, configuration change, or Gateway restart occurred.
+- Exit: repository clean, `WORKSPACE_LAYOUT_OK`; state hygiene remains the same
+  68 unrelated historical outside-workspace findings.
 
 ## Phase 0 verification
 

@@ -96,11 +96,16 @@ authorize it.
 ## Cleanup and remaining gates
 
 The superseded first preview receipt, generated dependency tree, and any
-restore-test residue are removed during final cleanup. The fresh encrypted
+restore-test residue were removed during final cleanup. The fresh encrypted
 archive, its 0600 receipt, and the final 0600 preview receipt are retained as
 rollback/audit evidence. No live database row, schema, configuration, plugin,
 prompt, ContextEngine selection, final recall route, or service process was
 changed.
+
+Final exit checks: candidate repository clean, `WORKSPACE_LAYOUT_OK`, Gateway
+active/running with `NRestarts=0`, healthz live, port 19021 listening, and no
+warning-or-higher service entries during the round. State hygiene remains the
+same 68 unrelated historical outside-workspace findings; this round added none.
 
 Remaining independent gate: exact-digest approval for the compatibility
 projection backfill, if Joy chooses it. Candidate promotion remains blocked by
