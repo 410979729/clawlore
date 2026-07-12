@@ -186,11 +186,11 @@ Updated: 2026-07-12
       and scope debt before apply.
 - [x] Create a fresh evidence-bound V2-write readiness receipt that cannot
       authorize writes by itself.
-- [ ] Obtain separate operator approval for rollout
+- [x] Obtain separate operator approval for rollout
       `clawlore-v2-write-20260712-r1`.
-- [ ] Apply additive V2 schema/writes with V1 fallback, then verify SQL/FTS/vector/
+- [x] Apply additive V2 schema/writes with V1 fallback, then verify SQL/FTS/vector/
       relation/Experience projection convergence and rollback evidence.
-- [ ] Keep ContextEngine and final recall cutover disabled until a later gate.
+- [x] Keep ContextEngine and final recall cutover disabled until a later gate.
 
 ## Phase 7A — Read-only live migration preflight
 
@@ -257,6 +257,22 @@ Updated: 2026-07-12
 - [ ] Wait for a separate explicit V2-write approval. Current readiness records
       `authorizesV2Writes=false`, `operatorApprovalPresent=false`, and
       `writeActivationAllowed=false`.
+
+## Phase 7D — Approved additive live V2 write rollout
+
+- [x] Bind a 0600 operator approval to the exact rollout id, approved readiness,
+      implementation commit, V1 fallback, and explicit ContextEngine/cutover denial.
+- [x] Apply Truth V2, FTS, vector-fallback, relation-projection, rollout-ledger,
+      and Experience schemas in one `BEGIN IMMEDIATE` transaction.
+- [x] Preserve all 952 V1 truth rows and V1 FTS/vector fallback without rewriting
+      or deleting any legacy row.
+- [x] Migrate 952 V2 rows as 0 active, 632 candidate, and 320 archived.
+- [x] Converge 952 FTS, 952 vector-fallback, 952 relation-projection, and 2,856
+      processed outbox rows with zero pending rows.
+- [x] Verify SQLite integrity, foreign keys, V1 doctor, Gateway/healthz/port,
+      warning logs, repository cleanliness, and owner-only rollout receipts.
+- [x] Keep live runtime mode `shadow`, compatibility ContextEngine, V1 reads,
+      and the existing shadow approval pointers unchanged; no restart occurred.
 
 ## Phase 0 verification
 
