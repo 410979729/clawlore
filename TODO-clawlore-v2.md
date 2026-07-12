@@ -484,8 +484,29 @@ overlap below 0.8.
 - [x] Pass focused 4/4 and full 182/182 tests, typecheck, build, module,
       ranking/control, vector, golden recall, and release gate; package scan
       399 files.
-- [ ] Generate a new read-only post-assignment candidate plan before proposing
+- [x] Generate a new read-only post-assignment candidate plan before proposing
       any lifecycle change. Phase 7M approval cannot authorize promotion.
+
+## Phase 7N — Post-assignment candidate-policy preview
+
+- [x] Add a query-only planner that binds the owner-only Phase 7L exact plan to
+      the Phase 7M acceptance receipt and validates all 90 assigned evidence
+      payloads against their approved per-row digests.
+- [x] Interpret direct-principal and conversation-boundary evidence without
+      inferring a principal/conversation id or changing address/verification.
+- [x] Keep the exact 632-row V2 candidate baseline fail-closed while tolerating
+      unrelated append-only V1 rows and reporting them as a cutover blocker.
+- [x] Generate the owner-only live preview for proposed rollout
+      `clawlore-v2-candidate-promotion-20260712-r2`, plan digest
+      `b4f93105e76db3d639ef8d797dca327e6490375d6ba1018a88077ddbb600e74a`.
+- [x] Confirm 0 eligible, 476 hold, 156 quarantine, automatic promotion 0;
+      lifecycle rollout is not selectable and no approval should be requested.
+- [x] Record V1/V2 979/952 with 27 append-only V1 rows not yet mirrored to V2;
+      candidate baseline, compatibility 952, and pending outbox 0 remain stable.
+- [x] Pass focused 4/4 and full 186/186 tests, typecheck, build, module,
+      ranking/control, vector, golden recall, and release gate; pack 404 files.
+- [x] Preserve all live evidence/lifecycle/verification/address/config/runtime
+      state and keep V1 fallback, ContextEngine, prompt, and final recall unchanged.
 
 ## Phase 0 verification
 

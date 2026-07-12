@@ -52,6 +52,15 @@
 - The next permissible step is a new read-only candidate-policy preview that
   explicitly understands the new evidence shape. It cannot reuse Phase 7M
   approval or infer lifecycle authority from a successful evidence write.
+- Phase 7N completed that read-only preview. All 90 assigned payloads match the
+  approved exact plan, but the result remains 0 eligible / 476 hold / 156
+  quarantine because registry resolution did not change address, verification,
+  operator review, or source-receipt state. No lifecycle rollout is selectable.
+- Legacy V1 continued receiving writes after the additive migration and is now
+  979 rows while V2 remains 952. The 27 append-only, unmirrored V1 rows do not
+  invalidate the exact 632-row candidate review, but they are a separate stage
+  4/5 parity blocker and prohibit final recall cutover until a new migration/
+  projection plan handles them under its own approval.
 
 ## Naming matrix
 
