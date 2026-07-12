@@ -181,10 +181,13 @@ Updated: 2026-07-12
 
 ## Phase 7 — Separately approved V2 write migration
 
-- [ ] Create and verify a live encrypted snapshot before any schema change.
-- [ ] Run the migration preview against a verified copy and adjudicate identity
+- [x] Create and verify a live encrypted snapshot before any schema change.
+- [x] Run the migration preview against a verified copy and adjudicate identity
       and scope debt before apply.
-- [ ] Require a fresh V2-write readiness receipt plus separate operator approval.
+- [x] Create a fresh evidence-bound V2-write readiness receipt that cannot
+      authorize writes by itself.
+- [ ] Obtain separate operator approval for rollout
+      `clawlore-v2-write-20260712-r1`.
 - [ ] Apply additive V2 schema/writes with V1 fallback, then verify SQL/FTS/vector/
       relation/Experience projection convergence and rollback evidence.
 - [ ] Keep ContextEngine and final recall cutover disabled until a later gate.
@@ -210,7 +213,7 @@ Updated: 2026-07-12
 - [x] Add a collision-safe encrypted live-snapshot executor that rejects
       existing destinations, restore-tests to a disposable path, removes all
       plaintext SQLite files, and emits a 0600 non-authorizing receipt.
-- [ ] Select an approved persistent SecretRef and run the executor against the
+- [x] Select an approved persistent SecretRef and run the executor against the
       actual live source before requesting V2-write approval.
 
 ## Phase 7B verification
@@ -235,6 +238,25 @@ Updated: 2026-07-12
   repository is clean and only the 0600 v5 evidence receipt remains.
 - State hygiene still reports the same 68 unrelated outside-workspace findings;
   none was created or modified by this bundle.
+
+## Phase 7C — Encrypted live snapshot and readiness gate
+
+- [x] Keep the 76 unowned manual rows candidate-only; do not infer Joy identity.
+- [x] Create an independent 32-byte archive key in the 0700 state SecretRef
+      area; key file mode is 0600 and key material is not logged or documented.
+- [x] Create a 0600 AES-256-GCM live archive and restore-test it to a disposable
+      path; source truth remained stable at 952 rows.
+- [x] Verify archive checksum, schema digest, logical truth digest, SQLite
+      integrity, foreign keys, and plaintext/WAL/SHM cleanup.
+- [x] Bind the v5 attribution preflight and encrypted-snapshot receipt into a
+      fresh 0600 V2-write readiness receipt.
+- [x] Re-run the complete release gate: 162/162 tests, typecheck, build, vector
+      smoke, golden recall, and 349-file package scan PASS.
+- [x] Verify Gateway active/running, healthz live, port 19021 listening, recent
+      warnings empty, and V2 table count still 0.
+- [ ] Wait for a separate explicit V2-write approval. Current readiness records
+      `authorizesV2Writes=false`, `operatorApprovalPresent=false`, and
+      `writeActivationAllowed=false`.
 
 ## Phase 0 verification
 
