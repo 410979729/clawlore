@@ -17,7 +17,9 @@ function parseArgs(argv) {
     args[token.slice(2)] = value;
     index += 1;
   }
-  for (const required of ["source", "assignment-plan", "assignment-acceptance", "rollout-id", "receipt"]) {
+  for (const required of [
+    "source", "assignment-plan", "assignment-acceptance", "delta-acceptance", "rollout-id", "receipt",
+  ]) {
     if (!args[required]) throw new Error(`--${required} is required`);
   }
   return args;
@@ -29,6 +31,7 @@ const plan = createLivePostAssignmentCandidatePlanV1({
   sourcePath: resolve(args.source),
   assignmentPlanPath: resolve(args["assignment-plan"]),
   assignmentAcceptancePath: resolve(args["assignment-acceptance"]),
+  deltaAcceptancePath: resolve(args["delta-acceptance"]),
   proposedRolloutId: args["rollout-id"],
 });
 await mkdir(dirname(receiptPath), { recursive: true });
@@ -39,6 +42,7 @@ process.stdout.write(`${JSON.stringify({
   proposedRolloutId: plan.proposedRolloutId,
   readOnly: plan.readOnly,
   assignment: plan.assignment,
+  delta: plan.delta,
   source: plan.source,
   counts: plan.candidatePromotionPlan.counts,
   planDigest: plan.candidatePromotionPlan.planDigest,

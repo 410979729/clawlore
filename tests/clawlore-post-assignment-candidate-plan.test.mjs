@@ -206,6 +206,96 @@ async function fixture() {
   return { root, source, planPath, acceptancePath };
 }
 
+async function appendAcceptedDelta(paths) {
+  const deltaAcceptancePath = join(paths.root, "delta-acceptance.json");
+  const addressJson = JSON.stringify({
+    schemaVersion: 2,
+    tenantId: "tenant",
+    principalId: "legacy:unresolved",
+    agentId: "main",
+    visibility: "private",
+    retention: "durable",
+  });
+  const deltaRows = [
+    { id: "delta-reflection", classification: "reflection_summary" },
+    { id: "delta-checkpoint", classification: "operational_checkpoint" },
+  ];
+  const db = new DatabaseSync(paths.source);
+  db.exec(`CREATE TABLE memory_fts_v2(item_id TEXT PRIMARY KEY);
+    CREATE TABLE memory_vector_projection_v2(item_id TEXT PRIMARY KEY);
+    CREATE TABLE memory_relation_projection_v2(item_id TEXT PRIMARY KEY);`);
+  for (const row of db.prepare("SELECT item_id FROM memory_items").all()) {
+    db.prepare("INSERT INTO memory_fts_v2 VALUES (?)").run(row.item_id);
+    db.prepare("INSERT INTO memory_vector_projection_v2 VALUES (?)").run(row.item_id);
+    db.prepare("INSERT INTO memory_relation_projection_v2 VALUES (?)").run(row.item_id);
+  }
+  for (const row of deltaRows) {
+    const itemId = `legacy:${row.id}`;
+    const revisionId = `revision:${row.id}`;
+    db.prepare("INSERT INTO memory_truth VALUES (?)").run(row.id);
+    db.prepare("INSERT INTO memory_items VALUES (?,?,?,?,?)")
+      .run(itemId, revisionId, addressJson, "candidate", "unverified");
+    db.prepare("INSERT INTO memory_sources VALUES (?,?,?)")
+      .run(`source:${row.id}`, revisionId, JSON.stringify({
+        classification: row.classification,
+        verificationDebt: "legacy_identity",
+        reviewRequired: true,
+      }));
+    db.prepare("INSERT INTO memory_fts_compat_v2 VALUES (?)").run(itemId);
+    db.prepare("INSERT INTO memory_fts_v2 VALUES (?)").run(itemId);
+    db.prepare("INSERT INTO memory_vector_projection_v2 VALUES (?)").run(itemId);
+    db.prepare("INSERT INTO memory_relation_projection_v2 VALUES (?)").run(itemId);
+  }
+  db.close();
+  const acceptance = {
+    schemaVersion: 1,
+    phase: "clawlore-v2-live-v1-append-delta-acceptance",
+    rolloutId: "clawlore-v2-v1-delta-migration-fixture-r2",
+    status: "pass",
+    verifiedAt: "2026-07-13T00:23:19.000Z",
+    planDigest: sha256("delta-plan"),
+    source: { v1Rows: 6, v2Rows: 6, sourceLogicalDigestUnchanged: true },
+    delta: {
+      rows: 2,
+      reflectionSummaryRows: 1,
+      operationalCheckpointRows: 1,
+      candidateRows: 2,
+      unverifiedRows: 2,
+      legacyIdentityDebtRows: 2,
+    },
+    preserved: {
+      existingCanonicalRowsChanged: 0,
+      existingLifecycleRowsChanged: 0,
+      existingVerificationRowsChanged: 0,
+      existingEvidenceRowsChanged: 0,
+    },
+    lifecycle: { activeRows: 0, candidateRows: 6, archivedRows: 0 },
+    projections: {
+      compatibilityRows: 6,
+      ftsRows: 6,
+      vectorRows: 6,
+      relationRows: 6,
+      newProcessedOutboxRows: 6,
+      pendingOutboxRows: 0,
+    },
+    database: {
+      integrity: "ok",
+      foreignKeyViolations: 0,
+      v1DoctorHealthy: true,
+      sqlVectorScopeMatch: true,
+    },
+    runtime: {
+      v1FallbackReads: true,
+      existingCandidateLifecycleMutationEnabled: false,
+      contextEngineEnabled: false,
+      promptMutationEnabled: false,
+      finalRecallCutoverEnabled: false,
+    },
+  };
+  await writeFile(deltaAcceptancePath, `${JSON.stringify(acceptance, null, 2)}\n`, { mode: 0o600 });
+  return deltaAcceptancePath;
+}
+
 test("post-assignment candidate plan validates new evidence without inferring ownership", async () => {
   const paths = await fixture();
   try {
@@ -254,6 +344,66 @@ test("post-assignment candidate plan tolerates unrelated append-only V1 rows but
     assert.equal(result.source.candidateBaselineUnchanged, true);
     assert.equal(result.decision.finalRecallCutoverBlockedByUnmirroredV1, true);
     assert.equal(result.authorizesFinalRecall, false);
+  } finally {
+    await rm(paths.root, { recursive: true, force: true });
+  }
+});
+
+test("post-assignment candidate plan binds an accepted delta into a complete candidate baseline", async () => {
+  const paths = await fixture();
+  try {
+    const deltaAcceptancePath = await appendAcceptedDelta(paths);
+    const result = createLivePostAssignmentCandidatePlanV1({
+      sourcePath: paths.source,
+      assignmentPlanPath: paths.planPath,
+      assignmentAcceptancePath: paths.acceptancePath,
+      deltaAcceptancePath,
+      proposedRolloutId: "clawlore-v2-candidate-promotion-fixture-r3",
+      now: () => new Date("2026-07-13T01:00:00.000Z"),
+    });
+    assert.equal(result.source.v1Rows, 6);
+    assert.equal(result.source.v2Rows, 6);
+    assert.equal(result.source.candidateRows, 6);
+    assert.equal(result.source.unmirroredV1Rows, 0);
+    assert.equal(result.source.currentFtsRows, 6);
+    assert.equal(result.source.vectorRows, 6);
+    assert.equal(result.source.relationRows, 6);
+    assert.deepEqual(result.candidatePromotionPlan.counts, {
+      eligible_for_operator_promotion: 0,
+      hold_candidate: 5,
+      quarantine: 1,
+      preserve_archived: 0,
+    });
+    assert.equal(result.delta.rowsValidated, 2);
+    assert.equal(result.delta.reflectionSummaryRows, 1);
+    assert.equal(result.delta.operationalCheckpointRows, 1);
+    assert.equal(result.decision.lifecycleRolloutSelectable, false);
+    assert.equal(result.decision.finalRecallCutoverBlockedByUnmirroredV1, false);
+    assert.equal(result.authorizesLifecycleMutation, false);
+  } finally {
+    await rm(paths.root, { recursive: true, force: true });
+  }
+});
+
+test("post-assignment candidate plan rejects accepted-delta evidence drift", async () => {
+  const paths = await fixture();
+  try {
+    const deltaAcceptancePath = await appendAcceptedDelta(paths);
+    const db = new DatabaseSync(paths.source);
+    const row = db.prepare("SELECT evidence_json FROM memory_sources WHERE source_id=?")
+      .get("source:delta-reflection");
+    const evidence = JSON.parse(row.evidence_json);
+    evidence.verificationDebt = "none";
+    db.prepare("UPDATE memory_sources SET evidence_json=? WHERE source_id=?")
+      .run(JSON.stringify(evidence), "source:delta-reflection");
+    db.close();
+    assert.throws(() => createLivePostAssignmentCandidatePlanV1({
+      sourcePath: paths.source,
+      assignmentPlanPath: paths.planPath,
+      assignmentAcceptancePath: paths.acceptancePath,
+      deltaAcceptancePath,
+      proposedRolloutId: "clawlore-v2-candidate-promotion-fixture-r3",
+    }), /delta candidate state does not match/);
   } finally {
     await rm(paths.root, { recursive: true, force: true });
   }

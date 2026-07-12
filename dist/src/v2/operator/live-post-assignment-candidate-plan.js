@@ -95,6 +95,43 @@ function loadControls(planPath, acceptancePath) {
         acceptanceSha256: loadedAcceptance.sha256,
     };
 }
+function loadDeltaAcceptance(path) {
+    const loaded = privateJson(path);
+    const value = loaded.value;
+    if (value.schemaVersion !== 1
+        || value.phase !== "clawlore-v2-live-v1-append-delta-acceptance"
+        || value.status !== "pass"
+        || !hasDigest(value.planDigest)
+        || !Number.isFinite(Date.parse(value.verifiedAt))
+        || value.source.sourceLogicalDigestUnchanged !== true
+        || value.delta.rows <= 0
+        || value.delta.rows !== value.delta.reflectionSummaryRows + value.delta.operationalCheckpointRows
+        || value.delta.candidateRows !== value.delta.rows
+        || value.delta.unverifiedRows !== value.delta.rows
+        || value.delta.legacyIdentityDebtRows !== value.delta.rows
+        || value.preserved.existingCanonicalRowsChanged !== 0
+        || value.preserved.existingLifecycleRowsChanged !== 0
+        || value.preserved.existingVerificationRowsChanged !== 0
+        || value.preserved.existingEvidenceRowsChanged !== 0
+        || value.lifecycle.candidateRows < value.delta.rows
+        || value.projections.compatibilityRows !== value.source.v2Rows
+        || value.projections.ftsRows !== value.source.v2Rows
+        || value.projections.vectorRows !== value.source.v2Rows
+        || value.projections.relationRows !== value.source.v2Rows
+        || value.projections.newProcessedOutboxRows !== value.delta.rows * 3
+        || value.projections.pendingOutboxRows !== 0
+        || value.database.integrity !== "ok"
+        || value.database.foreignKeyViolations !== 0
+        || value.database.v1DoctorHealthy !== true
+        || value.database.sqlVectorScopeMatch !== true
+        || value.runtime.v1FallbackReads !== true
+        || value.runtime.existingCandidateLifecycleMutationEnabled !== false
+        || value.runtime.contextEngineEnabled !== false
+        || value.runtime.promptMutationEnabled !== false
+        || value.runtime.finalRecallCutoverEnabled !== false)
+        throw new Error("delta acceptance contract is invalid or unsafe");
+    return loaded;
+}
 function stableStateDigest(row) {
     return hash(JSON.stringify({
         itemId: row.item_id,
@@ -179,8 +216,8 @@ function scalar(db, sql) {
     const row = db.prepare(sql).get();
     return Number(Object.values(row)[0] ?? 0);
 }
-function liveSourceSummary(db) {
-    return {
+function liveSourceSummary(db, includeDeltaProjections = false) {
+    const summary = {
         v1Rows: scalar(db, "SELECT COUNT(*) FROM memory_truth"),
         v2Rows: scalar(db, "SELECT COUNT(*) FROM memory_items"),
         candidateRows: scalar(db, "SELECT COUNT(*) FROM memory_items WHERE lifecycle='candidate'"),
@@ -189,6 +226,12 @@ function liveSourceSummary(db) {
         compatibilityRows: scalar(db, "SELECT COUNT(*) FROM memory_fts_compat_v2"),
         pendingOutboxRows: scalar(db, "SELECT COUNT(*) FROM projection_outbox WHERE processed_at IS NULL"),
     };
+    if (includeDeltaProjections) {
+        summary.currentFtsRows = scalar(db, "SELECT COUNT(*) FROM memory_fts_v2");
+        summary.vectorRows = scalar(db, "SELECT COUNT(*) FROM memory_vector_projection_v2");
+        summary.relationRows = scalar(db, "SELECT COUNT(*) FROM memory_relation_projection_v2");
+    }
+    return summary;
 }
 function candidateStateDigest(rows) {
     return hash(JSON.stringify(rows.map((row) => ({
@@ -201,7 +244,20 @@ function candidateStateDigest(rows) {
         evidenceJson: row.evidence_json,
     }))));
 }
-function candidateBaselineMatches(live, baseline) {
+function candidateBaselineMatches(live, baseline, delta) {
+    if (delta) {
+        return live.v1Rows === delta.source.v1Rows
+            && live.v2Rows === delta.source.v2Rows
+            && live.candidateRows === delta.lifecycle.candidateRows
+            && live.activeRows === delta.lifecycle.activeRows
+            && live.archivedRows === delta.lifecycle.archivedRows
+            && live.compatibilityRows === delta.projections.compatibilityRows
+            && live.pendingOutboxRows === delta.projections.pendingOutboxRows
+            && live.v2Rows === baseline.v2Rows + delta.delta.rows
+            && live.candidateRows === baseline.candidateRows + delta.delta.candidateRows
+            && live.activeRows === baseline.activeRows
+            && live.archivedRows === baseline.archivedRows;
+    }
     return live.v1Rows >= baseline.v1Rows
         && live.v2Rows === baseline.v2Rows
         && live.candidateRows === baseline.candidateRows
@@ -215,6 +271,9 @@ export function createLivePostAssignmentCandidatePlanV1(input) {
         throw new Error("proposed candidate rollout id is invalid");
     }
     const controls = loadControls(input.assignmentPlanPath, input.assignmentAcceptancePath);
+    const deltaControl = input.deltaAcceptancePath
+        ? loadDeltaAcceptance(input.deltaAcceptancePath)
+        : undefined;
     const { DatabaseSync } = require("node:sqlite");
     const db = new DatabaseSync(input.sourcePath, { readOnly: true });
     let summary;
@@ -225,7 +284,7 @@ export function createLivePostAssignmentCandidatePlanV1(input) {
     let unmirroredV1Rows = 0;
     try {
         db.exec("PRAGMA query_only=ON; PRAGMA busy_timeout=10000;");
-        summary = liveSourceSummary(db);
+        summary = liveSourceSummary(db, Boolean(deltaControl));
         unmirroredV1Rows = scalar(db, `SELECT COUNT(*) FROM memory_truth l
       LEFT JOIN memory_items i ON i.item_id='legacy:' || l.id WHERE i.item_id IS NULL`);
         const missingLegacyRowsForV2 = scalar(db, `SELECT COUNT(*) FROM memory_items i
@@ -236,19 +295,46 @@ export function createLivePostAssignmentCandidatePlanV1(input) {
       ORDER BY i.item_id,s.source_id`).all();
         const beforeDigest = candidateStateDigest(rows);
         const planned = new Map(controls.plan.rows.map((row) => [row.itemIdSha256, row]));
-        if (!candidateBaselineMatches(summary, controls.plan.source)
+        if (!candidateBaselineMatches(summary, controls.plan.source, deltaControl?.value)
+            || (deltaControl && (summary.currentFtsRows !== deltaControl.value.projections.ftsRows
+                || summary.vectorRows !== deltaControl.value.projections.vectorRows
+                || summary.relationRows !== deltaControl.value.projections.relationRows))
             || missingLegacyRowsForV2 !== 0
-            || rows.length !== controls.plan.source.candidateRows
-            || planned.size !== rows.length
-            || rows.some((row) => !planned.has(hash(row.item_id))))
+            || planned.size !== controls.plan.source.candidateRows
+            || rows.length !== controls.plan.source.candidateRows + (deltaControl?.value.delta.rows ?? 0)
+            || [...planned.keys()].some((itemIdSha256) => !rows.some((row) => hash(row.item_id) === itemIdSha256)))
             throw new Error("live candidate set no longer matches the evidence-assignment baseline");
+        let deltaReflectionSummaryRows = 0;
+        let deltaOperationalCheckpointRows = 0;
+        let deltaUnverifiedRows = 0;
+        let deltaLegacyIdentityDebtRows = 0;
         const reviewRows = rows.map((row) => {
             const plannedRow = planned.get(hash(row.item_id));
-            if (!plannedRow || plannedRow.currentStateDigest !== stableStateDigest(row)) {
+            if (plannedRow && plannedRow.currentStateDigest !== stableStateDigest(row)) {
                 throw new Error("live candidate state no longer matches the evidence-assignment baseline");
             }
             const source = parseRecord(row.evidence_json);
             const assigned = source.registryResolvedEvidenceV1;
+            if (!plannedRow) {
+                const delta = deltaControl?.value;
+                const address = JSON.parse(row.address_json);
+                const kind = classification(source.classification);
+                if (!delta
+                    || assigned !== undefined
+                    || !["reflection_summary", "operational_checkpoint"].includes(kind)
+                    || row.verification !== "unverified"
+                    || address.principalId !== "legacy:unresolved"
+                    || source.verificationDebt !== "legacy_identity"
+                    || source.reviewRequired !== true)
+                    throw new Error("delta candidate state does not match the accepted append-only rollout");
+                if (kind === "reflection_summary")
+                    deltaReflectionSummaryRows += 1;
+                else
+                    deltaOperationalCheckpointRows += 1;
+                deltaUnverifiedRows += 1;
+                deltaLegacyIdentityDebtRows += 1;
+                return reviewRow(row, source);
+            }
             const isTarget = plannedRow.decision.startsWith("propose_");
             if (!isTarget && assigned !== undefined)
                 throw new Error("unplanned registry-resolved evidence exists");
@@ -262,6 +348,11 @@ export function createLivePostAssignmentCandidatePlanV1(input) {
             }
             return reviewRow(row, source, registryEvidence);
         });
+        if (deltaControl && (deltaReflectionSummaryRows !== deltaControl.value.delta.reflectionSummaryRows
+            || deltaOperationalCheckpointRows !== deltaControl.value.delta.operationalCheckpointRows
+            || deltaUnverifiedRows !== deltaControl.value.delta.unverifiedRows
+            || deltaLegacyIdentityDebtRows !== deltaControl.value.delta.legacyIdentityDebtRows))
+            throw new Error("delta candidate counts do not match acceptance");
         if (directPrincipalRows !== controls.acceptance.evidence.directPrincipalRows
             || conversationBoundaryRows !== controls.acceptance.evidence.conversationBoundaryRows
             || directPrincipalRows + conversationBoundaryRows !== controls.acceptance.evidence.rowsWritten)
@@ -272,7 +363,7 @@ export function createLivePostAssignmentCandidatePlanV1(input) {
       ON s.revision_id=i.current_revision_id WHERE i.lifecycle='candidate'
       ORDER BY i.item_id,s.source_id`).all();
         if (beforeDigest !== candidateStateDigest(afterRows)
-            || JSON.stringify(summary) !== JSON.stringify(liveSourceSummary(db))
+            || JSON.stringify(summary) !== JSON.stringify(liveSourceSummary(db, Boolean(deltaControl)))
             || unmirroredV1Rows !== scalar(db, `SELECT COUNT(*) FROM memory_truth l
         LEFT JOIN memory_items i ON i.item_id='legacy:' || l.id WHERE i.item_id IS NULL`))
             throw new Error("live candidate state changed during query-only planning");
@@ -302,6 +393,23 @@ export function createLivePostAssignmentCandidatePlanV1(input) {
             invalidEvidenceRows: 0,
             unplannedEvidenceRows: 0,
         },
+        ...(deltaControl ? {
+            delta: {
+                rolloutId: deltaControl.value.rolloutId,
+                planDigest: deltaControl.value.planDigest,
+                acceptanceSha256: deltaControl.sha256,
+                rowsValidated: deltaControl.value.delta.rows,
+                reflectionSummaryRows: deltaControl.value.delta.reflectionSummaryRows,
+                operationalCheckpointRows: deltaControl.value.delta.operationalCheckpointRows,
+                candidateRows: deltaControl.value.delta.candidateRows,
+                unverifiedRows: deltaControl.value.delta.unverifiedRows,
+                legacyIdentityDebtRows: deltaControl.value.delta.legacyIdentityDebtRows,
+                existingCanonicalRowsChanged: 0,
+                existingLifecycleRowsChanged: 0,
+                existingVerificationRowsChanged: 0,
+                existingEvidenceRowsChanged: 0,
+            },
+        } : {}),
         source: {
             ...summary,
             baselineV1Rows: controls.plan.source.v1Rows,
