@@ -266,6 +266,25 @@
   ContextEngine, prompt mutation, or final recall. Phase 8F-B2 requires a new
   fresh snapshot and independent exact acceptance for only the 99-row archive
   lane; the 32 designs need their own payload-bearing proposal and transaction.
+- Phase 8F-B2 first refused that replay after another V1 operational checkpoint
+  changed live truth to 1003/1002. A separate exact r11 plan and fresh,
+  restore-verified encrypted snapshot converged only that row and restored
+  V1/V2 plus all four projections to 1003. Candidate became 666 while active 0,
+  archived 337, pending 0, and existing canonical/lifecycle/verification/
+  evidence state remained unchanged.
+- All controls were regenerated before mutation. Independent acceptance matched
+  a new exact 99-archive / 32-rewrite split with overlap 0 and plan digest
+  `504faad2...c3ecb`. A second fresh encrypted snapshot then bound the archive
+  transaction. Exactly 99 candidates became archived; the 32 rewrite targets,
+  non-target content/verification/address/ACL/projections/outbox, V1, and
+  runtime gates changed by 0. Postcheck proved 99 receipts, supersedes
+  relations, lifecycle events, and projection bindings with 0 mismatches.
+- The new lifecycle baseline is 567 candidate / 0 active / 436 archived with
+  V1/V2/FTS/vector 1003 and integrity/FK healthy. Rebuilt controls are 0
+  eligible / 411 hold / 156 quarantine and 32 unsafe / 2 safe duplicate / 56
+  semantic review. The unsafe archive lane is now empty; Phase 8F-B3 requires
+  separate payload-bearing authority for the 32 rewrite holds. Phase 8G and
+  Phase 9 remain independent.
 
 ## Naming matrix
 

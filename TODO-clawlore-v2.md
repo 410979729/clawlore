@@ -942,9 +942,21 @@ overlap below 0.8.
       require a fresh encrypted snapshot plus a separate exact apply.
 - [x] Pass focused 4/4, full 238/238, typecheck/build/module/vector/golden/
       release gates; closing package scan 511 files.
-- [ ] Phase 8F-B2 may apply only the 99-row archive lane under a new fresh
-      encrypted snapshot and independent acceptance. The 32 rewrite designs
-      require a separate payload-bearing proposal and exact rewrite control.
+- [x] Phase 8F-B2 applied only the 99-row archive lane under two fresh,
+      restore-verified encrypted snapshots and independent acceptance. A new
+      V1 append first triggered fail-closed r11 convergence to 1003/1003.
+- [x] Exact archive postcheck proved 99 archived targets, 32 unchanged rewrite
+      targets, 99 receipts/relations/events/projection bindings, 0 mismatches,
+      integrity ok, FK 0, and no non-target/runtime change.
+- [x] Rebase the new 567-candidate lifecycle baseline: 0 eligible / 411 hold /
+      156 quarantine; 32 unsafe / 2 safe duplicate / 56 semantic review; 0
+      remaining archive proposals / 32 rewrite holds.
+- [x] Pass focused 6/6, full 242/242, typecheck/build/vector/golden/release
+      gates; closing package scan 521 files.
+- [ ] Phase 8F-B3 must create payload-bearing proposals and a separate exact
+      rewrite transaction for only the remaining 32 holds. Phase 8F-B2 grants
+      no rewrite, verification, promotion, ContextEngine, prompt mutation, hard
+      delete, or final recall authority.
 
 ## Phase 0 verification
 
