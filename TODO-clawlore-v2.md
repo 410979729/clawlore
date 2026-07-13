@@ -773,6 +773,27 @@ overlap below 0.8.
       canonical selection, archive, verification, or lifecycle apply must use
       a new exact control and cannot be inferred from this review plan.
 
+## Phase 8A — Exact duplicate-trace adjudication
+
+- [x] Review the 20 exact-duplicate operational-trace rows as 8 normalized
+      groups against durable knowledge before proposing any disposition.
+- [x] Add a fail-closed adjudicator requiring complete group decisions, safe
+      evidence bases, exact Phase 7Z/live row binding, and redacted mode-0600
+      query-only output.
+- [x] Separate 5 groups / 14 rows already covered by durable truth or transient
+      runtime state from 3 groups / 6 rows whose durable facts need bounded
+      rewrite. Mutation-ready and automatic archive remain 0.
+- [x] Recover one new V1 operational checkpoint only after a fresh encrypted
+      snapshot and exact r6 delta. V1/V2 and all four projections are 984,
+      candidate 664, active 0, archived 320, pending outbox 0.
+- [x] Pass focused 11/11, full 216/216, typecheck/build/module/runtime/ranking/
+      control/vector/golden/release gates. Closing package scan is 451 files.
+- [ ] Produce bounded rewrites for the 6 durable rows and deduplicate the
+      rewritten facts against knowledge; do not archive those rows first.
+- [ ] If the 14 reversible proposals are selected for apply, create a fresh
+      encrypted snapshot and a separate exact soft-archive transaction plus
+      independent acceptance. Do not expand it to the other 131 unsafe rows.
+
 ## Phase 0 verification
 
 - Focused Memory Address V2 tests: 8/8 PASS.

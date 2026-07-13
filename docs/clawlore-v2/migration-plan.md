@@ -165,6 +165,17 @@
   Phase 7Y target digests against live truth and carries no rejection, rewrite,
   archive, verification, lifecycle, or runtime authority. Batch membership is
   prioritization for review, not an automatic disposition.
+- Phase 8A adjudicates only the 20 exact-duplicate trace rows after checking
+  each normalized group against durable truth. Five groups / 14 rows are
+  reversible soft-archive proposals because they duplicate existing knowledge
+  or transient service state; three groups / 6 rows contain durable facts and
+  remain held for bounded rewrite. The query-only planner accepts unrelated
+  live growth only when V1/V2/candidate and all four projections have advanced
+  together while active/archived/pending remain unchanged; it never adds that
+  growth to the protected target set. A concurrent checkpoint was first
+  converged under a fresh encrypted snapshot and exact one-row r6 delta, leaving
+  V1/V2/projections at 984 and all mutation authorities disabled. Every rewrite
+  or soft archive still needs a separate exact control and acceptance.
 
 ## Naming matrix
 
