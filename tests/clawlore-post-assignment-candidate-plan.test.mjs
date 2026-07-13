@@ -206,6 +206,106 @@ async function fixture() {
   return { root, source, planPath, acceptancePath };
 }
 
+async function followupAssignmentControl(paths) {
+  const priorPlan = JSON.parse(await readFile(paths.planPath, "utf8"));
+  const rolloutId = "clawlore-v2-evidence-assignment-fixture-r2";
+  const planPath = join(paths.root, "assignment-plan-r2.json");
+  const acceptancePath = join(paths.root, "assignment-acceptance-r2.json");
+  const plan = structuredClone(priorPlan);
+  plan.proposedRolloutId = rolloutId;
+  plan.summary = {
+    proposedEvidenceAssignmentRows: 1,
+    explicitHoldRows: 2,
+    quarantineRows: 1,
+    lifecycleRowsChanged: 0,
+    verificationRowsChanged: 0,
+  };
+  plan.decisions = {
+    propose_private_principal_evidence_assignment: 1,
+    propose_conversation_boundary_evidence_assignment: 0,
+    keep_candidate_unassigned: 0,
+    await_external_source_receipt: 2,
+    retain_quarantine: 1,
+  };
+  for (const row of plan.rows) {
+    delete row.resolver;
+    delete row.resolverEvidenceDigest;
+    delete row.proposedEvidencePayloadDigest;
+    if (row.itemIdSha256 === sha256("legacy:manual")) {
+      row.lane = "propose_private_principal_evidence_assignment";
+      row.decision = "propose_private_principal_evidence_assignment";
+      row.resolver = "sessions_registry_exact_private_v1";
+      row.resolverEvidenceDigest = sha256("resolver:manual-r2");
+      row.proposedEvidencePayloadDigest = sha256("payload:manual-r2");
+    } else if (row.itemIdSha256 !== sha256("legacy:unknown")) {
+      row.lane = "await_external_source_receipt";
+      row.decision = "await_external_source_receipt";
+    }
+  }
+  plan.planDigest = sha256(JSON.stringify(planCore(plan)));
+  const planBytes = `${JSON.stringify(plan, null, 2)}\n`;
+  await writeFile(planPath, planBytes, { mode: 0o600 });
+
+  const db = new DatabaseSync(paths.source);
+  const source = db.prepare("SELECT evidence_json FROM memory_sources WHERE source_id='source:manual'").get();
+  const evidence = JSON.parse(source.evidence_json);
+  const planned = plan.rows.find((row) => row.itemIdSha256 === sha256("legacy:manual"));
+  evidence.registryResolvedEvidenceV1 = {
+    schemaVersion: 1,
+    rolloutId,
+    planDigest: plan.planDigest,
+    evidenceKind: "direct-principal",
+    resolver: planned.resolver,
+    resolverEvidenceDigest: planned.resolverEvidenceDigest,
+    currentStateDigest: planned.currentStateDigest,
+    proposedEvidencePayloadDigest: planned.proposedEvidencePayloadDigest,
+    assignedAt: "2026-07-13T07:14:00.000Z",
+    preservesLifecycle: true,
+    preservesVerification: true,
+  };
+  db.prepare("UPDATE memory_sources SET evidence_json=? WHERE source_id='source:manual'")
+    .run(JSON.stringify(evidence));
+  db.close();
+
+  const acceptance = {
+    schemaVersion: 1,
+    phase: "clawlore-v2-live-evidence-assignment",
+    rolloutId,
+    status: "applied",
+    appliedAt: "2026-07-13T07:14:00.000Z",
+    planDigest: plan.planDigest,
+    planSha256: sha256(planBytes),
+    source: { memoryTruthRows: 4, memoryTruthLogicalDigest: sha256("truth"), unchanged: true },
+    evidence: {
+      rowsWritten: 1,
+      directPrincipalRows: 1,
+      conversationBoundaryRows: 0,
+      manualRowsChanged: 0,
+      externalSourceReceiptRowsChanged: 0,
+      quarantineRowsChanged: 0,
+      nonTargetEvidenceRowsChanged: 0,
+    },
+    canonical: {
+      memoryItemRowsChanged: 0,
+      lifecycleRowsChanged: 0,
+      verificationRowsChanged: 0,
+      addressRowsChanged: 0,
+      pendingOutboxRowsChanged: 0,
+      compatibilityRowsChanged: 0,
+    },
+    database: { integrity: "ok", foreignKeyViolations: 0 },
+    runtime: {
+      v1FallbackReads: true,
+      lifecycleMutationEnabled: false,
+      contextEngineEnabled: false,
+      promptMutationEnabled: false,
+      finalRecallCutoverEnabled: false,
+    },
+  };
+  await writeFile(acceptancePath, `${JSON.stringify(acceptance, null, 2)}\n`, { mode: 0o600 });
+  return { planPath, acceptancePath };
+}
+
 async function appendAcceptedDelta(paths) {
   const deltaAcceptancePath = join(paths.root, "delta-acceptance.json");
   const addressJson = JSON.stringify({
@@ -321,6 +421,47 @@ test("post-assignment candidate plan validates new evidence without inferring ow
     assert.equal(result.liveMutation.evidenceRowsChanged, 0);
     assert.equal(JSON.stringify(result).includes("legacy:direct"), false);
     assert.equal(JSON.stringify(result).includes("must-not-emit"), false);
+  } finally {
+    await rm(paths.root, { recursive: true, force: true });
+  }
+});
+
+test("post-assignment candidate plan validates a non-overlapping assignment control chain", async () => {
+  const paths = await fixture();
+  try {
+    const latest = await followupAssignmentControl(paths);
+    const result = createLivePostAssignmentCandidatePlanV1({
+      sourcePath: paths.source,
+      assignmentPlanPath: latest.planPath,
+      assignmentAcceptancePath: latest.acceptancePath,
+      priorAssignmentControls: [{
+        planPath: paths.planPath,
+        acceptancePath: paths.acceptancePath,
+      }],
+      proposedRolloutId: "clawlore-v2-candidate-promotion-fixture-r2-chain",
+    });
+    assert.equal(result.assignment.rowsValidated, 3);
+    assert.equal(result.assignment.directPrincipalRows, 2);
+    assert.equal(result.assignment.conversationBoundaryRows, 1);
+    assert.equal(result.assignment.controlRollouts.length, 2);
+    assert.deepEqual(result.assignment.controlRollouts.map((control) => control.rowsValidated), [1, 2]);
+    assert.equal(result.assignment.invalidEvidenceRows, 0);
+    assert.equal(result.assignment.unplannedEvidenceRows, 0);
+  } finally {
+    await rm(paths.root, { recursive: true, force: true });
+  }
+});
+
+test("post-assignment candidate plan rejects an incomplete assignment control chain", async () => {
+  const paths = await fixture();
+  try {
+    const latest = await followupAssignmentControl(paths);
+    assert.throws(() => createLivePostAssignmentCandidatePlanV1({
+      sourcePath: paths.source,
+      assignmentPlanPath: latest.planPath,
+      assignmentAcceptancePath: latest.acceptancePath,
+      proposedRolloutId: "clawlore-v2-candidate-promotion-fixture-r2-incomplete",
+    }), /unplanned registry-resolved evidence/);
   } finally {
     await rm(paths.root, { recursive: true, force: true });
   }

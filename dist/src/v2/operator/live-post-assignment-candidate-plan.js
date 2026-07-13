@@ -274,6 +274,8 @@ export function createLivePostAssignmentCandidatePlanV1(input) {
         throw new Error("proposed candidate rollout id is invalid");
     }
     const controls = loadControls(input.assignmentPlanPath, input.assignmentAcceptancePath);
+    const priorControls = (input.priorAssignmentControls ?? []).map((control) => loadControls(control.planPath, control.acceptancePath));
+    const assignmentControls = [controls, ...priorControls];
     const deltaControl = input.deltaAcceptancePath
         ? loadDeltaAcceptance(input.deltaAcceptancePath)
         : undefined;
@@ -298,6 +300,20 @@ export function createLivePostAssignmentCandidatePlanV1(input) {
       ORDER BY i.item_id,s.source_id`).all();
         const beforeDigest = candidateStateDigest(rows);
         const planned = new Map(controls.plan.rows.map((row) => [row.itemIdSha256, row]));
+        const acceptedTargets = new Map();
+        for (const accepted of assignmentControls) {
+            for (const row of accepted.plan.rows) {
+                if (!row.decision.startsWith("propose_"))
+                    continue;
+                if (acceptedTargets.has(row.itemIdSha256)) {
+                    throw new Error("assignment control chain contains an overlapping target");
+                }
+                if (!planned.has(row.itemIdSha256)) {
+                    throw new Error("prior assignment target is outside the current candidate baseline");
+                }
+                acceptedTargets.set(row.itemIdSha256, { controls: accepted, row });
+            }
+        }
         if (!candidateBaselineMatches(summary, controls.plan.source, deltaControl?.value)
             || (deltaControl && (summary.currentFtsRows !== deltaControl.value.projections.ftsRows
                 || summary.vectorRows !== deltaControl.value.projections.vectorRows
@@ -338,12 +354,12 @@ export function createLivePostAssignmentCandidatePlanV1(input) {
                 deltaLegacyIdentityDebtRows += 1;
                 return reviewRow(row, source);
             }
-            const isTarget = plannedRow.decision.startsWith("propose_");
-            if (!isTarget && assigned !== undefined)
-                throw new Error("unplanned registry-resolved evidence exists");
             let registryEvidence;
-            if (isTarget) {
-                registryEvidence = exactRegistryEvidence(assigned, controls.plan, plannedRow);
+            const acceptedTarget = acceptedTargets.get(hash(row.item_id));
+            if (assigned !== undefined) {
+                if (!acceptedTarget)
+                    throw new Error("unplanned registry-resolved evidence exists");
+                registryEvidence = exactRegistryEvidence(assigned, acceptedTarget.controls.plan, acceptedTarget.row);
                 if (registryEvidence.evidenceKind === "direct-principal")
                     directPrincipalRows += 1;
                 else
@@ -356,9 +372,9 @@ export function createLivePostAssignmentCandidatePlanV1(input) {
             || deltaUnverifiedRows !== deltaControl.value.delta.unverifiedRows
             || deltaLegacyIdentityDebtRows !== deltaControl.value.delta.legacyIdentityDebtRows))
             throw new Error("delta candidate counts do not match acceptance");
-        if (directPrincipalRows !== controls.acceptance.evidence.directPrincipalRows
-            || conversationBoundaryRows !== controls.acceptance.evidence.conversationBoundaryRows
-            || directPrincipalRows + conversationBoundaryRows !== controls.acceptance.evidence.rowsWritten)
+        if (directPrincipalRows !== assignmentControls.reduce((total, accepted) => total + accepted.acceptance.evidence.directPrincipalRows, 0)
+            || conversationBoundaryRows !== assignmentControls.reduce((total, accepted) => total + accepted.acceptance.evidence.conversationBoundaryRows, 0)
+            || directPrincipalRows + conversationBoundaryRows !== assignmentControls.reduce((total, accepted) => total + accepted.acceptance.evidence.rowsWritten, 0))
             throw new Error("validated evidence-assignment counts do not match acceptance");
         promotion = planCandidatePromotionsV1(reviewRows);
         const afterRows = db.prepare(`SELECT i.item_id,i.current_revision_id,i.address_json,i.lifecycle,i.verification,
@@ -390,6 +406,15 @@ export function createLivePostAssignmentCandidatePlanV1(input) {
             planDigest: controls.plan.planDigest,
             planSha256: controls.planSha256,
             acceptanceSha256: controls.acceptanceSha256,
+            controlRollouts: assignmentControls.map((accepted) => ({
+                rolloutId: accepted.acceptance.rolloutId,
+                planDigest: accepted.plan.planDigest,
+                planSha256: accepted.planSha256,
+                acceptanceSha256: accepted.acceptanceSha256,
+                rowsValidated: accepted.acceptance.evidence.rowsWritten,
+                directPrincipalRows: accepted.acceptance.evidence.directPrincipalRows,
+                conversationBoundaryRows: accepted.acceptance.evidence.conversationBoundaryRows,
+            })),
             rowsValidated: directPrincipalRows + conversationBoundaryRows,
             directPrincipalRows,
             conversationBoundaryRows,
