@@ -522,8 +522,10 @@ overlap below 0.8.
       `28957730237f1b4a272cd1a103c1114db30411f153e6bc21fd01aa49afd0ac1a`.
 - [x] Pass focused 3/3 and full 189/189 tests, typecheck, build, module,
       ranking/control, vector, golden recall, and release gate; pack 409 files.
-- [ ] Before any delta write, require a fresh encrypted snapshot and a separate
-      exact rollout approval. The preview authorizes no write or cutover.
+- [x] Before the historical delta write, require a fresh encrypted snapshot and
+      an exact reproduced plan. Phase 7Q completed the write; Phase 7T later
+      removed the separate human-approval artifact without weakening those
+      machine controls. The preview itself authorized no write or cutover.
 
 ## Phase 7P — Exact-approval drift rejection and delta apply gate
 
@@ -630,6 +632,27 @@ overlap below 0.8.
 - [x] Complete the one-row Phase 7S evidence apply after fresh snapshot and
       live-drift recovery. The rebuilt allowlist-bound plan digest is
       `a642d63d04c4c281fa22a604cb4092bcd838747af89b70d7785cd2d98e2d3cd4`.
+
+## Phase 7U — Read-only source-lineage receipt plan
+
+- [x] Add an owner-only, query-only planner over the current 206
+      `derived_system_evidence_review` rows; bind the complete 661-candidate
+      remediation set and all live projection counts.
+- [x] Require exact legacy source, current revision/source, rollout id, and one
+      matching remembered migration event without reading or emitting memory
+      or transcript content.
+- [x] Treat the immutable historical `operator:approved-*` event actors as
+      audit compatibility only; do not restore an executable approval gate.
+- [x] Generate a 0600 live plan for exactly 206 reflection-summary lineage
+      receipts, with 0 incomplete rows and 455 non-target candidates.
+- [x] Keep evidence writes, lifecycle/verification mutation, ContextEngine,
+      prompt mutation, and final recall disabled; no live mutation occurred.
+- [x] Pass focused 2/2, full 200/200, typecheck/build/module/runtime/ranking/
+      control/vector/golden/release gates; closing package scan 424 files.
+- [x] Revalidate the live host after the `/goal` UX restart: Gateway
+      active/running with healthz live, the same Telegram goal remains active,
+      and a fresh installed-registry import exposes the Telegram progress
+      placeholder. This host patch does not authorize the 206-row apply.
 
 ## Phase 0 verification
 

@@ -109,6 +109,17 @@
   scope checks, rollback evidence, and projection verification. Historical
   approval artifacts remain immutable audit evidence only. Hard-delete
   confirmation remains because it protects irreversible deletion.
+- Phase 7U remains in stage 4 and converts the 206 derived-system evidence
+  holds into an exact, query-only source-lineage receipt plan. All 206 are
+  reflection summaries with an exact legacy source, current V2 source, and
+  same-revision migration event bound to the rollout id; 0 have incomplete
+  lineage. Historical `operator:approved-*` event actor strings are immutable
+  audit data, not restored approval controls.
+- The Phase 7U plan authorizes no write and does not claim content quality. A
+  later exact-plan apply may attach source-lineage receipts only after a fresh
+  encrypted snapshot and drift replay, while preserving candidate/unverified
+  state. Operator content review remains a separate prerequisite for any
+  lifecycle change, ContextEngine, prompt mutation, or final recall.
 
 ## Naming matrix
 
