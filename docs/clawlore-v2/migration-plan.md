@@ -211,6 +211,25 @@
   0 eligible / 506 hold / 156 quarantine. Rebuilt content quality is 145 unsafe
   / 2 safe duplicate / 56 semantic review, mutation-ready 0. This transaction
   does not authorize the separate 14-row Phase 8E lane or any cutover.
+- Phase 8E creates that separate authority for only the 5-group / 14-row
+  reversible duplicate lane. Pre-write replay first rejected an action-schema
+  mismatch and then live V1/V2 986/985 drift; neither failure opened a write
+  transaction. A fresh encrypted snapshot plus exact r8 one-row delta restored
+  V1/V2/four projections to 986, and a conservative post-append rebase rebuilt
+  the current 663-candidate baseline instead of resurrecting the stale
+  pre-Phase8D lifecycle set.
+- A second fresh encrypted snapshot then bound the exact duplicate plan,
+  independent acceptance, transaction allowlist, and postcheck. Exactly 14
+  candidates became archived while content, verification, address, ACL, V1,
+  projections, outbox, non-target rows, and runtime gates changed by 0.
+  Candidate/archived counts became 649/337 with active 0; integrity is ok and
+  FK violations are 0.
+- Post-archive plans were regenerated from live truth: 0 eligible / 493 hold /
+  156 quarantine; 131 unsafe / 2 safe duplicate / 56 semantic review. The
+  unsafe primary lanes are now 7 unique oversized / 109 command / 15 tool and
+  the exact-duplicate operational trace lane is 0. Mutation-ready remains 0.
+  Phase 8F, Phase 8G, and the Phase 9 cutover-or-no-cutover decision remain
+  independently controlled; Phase 8E grants none of their authority.
 
 ## Naming matrix
 

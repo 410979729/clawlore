@@ -837,8 +837,13 @@ overlap below 0.8.
       those 3 rows, independently postcheck the transaction, and rebuild the
       662-row candidate/quality controls. Full 229/229 and release pack 478
       pass; ContextEngine, prompt mutation, and final recall remain off.
-- [ ] Phase 8E: handle the separate 14-row reversible archive proposal under a
-      fresh snapshot and independent acceptance.
+- [x] Phase 8E: under two fresh encrypted snapshots, first converge the exact
+      r8 one-row V1 append and then soft-archive the separate 14-row reversible
+      duplicate lane. Candidate 663 -> 649, archived 323 -> 337, active 0;
+      V1/V2/four projections remain 986/986 and independent mismatches are 0.
+      Rebuilt controls are 0 eligible / 493 hold / 156 quarantine and 131
+      unsafe / 2 safe duplicate / 56 semantic review. Full 233/233 and release
+      pack 492 pass; ContextEngine, prompt mutation, and final recall remain off.
 - [ ] Phase 8F: adjudicate the remaining unsafe command/tool/oversized lanes.
 - [ ] Phase 8G: adjudicate the 2 safe duplicates and 56 semantic-review rows.
 - [ ] Phase 9: make an explicit lifecycle/final-recall cutover or no-cutover
@@ -861,8 +866,29 @@ overlap below 0.8.
       semantic-review rows, mutation-ready 0.
 - [x] Pass focused 5/5, full 229/229, typecheck/build/vector/golden/release;
       closing package scan 478 files.
-- [ ] Phase 8E remains separate: the 14 earlier reversible archive proposals
-      were not touched by Phase 8D.
+- [x] Phase 8E remained separate and subsequently soft-archived exactly those
+      14 earlier proposals under its own plan, acceptance, fresh snapshot,
+      transaction allowlist, and independent postcheck.
+
+## Phase 8E — Exact duplicate-lane soft archive
+
+- [x] Fail closed before write on validator/action mismatch and later V1/V2
+      986/985 drift; perform no lifecycle transaction under stale controls.
+- [x] Converge the exact r8 operational checkpoint under a fresh encrypted
+      snapshot, then conservatively rebase the 663-candidate baseline without
+      reusing the stale pre-Phase8D lifecycle baseline.
+- [x] Reproduce the exact 5-group / 14-row plan, verify 0 live mismatches and
+      0 raw trace/id leak, and take a second fresh encrypted snapshot.
+- [x] Create exactly 14 archived revisions/sources/supersedes relations/events
+      while preserving content, verification, address, ACL, V1, all
+      projections, outbox, non-target rows, and runtime gates.
+- [x] Independently postcheck 14 archived rows, 14 valid receipts, 14 relation/
+      event/projection bindings, 0 mismatches, integrity ok, and FK 0.
+- [x] Rebuild current plans from 649 candidates: 0 eligible / 493 hold / 156
+      quarantine; 131 unsafe / 2 safe duplicate / 56 semantic review; exact
+      duplicate operational trace lane 0; mutation-ready 0.
+- [x] Pass focused 4/4, full 233/233, typecheck/build and all release gates;
+      closing package scan 492 files.
 
 ## Phase 0 verification
 
