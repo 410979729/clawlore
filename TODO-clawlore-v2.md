@@ -696,9 +696,36 @@ overlap below 0.8.
       digest is `6754fa858dd6c9b3ffefe312651f15de3d92d368c6e7f92d97bac474e0424c15`.
 - [x] Pass focused 15/15, full 204/204, typecheck/build/module/runtime/ranking/
       control/vector/golden/release gates; closing package scan 430 files.
-- [ ] Keep the 206-row source-lineage apply separate: the regenerated plan is
-      query-only and authorizes no evidence, lifecycle, verification, prompt,
+- [x] Keep the 206-row source-lineage apply separate until a fresh snapshot and
+      exact replay authorize the evidence-only transaction. Phase 7X completed
+      that bounded apply without lifecycle, verification, prompt,
       ContextEngine, or final-recall mutation.
+
+## Phase 7X — Source-lineage live apply and remediation closure
+
+- [x] Reproduce the 206-row Phase 7W plan byte-for-byte, create a fresh
+      restore-verified encrypted snapshot, and attach exactly 206 support-only
+      source-lineage receipts under one transaction.
+- [x] Independently prove 206 distinct current candidate items received
+      reflection-summary source receipts while non-target evidence, events,
+      canonical items, lifecycle, verification, address, projections, pending
+      outbox, and runtime controls changed by 0.
+- [x] Close the post-apply planner state transition: structurally valid receipts
+      move to `source_lineage_content_review`; invalid receipts stay fail-closed,
+      and stale remediation targeting an existing receipt is rejected.
+- [x] Detect a new live V1 operational checkpoint during acceptance, create a
+      second fresh snapshot, replay only the exact r5 delta, and restore V1/V2
+      plus all four projections to 983/983 with pending outbox 0.
+- [x] Bind the 663-candidate baseline to the cumulative non-overlapping r4+r5
+      delta controls. Final policy remains 0 eligible / 507 hold / 156
+      quarantine; remediation is 79 assignment / 428 evidence / 156 quarantine,
+      including 206 source-lineage content-review rows.
+- [x] Pass focused 9/9, full 205/205, typecheck/build/module/runtime/ranking/
+      control/vector/golden/release gates; closing package scan 431 files.
+- [ ] Perform bounded operator content-quality review for the 206 receipts and
+      the remaining assignment/evidence lanes. Do not infer promotion authority
+      from source lineage and do not enable lifecycle, ContextEngine, prompt
+      mutation, or final recall.
 
 ## Phase 0 verification
 

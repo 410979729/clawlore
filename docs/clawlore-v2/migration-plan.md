@@ -141,6 +141,17 @@
   acceptance chain and rejects incomplete chains. The regenerated 662-row
   baseline remains 0 eligible, and the new 206-row source-lineage plan is still
   query-only and non-authorizing.
+- Phase 7X executed that regenerated 206-row plan only after a byte-identical
+  replay and fresh restore-verified encrypted snapshot. The transaction attached
+  206 support-only receipts while canonical/lifecycle/verification/address/
+  projection/runtime changes stayed 0. Valid receipts now advance to a separate
+  `source_lineage_content_review` lane; stale remediation cannot propose them
+  again, and content review remains mandatory before any promotion decision.
+- A concurrent V1 append again appeared during acceptance. A second fresh
+  snapshot and exact one-row r5 delta restored V1/V2 and all four projections
+  to 983. The current 663-candidate baseline therefore binds both non-overlapping
+  r4 and r5 delta controls, remains 0 eligible / 507 hold / 156 quarantine, and
+  grants no lifecycle, ContextEngine, prompt, or final-recall authority.
 
 ## Naming matrix
 
