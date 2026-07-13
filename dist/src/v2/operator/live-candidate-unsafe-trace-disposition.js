@@ -14,6 +14,9 @@ const EXPECTED_OVERSIZED_ROWS = 7;
 function hash(value) {
     return createHash("sha256").update(value).digest("hex");
 }
+function isDigest(value) {
+    return typeof value === "string" && /^[a-f0-9]{64}$/i.test(value);
+}
 function privateJson(path) {
     const info = statSync(path);
     if (!info.isFile() || (info.mode & 0o077) !== 0 || info.size <= 0 || info.size > CONTROL_MAX_BYTES) {
@@ -194,4 +197,64 @@ export function createLiveCandidateUnsafeTraceDispositionPlanV1(input) {
     finally {
         db.close();
     }
+}
+export function validateLiveCandidateUnsafeTraceDispositionPlanV1(value, expectedDigest) {
+    if (value?.schemaVersion !== 1
+        || value.phase !== "clawlore-candidate-unsafe-trace-disposition-plan"
+        || value.readOnly !== true
+        || value.queryOnly !== true
+        || value.emitsMemoryContent !== false
+        || value.emitsTranscriptContent !== false
+        || value.emitsRawIdentifiers !== false
+        || value.emitsContentDigests !== true
+        || value.softArchiveProposalRows !== EXPECTED_ARCHIVE_ROWS
+        || value.boundedRewriteDesignRows !== EXPECTED_REWRITE_ROWS
+        || value.mutationReadyRows !== 0
+        || value.authorizesContentRewrite !== false
+        || value.authorizesSoftArchive !== false
+        || value.authorizesHardDelete !== false
+        || value.authorizesLifecycleMutation !== false
+        || value.authorizesVerificationMutation !== false
+        || value.authorizesContextEngine !== false
+        || value.authorizesPromptMutation !== false
+        || value.authorizesFinalRecall !== false
+        || value.requiresFreshEncryptedSnapshot !== true
+        || value.requiresSeparateExactApply !== true
+        || value.summary?.targetRows !== EXPECTED_TARGET_ROWS
+        || value.summary.softArchiveRows !== EXPECTED_ARCHIVE_ROWS
+        || value.summary.boundedRewriteRows !== EXPECTED_REWRITE_ROWS
+        || value.summary.oversizedSegmentationRows !== EXPECTED_OVERSIZED_ROWS
+        || value.summary.semanticExtractionRows !== EXPECTED_REWRITE_ROWS - EXPECTED_OVERSIZED_ROWS
+        || value.summary.mutationReadyRows !== 0
+        || value.summary.liveBindingMismatches !== 0
+        || !Array.isArray(value.archiveRows)
+        || value.archiveRows.length !== EXPECTED_ARCHIVE_ROWS
+        || !Array.isArray(value.rewriteDesigns)
+        || value.rewriteDesigns.length !== EXPECTED_REWRITE_ROWS
+        || new Set(value.archiveRows.map((row) => row.itemIdSha256)).size !== EXPECTED_ARCHIVE_ROWS
+        || new Set(value.rewriteDesigns.map((row) => row.itemIdSha256)).size !== EXPECTED_REWRITE_ROWS
+        || value.archiveRows.some((row) => row.proposedAction !== "soft_archive_under_separate_exact_apply"
+            || row.mutationReady !== false || row.proposedLifecycle !== "archived"
+            || row.proposedVerification !== "unverified")
+        || value.rewriteDesigns.some((row) => row.proposedAction !== "hold_for_separate_bounded_rewrite_proposal"
+            || row.mutationReady !== false || row.proposedLifecycle !== "candidate"
+            || row.proposedVerification !== "unverified" || row.removeCommandAndToolEnvelope !== true
+            || row.requireCaptureSafetyPass !== true || row.requireCorpusDeduplication !== true)
+        || value.archiveRows.some((row) => value.rewriteDesigns.some((rewrite) => rewrite.itemIdSha256 === row.itemIdSha256))
+        || !isDigest(value.planDigest)
+        || (expectedDigest !== undefined && value.planDigest !== expectedDigest))
+        throw new Error("unsafe trace disposition plan is invalid or outside the exact 99/32 lane");
+    const core = {
+        proposedDispositionId: value.proposedDispositionId,
+        adjudicationPlanDigest: value.adjudicationPlanDigest,
+        adjudicationPlanSha256: value.adjudicationPlanSha256,
+        source: value.source,
+        summary: value.summary,
+        archiveRows: value.archiveRows,
+        rewriteDesigns: value.rewriteDesigns,
+    };
+    if (hash(JSON.stringify(core)) !== value.planDigest) {
+        throw new Error("unsafe trace disposition plan digest is invalid");
+    }
+    return value;
 }
