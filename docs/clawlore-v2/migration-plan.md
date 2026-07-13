@@ -120,6 +120,19 @@
   encrypted snapshot and drift replay, while preserving candidate/unverified
   state. Operator content review remains a separate prerequisite for any
   lifecycle change, ContextEngine, prompt mutation, or final recall.
+- Phase 7V adds that exact-plan apply path without executing it live. The
+  executor replays the complete plan before write, rechecks per-row state,
+  source, and migration-event digests inside one transaction, writes only a
+  source-lineage receipt, and independently proves non-target/canonical/event/
+  projection state stayed unchanged.
+- The first live replay correctly failed closed because V1 appended one
+  `session-pressure-guard` operational checkpoint after Phase 7U, producing
+  V1/V2 982/981. No snapshot or write followed the mismatch.
+- A separate query-only r4 delta plan covers exactly that one row as
+  candidate/unverified/legacy-identity debt. It must be replayed under a fresh
+  encrypted snapshot before any bounded delta apply; afterward the candidate,
+  remediation, and source-lineage plans must be regenerated. The old 206-row
+  digest cannot be reused across this drift.
 
 ## Naming matrix
 

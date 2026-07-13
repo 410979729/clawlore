@@ -654,6 +654,30 @@ overlap below 0.8.
       and a fresh installed-registry import exposes the Telegram progress
       placeholder. This host patch does not authorize the 206-row apply.
 
+## Phase 7V — Transaction-scoped source-lineage apply gate
+
+- [x] Add an owner-only executor and CLI that require the exact Phase 7U plan,
+      a fresh restore-verified encrypted snapshot, and a byte-equivalent live
+      plan replay before opening a write transaction.
+- [x] Revalidate every target's candidate state, exact current source,
+      source-evidence digest, and same-revision migration-event digest inside
+      the transaction; reject duplicate receipts or multiple current sources.
+- [x] Restrict the write to `sourceLineageReceiptV1`; protect all non-target
+      evidence, events, canonical items, lifecycle, verification, address,
+      projections, pending outbox, V1 fallback, and runtime cutover controls.
+- [x] Pass focused planner/apply 4/4, full 202/202, typecheck/build/module/
+      runtime/ranking/control/vector/golden/release gates; closing package scan
+      429 files.
+- [x] Run a live query-only replay and fail closed before snapshot/write on
+      V1/V2 drift 982/981; existing source-lineage receipt rows remain 0.
+- [x] Generate a separate 0600 read-only r4 plan for the one new operational
+      checkpoint, digest
+      `cef0b285d178bfdf0fdd27a518a184ee51ae121c4021de2ba715de31aa2c6c3a`;
+      it authorizes no delta write or runtime cutover.
+- [ ] If the live write is selected, create a fresh encrypted snapshot, replay
+      the exact one-row r4 delta, restore parity, then regenerate the candidate/
+      remediation/source-lineage plans before considering the 206-row apply.
+
 ## Phase 0 verification
 
 - Focused Memory Address V2 tests: 8/8 PASS.
