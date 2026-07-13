@@ -832,14 +832,37 @@ overlap below 0.8.
       manual semantic rows, mutation-ready 0.
 - [x] Pass focused 16/16, full 224/224, typecheck/build/module/runtime/ranking/
       control/vector/golden/release gates. Closing package scan is 464 files.
-- [ ] Phase 8D: decide the 3 preserved companions under a new exact control;
-      successful representative rewrite is not archive authority.
+- [x] Phase 8D: bind the 3 preserved companions to their rewritten
+      representatives, take a fresh encrypted snapshot, soft-archive exactly
+      those 3 rows, independently postcheck the transaction, and rebuild the
+      662-row candidate/quality controls. Full 229/229 and release pack 478
+      pass; ContextEngine, prompt mutation, and final recall remain off.
 - [ ] Phase 8E: handle the separate 14-row reversible archive proposal under a
       fresh snapshot and independent acceptance.
 - [ ] Phase 8F: adjudicate the remaining unsafe command/tool/oversized lanes.
 - [ ] Phase 8G: adjudicate the 2 safe duplicates and 56 semantic-review rows.
 - [ ] Phase 9: make an explicit lifecycle/final-recall cutover or no-cutover
       decision. ContextEngine, prompt mutation, and final recall remain off.
+
+## Phase 8D — Exact companion soft archive
+
+- [x] Require the exact three Phase 8B/8C companion hashes, their current
+      unsafe trace bindings, and the paired representative rewrite receipts.
+- [x] Fail closed on control/source drift and require a fresh restore-verified
+      encrypted snapshot before lifecycle mutation.
+- [x] Create exactly 3 archived revisions, sources, supersedes relations, and
+      archived events while preserving content, verification, address, ACL,
+      V1, projections, outbox, and all runtime gates.
+- [x] Run an independent read-only postcheck: 3 archived companions, 3
+      preserved representatives, 3 valid receipts, 0 mismatches, integrity ok,
+      FK 0.
+- [x] Rebase the candidate policy to 662 rows: 0 eligible / 506 hold / 156
+      quarantine; rebuild quality to 145 unsafe / 2 safe duplicate / 56
+      semantic-review rows, mutation-ready 0.
+- [x] Pass focused 5/5, full 229/229, typecheck/build/vector/golden/release;
+      closing package scan 478 files.
+- [ ] Phase 8E remains separate: the 14 earlier reversible archive proposals
+      were not touched by Phase 8D.
 
 ## Phase 0 verification
 

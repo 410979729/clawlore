@@ -197,6 +197,20 @@
   from live truth and show 148 unsafe rows, 14 unsafe duplicate rows, 2 safe
   duplicate rows, and 56 semantic-review rows. No earlier content plan is valid
   as later archive authority.
+- Phase 8D creates that separate authority only for the three post-rewrite
+  companions. The plan binds each unsafe trace to its unchanged lineage receipt
+  and to the paired Phase 8C representative rewrite receipt; a fresh encrypted
+  snapshot and independent acceptance precede the exact transaction. Three
+  archived revisions/sources/supersedes relations/events are created while
+  content, verification, address, ACL, V1, all projections, outbox, non-target
+  rows, and runtime gates remain unchanged. Archived projections are retained
+  for compatibility/audit and are suppressed by lifecycle filtering.
+- A dedicated postcheck then proves 3 archived companions, 3 preserved
+  representatives, 3 valid disposition receipts, and 0 mismatches. The
+  candidate policy is rebased from 665 to 662 without rerunning stale controls:
+  0 eligible / 506 hold / 156 quarantine. Rebuilt content quality is 145 unsafe
+  / 2 safe duplicate / 56 semantic review, mutation-ready 0. This transaction
+  does not authorize the separate 14-row Phase 8E lane or any cutover.
 
 ## Naming matrix
 
