@@ -808,11 +808,38 @@ overlap below 0.8.
       0 mutation-ready. Live remains 984/984 with candidate 664.
 - [x] Pass focused 16/16, full 221/221, typecheck/build/module/runtime/ranking/
       control/vector/golden/release gates. Closing package scan is 459 files.
-- [ ] If live rewrite is selected, create a fresh encrypted snapshot and an
+- [x] If live rewrite is selected, create a fresh encrypted snapshot and an
       exact three-representative transaction that preserves candidate/
       unverified state and leaves all three companions unchanged.
-- [ ] Rebuild content-quality and duplicate plans after rewrite before any
+- [x] Rebuild content-quality and duplicate plans after rewrite before any
       companion soft archive; do not reuse Phase 8A/8B plans across revisions.
+
+## Phase 8C — Exact durable rewrite live apply
+
+- [x] Repair the continuous-append candidate-baseline comparison and cover a
+      later V1-only append without weakening the unmirrored-row cutover block.
+- [x] Under a fresh encrypted snapshot, migrate the exact r7 operational
+      checkpoint and restore V1/V2/four projections to 985/985.
+- [x] Bind the accepted Phase 8B plan, payload, acceptance, post-r7 candidate
+      baseline, and a second fresh encrypted snapshot into one exact three-row
+      durable rewrite transaction.
+- [x] Create 3 new candidate/unverified representative revisions while keeping
+      all 3 companions, current lifecycle/verification, address, ACL, V1,
+      compatibility/vector/relation projections, outbox, and runtime gates
+      unchanged. Independent postcheck mismatch count is 0.
+- [x] Rebuild remediation/content-quality/capture-safety controls from live
+      truth: 148 unsafe, 14 unsafe duplicate rows, 2 safe duplicate rows, 56
+      manual semantic rows, mutation-ready 0.
+- [x] Pass focused 16/16, full 224/224, typecheck/build/module/runtime/ranking/
+      control/vector/golden/release gates. Closing package scan is 464 files.
+- [ ] Phase 8D: decide the 3 preserved companions under a new exact control;
+      successful representative rewrite is not archive authority.
+- [ ] Phase 8E: handle the separate 14-row reversible archive proposal under a
+      fresh snapshot and independent acceptance.
+- [ ] Phase 8F: adjudicate the remaining unsafe command/tool/oversized lanes.
+- [ ] Phase 8G: adjudicate the 2 safe duplicates and 56 semantic-review rows.
+- [ ] Phase 9: make an explicit lifecycle/final-recall cutover or no-cutover
+      decision. ContextEngine, prompt mutation, and final recall remain off.
 
 ## Phase 0 verification
 

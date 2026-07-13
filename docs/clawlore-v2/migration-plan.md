@@ -186,6 +186,17 @@
   candidate/unverified. A later exact apply may rewrite only the three
   representatives under a fresh encrypted snapshot; companion archive decisions
   require a new post-rewrite plan.
+- Phase 8C performs that exact apply. A new V1-only checkpoint is first
+  converged separately under an r7 plan and encrypted snapshot, producing a
+  zero-eligible 985-row baseline. A second fresh snapshot then binds an exact
+  transaction that creates three new representative revisions while preserving
+  candidate/unverified current state, all three companions, address/ACL, V1,
+  compatibility/vector/relation projections, outbox, and runtime gates. The
+  three old representative revisions become superseded history; this does not
+  promote or archive the current items. Post-rewrite controls are regenerated
+  from live truth and show 148 unsafe rows, 14 unsafe duplicate rows, 2 safe
+  duplicate rows, and 56 semantic-review rows. No earlier content plan is valid
+  as later archive authority.
 
 ## Naming matrix
 
