@@ -57,6 +57,7 @@
     "preview:clawlore-duplicate-trace-adjudication": "node scripts/clawlore-candidate-duplicate-trace-adjudication.mjs",
     "preview:clawlore-durable-rewrite": "node scripts/clawlore-candidate-durable-rewrite-proposal.mjs",
     "accept:clawlore-durable-rewrite": "node scripts/clawlore-candidate-durable-rewrite-acceptance.mjs",
+    "rollout:clawlore-durable-rewrite": "node scripts/clawlore-live-candidate-durable-rewrite.mjs",
     "preview:clawlore-source-lineage": "node scripts/clawlore-source-lineage-receipt-plan.mjs",
     "rollout:clawlore-source-lineage": "node scripts/clawlore-live-source-lineage-receipt.mjs",
     "preview:clawlore-evidence-assignment": "node scripts/clawlore-evidence-assignment-plan.mjs",

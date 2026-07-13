@@ -553,7 +553,7 @@ function candidateBaselineMatches(
   delta?: DeltaAcceptanceV1,
 ): boolean {
   if (delta) {
-    return live.v1Rows === delta.source.v1Rows
+    return live.v1Rows >= delta.source.v1Rows
       && live.v2Rows === delta.source.v2Rows
       && live.candidateRows === delta.lifecycle.candidateRows
       && live.activeRows === delta.lifecycle.activeRows

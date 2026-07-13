@@ -16,6 +16,10 @@ const { planCandidateDurableRewriteProposalV1 } =
   jiti("../src/v2/application/candidate-durable-rewrite-proposal.ts");
 const { createLiveCandidateDurableRewriteProposalPlanV1 } =
   jiti("../src/v2/operator/live-candidate-durable-rewrite-proposal.ts");
+const { executeLiveCandidateDurableRewriteV1 } =
+  jiti("../src/v2/operator/live-candidate-durable-rewrite-apply.ts");
+const { inspectLegacySqliteSnapshotV2 } =
+  jiti("../src/v2/operator/legacy-v1-snapshot.ts");
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
 const originalContents = {
@@ -168,15 +172,34 @@ async function liveFixture() {
   const payloadPath = join(root, "payload.json");
   const rows = fixtureRows();
   const db = new DatabaseSync(source);
-  db.exec(`CREATE TABLE memory_truth(id TEXT PRIMARY KEY,metadata TEXT NOT NULL);
+  db.exec(`CREATE TABLE memory_truth(id TEXT PRIMARY KEY,text TEXT NOT NULL,category TEXT NOT NULL,
+      scope TEXT NOT NULL,timestamp INTEGER NOT NULL,metadata TEXT NOT NULL);
     CREATE TABLE memory_items(item_id TEXT PRIMARY KEY,current_revision_id TEXT NOT NULL,
-      content TEXT NOT NULL,category TEXT NOT NULL,lifecycle TEXT NOT NULL,verification TEXT NOT NULL);
-    CREATE TABLE memory_sources(source_id TEXT PRIMARY KEY,revision_id TEXT NOT NULL,evidence_json TEXT NOT NULL);
-    CREATE TABLE memory_fts_compat_v2(item_id TEXT PRIMARY KEY);
-    CREATE TABLE memory_fts_v2(item_id TEXT PRIMARY KEY);
-    CREATE TABLE memory_vector_projection_v2(item_id TEXT PRIMARY KEY);
-    CREATE TABLE memory_relation_projection_v2(item_id TEXT PRIMARY KEY);
-    CREATE TABLE projection_outbox(outbox_id TEXT PRIMARY KEY,processed_at TEXT);`);
+      revision_no INTEGER NOT NULL,content TEXT NOT NULL,category TEXT NOT NULL,address_json TEXT NOT NULL,
+      tenant_id TEXT NOT NULL,principal_id TEXT NOT NULL,agent_id TEXT NOT NULL,visibility TEXT NOT NULL,
+      retention TEXT NOT NULL,workspace_id TEXT,project_id TEXT,conversation_id TEXT,thread_id TEXT,
+      customer_id TEXT,task_id TEXT,lifecycle TEXT NOT NULL,verification TEXT NOT NULL,valid_until TEXT,
+      created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+    CREATE TABLE memory_revisions(revision_id TEXT PRIMARY KEY,item_id TEXT NOT NULL,revision_no INTEGER NOT NULL,
+      content TEXT NOT NULL,lifecycle TEXT NOT NULL,verification TEXT NOT NULL,valid_until TEXT,created_at TEXT NOT NULL);
+    CREATE TABLE memory_sources(source_id TEXT PRIMARY KEY,revision_id TEXT NOT NULL,source_type TEXT NOT NULL,
+      external_id TEXT,observed_at TEXT NOT NULL,evidence_json TEXT NOT NULL);
+    CREATE TABLE memory_relations(relation_id TEXT PRIMARY KEY,from_revision_id TEXT NOT NULL,to_revision_id TEXT NOT NULL,
+      relation_type TEXT NOT NULL,created_at TEXT NOT NULL);
+    CREATE TABLE memory_acl(acl_id TEXT PRIMARY KEY,item_id TEXT NOT NULL,owner_principal_id TEXT NOT NULL,
+      visibility TEXT NOT NULL,policy_json TEXT NOT NULL,created_at TEXT NOT NULL);
+    CREATE TABLE memory_events(event_id TEXT PRIMARY KEY,item_id TEXT NOT NULL,revision_id TEXT,event_type TEXT NOT NULL,
+      actor TEXT NOT NULL,reason TEXT NOT NULL,created_at TEXT NOT NULL);
+    CREATE TABLE memory_fts_compat_v2(item_id TEXT PRIMARY KEY,content TEXT NOT NULL,metadata_text TEXT NOT NULL);
+    CREATE TABLE memory_fts_v2(item_id TEXT PRIMARY KEY,content TEXT NOT NULL,category TEXT NOT NULL);
+    CREATE TABLE memory_vector_projection_v2(item_id TEXT PRIMARY KEY,legacy_id TEXT,backend TEXT,state TEXT,verified_at TEXT);
+    CREATE TABLE memory_relation_projection_v2(item_id TEXT PRIMARY KEY,state TEXT,verified_at TEXT);
+    CREATE TABLE projection_outbox(outbox_id TEXT PRIMARY KEY,item_id TEXT,revision_id TEXT,operation TEXT,projection TEXT,
+      attempts INTEGER,available_at TEXT,created_at TEXT,processed_at TEXT,last_error TEXT);
+    CREATE TABLE clawlore_rollouts_v2(rollout_id TEXT PRIMARY KEY,plan_digest TEXT NOT NULL,control_sha256 TEXT NOT NULL,
+      readiness_sha256 TEXT NOT NULL,legacy_logical_digest TEXT NOT NULL,rows_applied INTEGER NOT NULL,
+      applied_at TEXT NOT NULL,v1_fallback_reads INTEGER NOT NULL,context_engine_enabled INTEGER NOT NULL,
+      final_recall_cutover_enabled INTEGER NOT NULL);`);
   const originals = [
     ["control-a", originalContents.control, "decision"],
     ["control-b", originalContents.control, "decision"],
@@ -188,16 +211,26 @@ async function liveFixture() {
   for (const [id, content, category] of originals) {
     const itemId = `legacy:${id}`;
     const revisionId = `revision:${id}`;
-    db.prepare("INSERT INTO memory_truth VALUES (?,?)").run(id, JSON.stringify({ source: "reflection-summary" }));
-    db.prepare("INSERT INTO memory_items VALUES (?,?,?,?,?,?)")
-      .run(itemId, revisionId, content, category, "candidate", "unverified");
-    db.prepare("INSERT INTO memory_sources VALUES (?,?,?)").run(`source:${id}`, revisionId, JSON.stringify({
+    db.prepare("INSERT INTO memory_truth VALUES (?,?,?,?,?,?)")
+      .run(id, content, category, "private", 1, JSON.stringify({ source: "reflection-summary" }));
+    const now = "2026-07-13T09:00:00.000Z";
+    const address = JSON.stringify({ tenantId: "local", principalId: "joy", agentId: "main",
+      visibility: "private", retention: "durable", workspaceId: "test" });
+    db.prepare("INSERT INTO memory_items VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+      .run(itemId, revisionId, 1, content, category, address, "local", "joy", "main", "private", "durable",
+        "test", null, null, null, null, null, "candidate", "unverified", null, now, now);
+    db.prepare("INSERT INTO memory_revisions VALUES (?,?,?,?,?,?,?,?)")
+      .run(revisionId, itemId, 1, content, "candidate", "unverified", null, now);
+    db.prepare("INSERT INTO memory_sources VALUES (?,?,?,?,?,?)").run(`source:${id}`, revisionId, "legacy", id, now, JSON.stringify({
       classification: "reflection_summary",
       sourceLineageReceiptV1: lineageReceipt(),
     }));
-    for (const table of ["memory_fts_compat_v2", "memory_fts_v2", "memory_vector_projection_v2", "memory_relation_projection_v2"]) {
-      db.prepare(`INSERT INTO ${table} VALUES (?)`).run(itemId);
-    }
+    db.prepare("INSERT INTO memory_acl VALUES (?,?,?,?,?,?)").run(`acl:${id}`, itemId, "joy", "private", "{}", now);
+    db.prepare("INSERT INTO memory_events VALUES (?,?,?,?,?,?,?)").run(`event:${id}`, itemId, revisionId, "remembered", "fixture", "fixture", now);
+    db.prepare("INSERT INTO memory_fts_compat_v2 VALUES (?,?,?)").run(itemId, content, "{}");
+    db.prepare("INSERT INTO memory_fts_v2 VALUES (?,?,?)").run(itemId, content, category);
+    db.prepare("INSERT INTO memory_vector_projection_v2 VALUES (?,?,?,?,?)").run(itemId, id, "fixture", "verified", now);
+    db.prepare("INSERT INTO memory_relation_projection_v2 VALUES (?,?,?)").run(itemId, "none", now);
   }
   db.close();
   await chmod(source, 0o600);
@@ -315,13 +348,23 @@ test("live durable rewrite plan tolerates only a fully converged append outside 
     const id = "new-checkpoint";
     const itemId = `legacy:${id}`;
     const revisionId = `revision:${id}`;
-    db.prepare("INSERT INTO memory_truth VALUES (?,?)").run(id, JSON.stringify({ source: "checkpoint" }));
-    db.prepare("INSERT INTO memory_items VALUES (?,?,?,?,?,?)")
-      .run(itemId, revisionId, "new isolated checkpoint", "decision", "candidate", "unverified");
-    db.prepare("INSERT INTO memory_sources VALUES (?,?,?)").run(`source:${id}`, revisionId, "{}");
-    for (const table of ["memory_fts_compat_v2", "memory_fts_v2", "memory_vector_projection_v2", "memory_relation_projection_v2"]) {
-      db.prepare(`INSERT INTO ${table} VALUES (?)`).run(itemId);
-    }
+    const now = "2026-07-13T09:30:00.000Z";
+    const address = JSON.stringify({ tenantId: "local", principalId: "joy", agentId: "main",
+      visibility: "private", retention: "durable", workspaceId: "test" });
+    db.prepare("INSERT INTO memory_truth VALUES (?,?,?,?,?,?)")
+      .run(id, "new isolated checkpoint", "decision", "private", 2, JSON.stringify({ source: "checkpoint" }));
+    db.prepare("INSERT INTO memory_items VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+      .run(itemId, revisionId, 1, "new isolated checkpoint", "decision", address, "local", "joy", "main",
+        "private", "durable", "test", null, null, null, null, null, "candidate", "unverified", null, now, now);
+    db.prepare("INSERT INTO memory_revisions VALUES (?,?,?,?,?,?,?,?)")
+      .run(revisionId, itemId, 1, "new isolated checkpoint", "candidate", "unverified", null, now);
+    db.prepare("INSERT INTO memory_sources VALUES (?,?,?,?,?,?)").run(`source:${id}`, revisionId, "legacy", id, now, "{}");
+    db.prepare("INSERT INTO memory_acl VALUES (?,?,?,?,?,?)").run(`acl:${id}`, itemId, "joy", "private", "{}", now);
+    db.prepare("INSERT INTO memory_events VALUES (?,?,?,?,?,?,?)").run(`event:${id}`, itemId, revisionId, "remembered", "fixture", "fixture", now);
+    db.prepare("INSERT INTO memory_fts_compat_v2 VALUES (?,?,?)").run(itemId, "new isolated checkpoint", "{}");
+    db.prepare("INSERT INTO memory_fts_v2 VALUES (?,?,?)").run(itemId, "new isolated checkpoint", "decision");
+    db.prepare("INSERT INTO memory_vector_projection_v2 VALUES (?,?,?,?,?)").run(itemId, id, "fixture", "verified", now);
+    db.prepare("INSERT INTO memory_relation_projection_v2 VALUES (?,?,?)").run(itemId, "none", now);
     db.close();
     const plan = createLiveCandidateDurableRewriteProposalPlanV1({
       sourcePath: paths.source,
@@ -367,5 +410,203 @@ test("live durable rewrite plan rejects tampered payloads and protected-row drif
     }
   } finally {
     await rm(paths.root, { recursive: true, force: true });
+  }
+});
+
+async function writePrivateJson(path, value) {
+  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  await chmod(path, 0o600);
+}
+
+async function liveApplyFixture() {
+  const paths = await liveFixture();
+  const planPath = join(paths.root, "rewrite-plan.json");
+  const acceptancePath = join(paths.root, "rewrite-acceptance.json");
+  const baselinePath = join(paths.root, "candidate-baseline.json");
+  const archivePath = join(paths.root, "fresh.clawlore2");
+  const snapshotReceiptPath = join(paths.root, "fresh.receipt.json");
+  const plan = createLiveCandidateDurableRewriteProposalPlanV1({
+    sourcePath: paths.source,
+    adjudicationPreviewPath: paths.adjudicationPath,
+    rewritePayloadPath: paths.payloadPath,
+    proposedRewriteId: "clawlore-v2-durable-rewrite-r1",
+    now: () => new Date("2026-07-13T11:00:00.000Z"),
+  });
+  await writePrivateJson(planPath, plan);
+  const planSha256 = sha256(await readFile(planPath));
+  const payload = JSON.parse(await readFile(paths.payloadPath, "utf8"));
+  await writePrivateJson(acceptancePath, {
+    schemaVersion: 1,
+    phase: "clawlore-candidate-durable-rewrite-proposal-acceptance",
+    acceptedAt: "2026-07-13T11:01:00.000Z",
+    status: "pass",
+    planDigest: plan.planDigest,
+    planSha256,
+    rewritePayloadDigest: payload.payloadDigest,
+    rewritePayloadSha256: sha256(await readFile(paths.payloadPath)),
+    summary: plan.summary,
+    live: plan.source,
+    liveBindingMismatches: 0,
+    proposedContentLeak: false,
+    rawTraceOrIdentifierLeak: false,
+    authorizesContentRewrite: false,
+    authorizesSoftArchive: false,
+    authorizesLifecycleMutation: false,
+    requiresFreshEncryptedSnapshot: true,
+    requiresSeparateExactApply: true,
+  });
+  const promotionRows = fixtureRows().map((row) => ({
+    itemIdSha256: row.itemIdSha256,
+    disposition: "hold_candidate",
+    reasonCodes: ["automatic_source_operator_review_missing"],
+  }));
+  const baselineDigest = sha256(JSON.stringify(promotionRows));
+  await writePrivateJson(baselinePath, {
+    schemaVersion: 1,
+    phase: "clawlore-post-assignment-candidate-plan",
+    createdAt: "2026-07-13T11:02:00.000Z",
+    proposedRolloutId: "test-baseline-r1",
+    readOnly: true,
+    queryOnly: true,
+    emitsMemoryContent: false,
+    emitsTranscriptContent: false,
+    emitsRawIdentifiers: false,
+    source: {
+      ...plan.source,
+      baselineV1Rows: 6,
+      unmirroredV1Rows: 0,
+      missingLegacyRowsForV2: 0,
+      candidateBaselineUnchanged: true,
+      sourceUnchangedDuringPlan: true,
+    },
+    candidatePromotionPlan: {
+      schemaVersion: 1,
+      phase: "clawlore-candidate-promotion-plan",
+      readOnly: true,
+      emitsItemIds: false,
+      automaticPromotionRows: 0,
+      authorizesLiveMutation: false,
+      counts: { eligible_for_promotion: 0, hold_candidate: 6, quarantine: 0, preserve_archived: 0 },
+      rows: promotionRows,
+      planDigest: baselineDigest,
+    },
+    decision: {
+      eligibleRows: 0,
+      lifecycleRolloutSelectable: false,
+      finalRecallCutoverBlockedByUnmirroredV1: false,
+      automaticPromotionRows: 0,
+    },
+    authorizesLifecycleMutation: false,
+    authorizesContextEngine: false,
+    authorizesPromptMutation: false,
+    authorizesFinalRecall: false,
+  });
+  const legacy = await inspectLegacySqliteSnapshotV2(paths.source);
+  const archive = Buffer.from("fixture encrypted snapshot");
+  await writeFile(archivePath, archive, { mode: 0o600 });
+  await chmod(archivePath, 0o600);
+  await writePrivateJson(snapshotReceiptPath, {
+    schemaVersion: 1,
+    phase: "clawlore-v2-live-encrypted-snapshot",
+    createdAt: "2026-07-13T11:03:00.000Z",
+    status: "pass",
+    authorizesV2Writes: false,
+    archiveSha256: sha256(archive),
+    sourceStableDuringBackup: true,
+    restoreVerified: true,
+    restoredPlaintextRemoved: true,
+    snapshot: {
+      schemaDigest: legacy.schemaDigest,
+      memoryTruthRows: legacy.memoryTruth.rowCount,
+      memoryTruthLogicalDigest: legacy.memoryTruth.logicalDigest,
+      integrity: "ok",
+      foreignKeyViolations: 0,
+    },
+  });
+  return {
+    ...paths, plan, planPath, acceptancePath, baselinePath, baselineDigest,
+    archivePath, snapshotReceiptPath,
+  };
+}
+
+test("live durable rewrite apply changes exactly three representatives and preserves protected state", async () => {
+  const paths = await liveApplyFixture();
+  try {
+    const receipt = await executeLiveCandidateDurableRewriteV1({
+      sourcePath: paths.source,
+      planPath: paths.planPath,
+      payloadPath: paths.payloadPath,
+      proposalAcceptancePath: paths.acceptancePath,
+      candidateBaselinePath: paths.baselinePath,
+      candidateBaselineDigest: paths.baselineDigest,
+      snapshotArchivePath: paths.archivePath,
+      snapshotReceiptPath: paths.snapshotReceiptPath,
+      rolloutId: "clawlore-v2-durable-rewrite-apply-r1",
+      planDigest: paths.plan.planDigest,
+      now: () => new Date("2026-07-13T11:04:00.000Z"),
+    });
+    assert.equal(receipt.rewrite.representativeRows, 3);
+    assert.equal(receipt.rewrite.companionRowsChanged, 0);
+    assert.equal(receipt.rewrite.currentLifecycleRowsChanged, 0);
+    assert.equal(receipt.projections.vectorRowsChanged, 0);
+    const db = new DatabaseSync(paths.source, { readOnly: true });
+    const rows = db.prepare("SELECT item_id,revision_no,content,lifecycle,verification FROM memory_items ORDER BY item_id").all();
+    assert.equal(rows.filter((row) => row.revision_no === 2).length, 3);
+    assert.equal(rows.filter((row) => row.revision_no === 1).length, 3);
+    assert.equal(rows.every((row) => row.lifecycle === "candidate" && row.verification === "unverified"), true);
+    assert.equal(db.prepare("SELECT COUNT(*) AS rows FROM memory_revisions WHERE lifecycle='superseded'").get().rows, 3);
+    assert.equal(db.prepare("SELECT COUNT(*) AS rows FROM memory_sources").get().rows, 9);
+    assert.equal(db.prepare("SELECT COUNT(*) AS rows FROM memory_relations").get().rows, 3);
+    assert.equal(db.prepare("SELECT COUNT(*) AS rows FROM memory_events").get().rows, 9);
+    assert.equal(db.prepare("SELECT COUNT(*) AS rows FROM projection_outbox").get().rows, 0);
+    db.close();
+  } finally {
+    await rm(paths.root, { recursive: true, force: true });
+  }
+});
+
+test("live durable rewrite apply fails closed on target drift or stale snapshot", async () => {
+  const drifted = await liveApplyFixture();
+  try {
+    const db = new DatabaseSync(drifted.source);
+    const representative = drifted.plan.rows.find((row) => row.role === "rewrite_representative");
+    const target = db.prepare("SELECT item_id FROM memory_items ORDER BY item_id").all()
+      .find((row) => sha256(row.item_id) === representative.itemIdSha256);
+    db.prepare("UPDATE memory_items SET content=content || ' drift' WHERE item_id=?").run(target.item_id);
+    db.close();
+    await assert.rejects(executeLiveCandidateDurableRewriteV1({
+      sourcePath: drifted.source,
+      planPath: drifted.planPath,
+      payloadPath: drifted.payloadPath,
+      proposalAcceptancePath: drifted.acceptancePath,
+      candidateBaselinePath: drifted.baselinePath,
+      candidateBaselineDigest: drifted.baselineDigest,
+      snapshotArchivePath: drifted.archivePath,
+      snapshotReceiptPath: drifted.snapshotReceiptPath,
+      rolloutId: "clawlore-v2-durable-rewrite-apply-r1",
+      planDigest: drifted.plan.planDigest,
+      now: () => new Date("2026-07-13T11:04:00.000Z"),
+    }), /no longer matches/);
+  } finally {
+    await rm(drifted.root, { recursive: true, force: true });
+  }
+
+  const stale = await liveApplyFixture();
+  try {
+    await assert.rejects(executeLiveCandidateDurableRewriteV1({
+      sourcePath: stale.source,
+      planPath: stale.planPath,
+      payloadPath: stale.payloadPath,
+      proposalAcceptancePath: stale.acceptancePath,
+      candidateBaselinePath: stale.baselinePath,
+      candidateBaselineDigest: stale.baselineDigest,
+      snapshotArchivePath: stale.archivePath,
+      snapshotReceiptPath: stale.snapshotReceiptPath,
+      rolloutId: "clawlore-v2-durable-rewrite-apply-r1",
+      planDigest: stale.plan.planDigest,
+      now: () => new Date("2026-07-13T13:04:00.000Z"),
+    }), /snapshot is invalid, stale/);
+  } finally {
+    await rm(stale.root, { recursive: true, force: true });
   }
 });

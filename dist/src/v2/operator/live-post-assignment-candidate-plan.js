@@ -249,7 +249,7 @@ function candidateStateDigest(rows) {
 }
 function candidateBaselineMatches(live, baseline, delta) {
     if (delta) {
-        return live.v1Rows === delta.source.v1Rows
+        return live.v1Rows >= delta.source.v1Rows
             && live.v2Rows === delta.source.v2Rows
             && live.candidateRows === delta.lifecycle.candidateRows
             && live.activeRows === delta.lifecycle.activeRows

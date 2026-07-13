@@ -526,6 +526,32 @@ test("post-assignment candidate plan binds an accepted delta into a complete can
   }
 });
 
+test("post-assignment candidate plan keeps an accepted delta baseline valid across a later V1-only append", async () => {
+  const paths = await fixture();
+  try {
+    const deltaAcceptancePath = await appendAcceptedDelta(paths);
+    const db = new DatabaseSync(paths.source);
+    db.prepare("INSERT INTO memory_truth VALUES (?)").run("later-unmirrored-v1-row");
+    db.close();
+    const result = createLivePostAssignmentCandidatePlanV1({
+      sourcePath: paths.source,
+      assignmentPlanPath: paths.planPath,
+      assignmentAcceptancePath: paths.acceptancePath,
+      deltaAcceptancePath,
+      proposedRolloutId: "clawlore-v2-candidate-promotion-fixture-r3-later-v1",
+    });
+    assert.equal(result.source.v1Rows, 7);
+    assert.equal(result.source.v2Rows, 6);
+    assert.equal(result.source.candidateRows, 6);
+    assert.equal(result.source.unmirroredV1Rows, 1);
+    assert.equal(result.source.candidateBaselineUnchanged, true);
+    assert.equal(result.decision.finalRecallCutoverBlockedByUnmirroredV1, true);
+    assert.equal(result.authorizesFinalRecall, false);
+  } finally {
+    await rm(paths.root, { recursive: true, force: true });
+  }
+});
+
 test("post-assignment candidate plan rejects accepted-delta evidence drift", async () => {
   const paths = await fixture();
   try {
