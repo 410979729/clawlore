@@ -599,9 +599,13 @@ overlap below 0.8.
       assignment; keep 503 holds and 156 quarantines unchanged.
 - [x] Pass focused 4/4, affected 8/8, full 196/196, typecheck/build/module/
       ranking/control/vector/golden/release; pack 417.
-- [ ] Before the one-row evidence write, require a fresh encrypted snapshot and
-      reproduce the exact plan digest
-      `5bcbfbfabd64638188cdb68ed58de0d6fb0ee79ef14f2859c21bd12dbb027c05`.
+- [x] Before the evidence write, fail closed on one new append-only V1 row;
+      migrate it as candidate/unverified through a fresh encrypted snapshot,
+      restore V1/V2 and all projection parity at 981, and rebuild the exact
+      661-candidate baseline.
+- [x] Bind the original one-row target with a hashed allowlist, create a second
+      fresh encrypted snapshot, and write exactly one direct-principal evidence
+      row. Preserve lifecycle/verification/address and all non-target evidence.
 
 ## Phase 7T — Remove repeated human rollout approvals
 
@@ -623,9 +627,9 @@ overlap below 0.8.
       manifest to the live extension under the existing authenticated
       service-change boundary; restart once and verify a real read-only shadow
       trace without reading or requiring the deprecated approval file.
-- [ ] Continue the one-row Phase 7S evidence apply from a fresh encrypted
-      snapshot and reproduced exact plan digest
-      `5bcbfbfabd64638188cdb68ed58de0d6fb0ee79ef14f2859c21bd12dbb027c05`.
+- [x] Complete the one-row Phase 7S evidence apply after fresh snapshot and
+      live-drift recovery. The rebuilt allowlist-bound plan digest is
+      `a642d63d04c4c281fa22a604cb4092bcd838747af89b70d7785cd2d98e2d3cd4`.
 
 ## Phase 0 verification
 
