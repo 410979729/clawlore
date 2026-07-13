@@ -844,7 +844,13 @@ overlap below 0.8.
       Rebuilt controls are 0 eligible / 493 hold / 156 quarantine and 131
       unsafe / 2 safe duplicate / 56 semantic review. Full 233/233 and release
       pack 492 pass; ContextEngine, prompt mutation, and final recall remain off.
-- [ ] Phase 8F: adjudicate the remaining unsafe command/tool/oversized lanes.
+- [x] Phase 8F-A: converge the exact 15-row nightly V1 append under a fresh
+      encrypted snapshot, rebuild the 664-candidate controls, and adjudicate
+      all 131 unsafe rows query-only as 99 soft-archive proposals plus 32
+      bounded-rewrite holds. No disposition or runtime mutation was performed;
+      full 236/236 and release pack 504 pass.
+- [ ] Phase 8F-B: under independent exact controls, verify/apply any selected
+      99-row soft archive and develop bounded rewrites for the 32 held rows.
 - [ ] Phase 8G: adjudicate the 2 safe duplicates and 56 semantic-review rows.
 - [ ] Phase 9: make an explicit lifecycle/final-recall cutover or no-cutover
       decision. ContextEngine, prompt mutation, and final recall remain off.
@@ -889,6 +895,32 @@ overlap below 0.8.
       duplicate operational trace lane 0; mutation-ready 0.
 - [x] Pass focused 4/4, full 233/233, typecheck/build and all release gates;
       closing package scan 492 files.
+
+## Phase 8F-A — Query-only unsafe-trace adjudication
+
+- [x] Fail closed on the stale Phase 8E baseline after nightly extraction
+      appended 15 V1 rows; do not open a write transaction under 1001/986 drift.
+- [x] Generalize the V1 append acceptance/rebase control from a single
+      operational checkpoint to an exact mixed batch without weakening
+      per-row hashes, lifecycle debt, snapshot, or projection checks.
+- [x] Under a fresh restore-verified encrypted snapshot, apply exactly 14
+      reflection summaries plus 1 operational checkpoint as candidate/
+      unverified/legacy-identity debt. V1/V2/four projections become 1001,
+      candidate 664, active 0, archived 337, pending 0.
+- [x] Rebuild current plans: 0 eligible / 508 hold / 156 quarantine; 83
+      assignment / 425 evidence / 156 quarantine; 131 unsafe / 2 safe
+      duplicate / 56 semantic review; mutation-ready 0.
+- [x] Add a redacted query-only adjudicator over the exact 131-row unsafe lane.
+      Result: 99 reversible soft-archive proposals and 32 bounded-rewrite holds
+      (7 oversized segmentation + 25 semantic-result rewrite review).
+- [x] Verify live corpus 1001/1001 with missing/duplicate mappings 0. Preserve
+      the 3 intentional Phase 8C substantive V2 rewrites as an explicit parity
+      blocker; active/injectable V2 recall remains 0.
+- [x] Pass focused 10/10, full 236/236, typecheck/build/module/vector/golden/
+      release gates; closing package scan 504 files.
+- [ ] Phase 8F-B must create separate exact archive and rewrite controls. This
+      read-only adjudication authorizes no archive, rewrite, verification,
+      lifecycle, ContextEngine, prompt mutation, hard delete, or final recall.
 
 ## Phase 0 verification
 

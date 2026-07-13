@@ -1,38 +1,39 @@
 # ClawLore 2.0 project handoff
 
-Current through Phase 8E on 2026-07-13.
+Current through Phase 8F-A on 2026-07-13.
 
 ## Live position
 
 - OpenClaw runtime: shadow registration, hooks=1, writes=false,
   promptMutation=false, contextEngine=false, blocks=none.
 - Gateway: active/running; healthz live.
-- Live truth: V1/V2/current FTS/vector 986/986/986/986;
-  candidate 649, active 0, archived 337, pending outbox 0.
-- Current policy: 0 eligible / 493 hold / 156 quarantine.
+- Live truth: V1/V2/current FTS/vector 1001/1001/1001/1001;
+  candidate 664, active 0, archived 337, pending outbox 0.
+- Current policy: 0 eligible / 508 hold / 156 quarantine.
 - Current content review: 131 unsafe / 2 safe duplicate / 56 semantic review;
   mutation-ready 0.
 
 ## Latest completed phase
 
-Phase 8E soft-archived only the separately authorized 5-group / 14-row
-reversible duplicate lane. It used an exact plan, two fresh restore-verified
-encrypted snapshots, a target allowlist, and an independent postcheck. Content,
-verification, address, ACL, V1, projections, outbox, non-target rows, and all
-runtime gates changed by 0.
+Phase 8F-A first converged the exact 15-row nightly V1 append under a fresh
+restore-verified encrypted snapshot. It then rebuilt all candidate controls and
+adjudicated the exact 131-row unsafe lane query-only: 99 soft-archive proposals,
+32 bounded-rewrite holds, and 0 mutation-ready rows. No archive, rewrite,
+verification, lifecycle, hard delete, or runtime change was performed.
 
-- code commit: `8e0ed3c`;
-- full tests: 233/233 PASS;
-- release package scan: 492 files;
+- code commit: `da25aba`;
+- full tests: 236/236 PASS;
+- release package scan: 504 files;
 - run report:
-  `eval/phase8e-duplicate-disposition-live-apply-run-2026-07-13.md`;
+  `eval/phase8f-a-unsafe-trace-adjudication-run-2026-07-13.md`;
 - owner-only rollback/audit evidence:
-  `archive/clawlore-phase8e-duplicate-disposition-20260713_215037/`.
+  `archive/clawlore-phase8f-unsafe-disposition-20260713_2316/`.
 
 ## Remaining controlled route
 
-1. Phase 8F: adjudicate 7 unique oversized, 109 command, and 15 tool-payload
-   unsafe rows under separate exact controls.
+1. Phase 8F-B: verify/apply any selected 99-row reversible soft archive and
+   create bounded rewrite proposals for the 32 holds under separate exact
+   controls and fresh snapshots.
 2. Phase 8G: adjudicate 2 safe duplicates and 56 semantic-review rows.
 3. Phase 9: make an explicit lifecycle/final-recall cutover or no-cutover
    decision.

@@ -230,6 +230,25 @@
   the exact-duplicate operational trace lane is 0. Mutation-ready remains 0.
   Phase 8F, Phase 8G, and the Phase 9 cutover-or-no-cutover decision remain
   independently controlled; Phase 8E grants none of their authority.
+- Phase 8F-A first refused the stale Phase 8E baseline after the 23:00 nightly
+  writer appended 15 V1 rows. A generalized exact-batch acceptance, fresh
+  encrypted snapshot, and r9 transaction converged 14 reflection summaries and
+  1 operational checkpoint as candidate/unverified/legacy-identity debt.
+  V1/V2 and all four projections are now 1001, with 664 candidate / 0 active /
+  337 archived and pending outbox 0. Existing canonical/lifecycle/verification/
+  evidence state changed by 0.
+- All candidate controls were then rebuilt from live truth: 0 eligible / 508
+  hold / 156 quarantine; content review remains 131 unsafe / 2 safe duplicate /
+  56 semantic review. The new query-only unsafe adjudicator classifies 99 rows
+  as reversible soft-archive proposals and 32 as bounded-rewrite holds, with 0
+  mutation-ready. The plan exposes hashes/review metadata only and authorizes
+  no disposition, verification, lifecycle, hard delete, or runtime change.
+- Corpus parity is complete at 1001/1001 with no missing or duplicate mapping.
+  Three substantive differences are the intentional Phase 8C durable V2
+  rewrites, so shadow/cutover remains blocked along with active/injectable V2
+  recall being 0. Phase 8F-B needs new exact controls and a fresh encrypted
+  snapshot for any selected archive or rewrite; Phase 8G and Phase 9 remain
+  independent.
 
 ## Naming matrix
 
