@@ -18,6 +18,8 @@ function privateBaseline(path) {
     }
     const bytes = readFileSync(path);
     const value = JSON.parse(bytes.toString("utf8"));
+    const eligibleRows = value.candidatePromotionPlan?.counts?.eligible_for_promotion
+        ?? value.candidatePromotionPlan?.counts?.eligible_for_operator_promotion;
     if (value.schemaVersion !== 1
         || value.phase !== "clawlore-post-assignment-candidate-plan"
         || value.readOnly !== true
@@ -34,7 +36,7 @@ function privateBaseline(path) {
         || !hasDigest(value.candidatePromotionPlan.planDigest)
         || value.candidatePromotionPlan.automaticPromotionRows !== 0
         || value.candidatePromotionPlan.authorizesLiveMutation !== false
-        || value.candidatePromotionPlan.counts.eligible_for_promotion !== 0
+        || eligibleRows !== 0
         || value.decision.eligibleRows !== 0
         || value.decision.lifecycleRolloutSelectable !== false
         || value.decision.automaticPromotionRows !== 0

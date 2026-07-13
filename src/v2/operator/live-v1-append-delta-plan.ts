@@ -36,7 +36,12 @@ interface PostAssignmentBaselineV1 {
     planDigest: string;
     automaticPromotionRows: 0;
     authorizesLiveMutation: false;
-    counts: { eligible_for_promotion: number; hold_candidate: number; quarantine: number };
+    counts: {
+      eligible_for_promotion?: number;
+      eligible_for_operator_promotion?: number;
+      hold_candidate: number;
+      quarantine: number;
+    };
   };
   decision: { eligibleRows: number; lifecycleRolloutSelectable: false; automaticPromotionRows: 0 };
   authorizesLifecycleMutation: false;
@@ -142,6 +147,8 @@ function privateBaseline(path: string): { value: PostAssignmentBaselineV1; sha25
   }
   const bytes = readFileSync(path);
   const value = JSON.parse(bytes.toString("utf8")) as PostAssignmentBaselineV1;
+  const eligibleRows = value.candidatePromotionPlan?.counts?.eligible_for_promotion
+    ?? value.candidatePromotionPlan?.counts?.eligible_for_operator_promotion;
   if (
     value.schemaVersion !== 1
     || value.phase !== "clawlore-post-assignment-candidate-plan"
@@ -159,7 +166,7 @@ function privateBaseline(path: string): { value: PostAssignmentBaselineV1; sha25
     || !hasDigest(value.candidatePromotionPlan.planDigest)
     || value.candidatePromotionPlan.automaticPromotionRows !== 0
     || value.candidatePromotionPlan.authorizesLiveMutation !== false
-    || value.candidatePromotionPlan.counts.eligible_for_promotion !== 0
+    || eligibleRows !== 0
     || value.decision.eligibleRows !== 0
     || value.decision.lifecycleRolloutSelectable !== false
     || value.decision.automaticPromotionRows !== 0

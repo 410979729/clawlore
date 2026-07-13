@@ -166,3 +166,27 @@ test("append-only V1 delta plan rejects a group-readable baseline", async () => 
     await rm(paths.root, { recursive: true, force: true });
   }
 });
+
+test("append-only V1 delta plan accepts the policy-baseline zero-eligible field", async () => {
+  const paths = await fixture();
+  try {
+    const baseline = JSON.parse(await readFile(paths.baseline, "utf8"));
+    baseline.candidatePromotionPlan.counts = {
+      eligible_for_operator_promotion: 0,
+      hold_candidate: 1,
+      quarantine: 0,
+    };
+    await writeFile(paths.baseline, `${JSON.stringify(baseline, null, 2)}\n`, { mode: 0o600 });
+    await chmod(paths.baseline, 0o600);
+    const plan = await createLiveV1AppendDeltaPlanV1({
+      sourcePath: paths.source,
+      baselineReceiptPath: paths.baseline,
+      proposedRolloutId: "clawlore-v2-v1-delta-fixture-r2",
+      defaults: { tenantId: "local", agentId: "main", workspaceId: "workspace" },
+    });
+    assert.equal(plan.source.deltaRows, 2);
+    assert.equal(plan.authorizesDeltaWrite, false);
+  } finally {
+    await rm(paths.root, { recursive: true, force: true });
+  }
+});
