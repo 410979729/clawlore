@@ -619,10 +619,13 @@ overlap below 0.8.
 - [x] Finish full regression, build, release gate, run report, and source-tree
       cleanup: 196/196 tests, typecheck/build, all affected smokes, golden
       recall, and release gate PASS; package scan 418 files.
-- [ ] Deploy the verified source to the live extension under the existing
-      authenticated service-change boundary, restart once, verify a real shadow
-      trace without the functional gate, then continue the one-row Phase 7S
-      evidence apply from a fresh snapshot and reproduced digest.
+- [x] Deploy the verified runtime entrypoint source, compiled entrypoint, and
+      manifest to the live extension under the existing authenticated
+      service-change boundary; restart once and verify a real read-only shadow
+      trace without reading or requiring the deprecated approval file.
+- [ ] Continue the one-row Phase 7S evidence apply from a fresh encrypted
+      snapshot and reproduced exact plan digest
+      `5bcbfbfabd64638188cdb68ed58de0d6fb0ee79ef14f2859c21bd12dbb027c05`.
 
 ## Phase 0 verification
 
