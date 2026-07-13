@@ -34,34 +34,20 @@ function readiness() {
   });
 }
 
-function approval() {
-  return {
-    schemaVersion: 1,
-    rolloutId: "live-shadow-fixture",
-    mode: "shadow",
-    decision: "approved",
-    actor: "operator:fixture",
-    approvedAt: "2026-07-12T04:01:00.000Z",
-  };
-}
-
-test("rollout controls require separate valid 0600 files", async () => {
+test("rollout controls require one valid 0600 readiness file", async () => {
   const root = await mkdtemp(join(tmpdir(), "clawlore-rollout-control-"));
   try {
     const readinessFile = join(root, "readiness.json");
-    const approvalFile = join(root, "approval.json");
     await writeFile(readinessFile, `${JSON.stringify(readiness())}\n`, { mode: 0o600 });
-    await writeFile(approvalFile, `${JSON.stringify(approval())}\n`, { mode: 0o600 });
 
-    const loaded = loadRuntimeRolloutControlsV1({ readinessFile, approvalFile });
+    const loaded = loadRuntimeRolloutControlsV1({ readinessFile });
     assert.deepEqual(loaded.errors, []);
     assert.equal(loaded.readiness?.status, "ready");
-    assert.equal(loaded.approval?.rolloutId, loaded.readiness?.rollout.rolloutId);
 
-    await chmod(approvalFile, 0o644);
-    const unsafe = loadRuntimeRolloutControlsV1({ readinessFile, approvalFile });
+    await chmod(readinessFile, 0o644);
+    const unsafe = loadRuntimeRolloutControlsV1({ readinessFile });
     assert.deepEqual(unsafe.errors, ["rollout_control_permissions_must_be_0600"]);
-    assert.equal(unsafe.approval, undefined);
+    assert.equal(unsafe.readiness, undefined);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

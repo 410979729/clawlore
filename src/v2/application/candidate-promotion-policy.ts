@@ -43,7 +43,7 @@ export interface CandidatePromotionReviewRowV1 {
 }
 
 export type CandidatePromotionDispositionV1 =
-  | "eligible_for_operator_promotion"
+  | "eligible_for_promotion"
   | "hold_candidate"
   | "quarantine"
   | "preserve_archived";
@@ -55,7 +55,6 @@ export interface CandidatePromotionPlanV1 {
   emitsItemIds: false;
   automaticPromotionRows: 0;
   authorizesLiveMutation: false;
-  requiresSeparateOperatorApproval: true;
   counts: Record<CandidatePromotionDispositionV1, number>;
   rows: Array<{
     itemIdSha256: string;
@@ -160,8 +159,8 @@ function reviewRow(row: CandidatePromotionReviewRowV1): {
       return { disposition: "quarantine", reasonCodes: ["unsupported_legacy_classification"] };
   }
   return {
-    disposition: "eligible_for_operator_promotion",
-    reasonCodes: ["evidence_complete_separate_approval_required"],
+    disposition: "eligible_for_promotion",
+    reasonCodes: ["evidence_complete"],
   };
 }
 
@@ -173,7 +172,7 @@ export function planCandidatePromotionsV1(rows: CandidatePromotionReviewRowV1[])
     return { itemIdSha256: hash(row.itemId), ...reviewRow(row) };
   });
   const counts: Record<CandidatePromotionDispositionV1, number> = {
-    eligible_for_operator_promotion: 0,
+    eligible_for_promotion: 0,
     hold_candidate: 0,
     quarantine: 0,
     preserve_archived: 0,
@@ -186,7 +185,6 @@ export function planCandidatePromotionsV1(rows: CandidatePromotionReviewRowV1[])
     emitsItemIds: false,
     automaticPromotionRows: 0,
     authorizesLiveMutation: false,
-    requiresSeparateOperatorApproval: true,
     counts,
     rows: reviewed,
     planDigest: hash(JSON.stringify(reviewed)),

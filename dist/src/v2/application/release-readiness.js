@@ -55,7 +55,7 @@ function rolloutSteps(mode) {
         steps.push({ order: 3, action: "apply_additive_v2_schema", mutatesLive: true, rollback: "restore_snapshot_to_new_location" }, { order: 4, action: "enable_v2_single_write_with_v1_fallback_read", mutatesLive: true, rollback: "restore_config_pointer" });
     }
     else if (mode === "cutover") {
-        steps.push({ order: 3, action: "apply_additive_v2_schema", mutatesLive: true, rollback: "restore_snapshot_to_new_location" }, { order: 4, action: "rebuild_and_verify_all_projections", mutatesLive: true, rollback: "discard_rebuildable_projections" }, { order: 5, action: "atomic_cutover_after_operator_approval", mutatesLive: true, rollback: "restore_config_and_database_pointer" });
+        steps.push({ order: 3, action: "apply_additive_v2_schema", mutatesLive: true, rollback: "restore_snapshot_to_new_location" }, { order: 4, action: "rebuild_and_verify_all_projections", mutatesLive: true, rollback: "discard_rebuildable_projections" }, { order: 5, action: "atomic_cutover_after_quality_gates", mutatesLive: true, rollback: "restore_config_and_database_pointer" });
     }
     return steps;
 }
@@ -71,7 +71,6 @@ export function previewRollout(input) {
         currentMode: input.currentMode,
         ready: blockingReasons.length === 0,
         readOnly: input.requestedMode === "disabled" || input.requestedMode === "shadow",
-        requiresOperatorApproval: input.requestedMode !== "disabled",
         blockingReasons,
         steps: rolloutSteps(input.requestedMode),
         compatibility: CLAWLORE_COMPATIBILITY_SURFACE_V1,

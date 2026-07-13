@@ -70,7 +70,7 @@ function stableStateDigest(row) {
 }
 function assertSameRemediationPlan(expected, actual) {
     if (actual.planDigest !== expected.planDigest || JSON.stringify(actual.source) !== JSON.stringify(expected.source)) {
-        throw new Error("live remediation plan no longer matches the approved read-only baseline");
+        throw new Error("live remediation plan no longer matches the read-only baseline");
     }
     const expectedRows = new Map(expected.rows.map((row) => [row.itemIdSha256, JSON.stringify(row)]));
     if (expectedRows.size !== actual.rows.length
@@ -203,7 +203,6 @@ export function createLiveEvidenceAssignmentPlanV1(input) {
         authorizesPromptMutation: false,
         authorizesFinalRecall: false,
         requiresFreshSnapshotBeforeApply: true,
-        requiresSeparateOperatorApproval: true,
         ...planCore,
         planDigest: hash(JSON.stringify(planCore)),
     };

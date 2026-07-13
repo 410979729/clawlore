@@ -273,6 +273,7 @@ interface PluginConfig {
     maxQueryChars?: number;
     candidateLimit?: number;
     readinessFile?: string;
+    /** Deprecated compatibility input. Parsed but never used as an activation gate. */
     approvalFile?: string;
   };
 }
@@ -1971,11 +1972,8 @@ const scopeRecallOpenClawPlugin = {
           readinessFile: config.clawloreV2?.readinessFile
             ? api.resolvePath(config.clawloreV2.readinessFile)
             : undefined,
-          approvalFile: config.clawloreV2?.approvalFile
-            ? api.resolvePath(config.clawloreV2.approvalFile)
-            : undefined,
         })
-      : { readiness: undefined, approval: undefined, errors: [] as string[] };
+      : { readiness: undefined, errors: [] as string[] };
     if (rolloutControls.errors.length > 0) {
       api.logger.warn(
         `clawlore-v2: shadow rollout controls blocked: ${rolloutControls.errors.join(",")}`,
@@ -2006,7 +2004,6 @@ const scopeRecallOpenClawPlugin = {
         },
       },
       readiness: rolloutControls.readiness,
-      approval: rolloutControls.approval,
     });
     api.logger.info(
       `clawlore-v2: runtime status=${clawloreRuntimeReceipt.status} mode=${clawloreRuntimeReceipt.requestedMode} hooks=${clawloreRuntimeReceipt.registeredHooks.length} writes=${clawloreRuntimeReceipt.writeEnabled} promptMutation=${clawloreRuntimeReceipt.promptMutationEnabled} contextEngine=${clawloreRuntimeReceipt.contextEngineRegistered} blocks=${clawloreRuntimeReceipt.blockingReasons.join(",") || "none"}`,

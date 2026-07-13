@@ -7,7 +7,7 @@ const require = createRequire(import.meta.url);
 const { createJiti } = require("jiti");
 const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: false });
 const { planCandidatePromotionsV1 } = jiti("../src/v2/application/candidate-promotion-policy.ts");
-const { buildPhase7GControlBundleV1, validatePhase7GApprovalV1 } =
+const { buildPhase7GControlBundleV1 } =
   jiti("../src/v2/application/phase7g-rollout-controls.ts");
 const fixture = JSON.parse(await readFile(
   new URL("./fixtures/clawlore-phase7f-ranking-promotion-v1.json", import.meta.url),
@@ -69,15 +69,16 @@ function bundle(overrides = {}) {
   });
 }
 
-test("phase 7G controls bind fresh snapshot and keep two rollout approvals isolated", () => {
+test("phase 7G controls bind fresh snapshot and keep two bounded plans isolated", () => {
   const result = bundle();
-  assert.equal(result.status, "ready_for_separate_approvals");
+  assert.equal(result.status, "ready");
   assert.deepEqual(result.blockers, []);
   assert.equal(result.snapshot.ageSeconds, 1800);
-  assert.equal(result.approvals.compatibilityBackfill.mode, "compatibility-backfill");
-  assert.equal(result.approvals.candidatePromotion.mode, "candidate-promotion");
-  assert.equal(result.approvals.candidatePromotion.eligibleRows, 3);
-  assert.equal(result.isolation.oneApprovalCannotAuthorizeBothActions, true);
+  assert.equal(result.plans.compatibilityBackfill.mode, "compatibility-backfill");
+  assert.equal(result.plans.candidatePromotion.mode, "candidate-promotion");
+  assert.equal(result.plans.candidatePromotion.eligibleRows, 3);
+  assert.equal(result.isolation.compatibilityPlanCannotPromoteCandidates, true);
+  assert.equal(result.isolation.promotionPlanCannotCreateProjection, true);
   assert.equal(result.authorizesCompatibilityBackfill, false);
   assert.equal(result.authorizesCandidatePromotion, false);
   assert.equal(result.authorizesContextEngine, false);
@@ -117,38 +118,10 @@ test("phase 7G controls fail closed on stale snapshot or incomplete projection m
   }), /must be distinct/);
 });
 
-test("a projection approval cannot authorize promotion or broader runtime changes", () => {
+test("projection and promotion remain isolated without an approval control", () => {
   const controls = bundle();
-  const approval = {
-    schemaVersion: 1,
-    rolloutId: controls.approvals.compatibilityBackfill.rolloutId,
-    mode: "compatibility-backfill",
-    decision: "approved",
-    actor: "operator:fixture",
-    approvedAt: "2026-07-12T11:31:00.000Z",
-    planDigest: controls.approvals.compatibilityBackfill.planDigest,
-    preserveV1Fallback: true,
-    allowContextEngine: false,
-    allowPromptMutation: false,
-    allowFinalRecallCutover: false,
-  };
-  assert.deepEqual(validatePhase7GApprovalV1({
-    approval,
-    expected: controls.approvals.compatibilityBackfill,
-  }), { valid: true, reasonCodes: [] });
-  const promotionAttempt = validatePhase7GApprovalV1({
-    approval,
-    expected: controls.approvals.candidatePromotion,
-  });
-  assert.equal(promotionAttempt.valid, false);
-  assert.ok(promotionAttempt.reasonCodes.includes("approval_rollout_mismatch"));
-  assert.ok(promotionAttempt.reasonCodes.includes("approval_mode_mismatch"));
-  assert.ok(promotionAttempt.reasonCodes.includes("approval_plan_digest_mismatch"));
-
-  const overbroad = validatePhase7GApprovalV1({
-    approval: { ...approval, allowPromptMutation: true },
-    expected: controls.approvals.compatibilityBackfill,
-  });
-  assert.equal(overbroad.valid, false);
-  assert.ok(overbroad.reasonCodes.includes("approval_exceeds_authorized_boundary"));
+  assert.notEqual(controls.plans.compatibilityBackfill.rolloutId, controls.plans.candidatePromotion.rolloutId);
+  assert.notEqual(controls.plans.compatibilityBackfill.planDigest, controls.plans.candidatePromotion.planDigest);
+  assert.equal("approvals" in controls, false);
+  assert.equal(JSON.stringify(controls).includes("OperatorApproval"), false);
 });

@@ -33,7 +33,6 @@ async function fixture() {
   const baseline = join(root, "baseline.json");
   const remediation = join(root, "remediation.json");
   const planPath = join(root, "plan.json");
-  const approval = join(root, "approval.json");
   const snapshotArchive = join(root, "fresh.clawlore2");
   const snapshotReceipt = join(root, "snapshot.json");
   const rolloutId = "clawlore-v2-evidence-assignment-fixture-r1";
@@ -112,26 +111,6 @@ async function fixture() {
     proposedRolloutId: rolloutId,
   });
   await privateJson(planPath, plan);
-  await privateJson(approval, {
-    schemaVersion: 1,
-    phase: "clawlore-evidence-assignment-approval",
-    rolloutId,
-    decision: "approved",
-    actor: "operator:fixture",
-    approvedAt: "2026-07-12T14:01:00.000Z",
-    planDigest: plan.planDigest,
-    allowFreshEncryptedSnapshot: true,
-    allowEvidenceWrite: true,
-    preserveLifecycle: true,
-    preserveVerification: true,
-    preserveV1Fallback: true,
-    allowManualPrincipalAssignment: false,
-    allowExternalSourceReceiptWrite: false,
-    allowQuarantineMutation: false,
-    allowContextEngine: false,
-    allowPromptMutation: false,
-    allowFinalRecallCutover: false,
-  });
   const snapshot = await inspectLegacySqliteSnapshotV2(source, "2026-07-12T14:02:00.000Z");
   await writeFile(snapshotArchive, Buffer.from("fixture encrypted archive"), { mode: 0o600 });
   await chmod(snapshotArchive, 0o600);
@@ -155,7 +134,7 @@ async function fixture() {
     },
   });
   return {
-    root, source, registry, registryValue, baseline, remediation, planPath, approval,
+    root, source, registry, registryValue, baseline, remediation, planPath,
     snapshotArchive, snapshotReceipt, rolloutId, plan,
   };
 }
@@ -167,7 +146,6 @@ function execute(paths) {
     remediationPreviewPath: paths.remediation,
     baselinePromotionPreviewPath: paths.baseline,
     planPath: paths.planPath,
-    approvalPath: paths.approval,
     snapshotArchivePath: paths.snapshotArchive,
     snapshotReceiptPath: paths.snapshotReceipt,
     rolloutId: paths.rolloutId,
@@ -176,7 +154,7 @@ function execute(paths) {
   });
 }
 
-test("approved evidence assignment writes only exact registry-resolved source evidence", async () => {
+test("evidence assignment writes only exact registry-resolved source evidence", async () => {
   const paths = await fixture();
   try {
     await privateJson(paths.registry, {

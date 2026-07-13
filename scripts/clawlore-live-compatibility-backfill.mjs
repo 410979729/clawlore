@@ -15,7 +15,7 @@ function parseArgs(argv) {
     if (!name?.startsWith("--") || !value) throw new Error(`invalid argument near ${name || "<end>"}`);
     args[name.slice(2)] = value;
   }
-  for (const required of ["source", "preview", "approval", "rollout-id", "plan-digest", "receipt"]) {
+  for (const required of ["source", "preview", "rollout-id", "plan-digest", "receipt"]) {
     if (!args[required]) throw new Error(`--${required} is required`);
   }
   return args;
@@ -25,7 +25,6 @@ const args = parseArgs(process.argv.slice(2));
 const receipt = await executeLiveCompatibilityBackfillV1({
   sourcePath: resolve(args.source),
   previewPath: resolve(args.preview),
-  approvalPath: resolve(args.approval),
   rolloutId: args["rollout-id"],
   planDigest: args["plan-digest"],
 });

@@ -43,28 +43,12 @@ export interface CompatibilityBackfillPlanEvidenceV1 {
   authorizesLiveMutation: false;
 }
 
-export type Phase7GRolloutModeV1 = "compatibility-backfill" | "candidate-promotion";
-
-export interface Phase7GApprovalV1 {
-  schemaVersion: 1;
-  rolloutId: string;
-  mode: Phase7GRolloutModeV1;
-  decision: "approved";
-  actor: string;
-  approvedAt: string;
-  planDigest: string;
-  preserveV1Fallback: true;
-  allowContextEngine: false;
-  allowPromptMutation: false;
-  allowFinalRecallCutover: false;
-}
-
 export interface Phase7GControlBundleV1 {
   schemaVersion: 1;
   phase: "clawlore-phase7g-rollout-controls";
   readOnly: true;
   emitsMemoryContent: false;
-  status: "ready_for_separate_approvals" | "blocked";
+  status: "ready" | "blocked";
   blockers: string[];
   snapshot: {
     receiptSha256: string;
@@ -77,25 +61,22 @@ export interface Phase7GControlBundleV1 {
     sourceUnchanged: boolean;
     plaintextResidueFiles: number;
   };
-  approvals: {
+  plans: {
     compatibilityBackfill: {
       rolloutId: string;
       mode: "compatibility-backfill";
       planDigest: string;
-      requiresSeparateOperatorApproval: true;
     };
     candidatePromotion: {
       rolloutId: string;
       mode: "candidate-promotion";
       planDigest: string;
       eligibleRows: number;
-      requiresSeparateOperatorApproval: true;
     };
   };
   isolation: {
-    oneApprovalCannotAuthorizeBothActions: true;
-    compatibilityApprovalCannotPromoteCandidates: true;
-    promotionApprovalCannotCreateProjection: true;
+    compatibilityPlanCannotPromoteCandidates: true;
+    promotionPlanCannotCreateProjection: true;
   };
   authorizesCompatibilityBackfill: false;
   authorizesCandidatePromotion: false;
@@ -200,7 +181,6 @@ export function buildPhase7GControlBundleV1(input: {
     || promotion.emitsItemIds !== false
     || promotion.automaticPromotionRows !== 0
     || promotion.authorizesLiveMutation !== false
-    || promotion.requiresSeparateOperatorApproval !== true
   ) blockers.push("promotion_plan_contract_invalid");
   if (!validDigest(promotion.planDigest)) blockers.push("promotion_plan_digest_invalid");
   const promotionCount = Object.values(promotion.counts).reduce((sum, count) => sum + count, 0);
@@ -221,35 +201,32 @@ export function buildPhase7GControlBundleV1(input: {
     sourceUnchanged: input.snapshot.sourceUnchanged,
     plaintextResidueFiles: input.snapshot.plaintextResidueFiles,
   };
-  const approvals = {
+  const plans = {
     compatibilityBackfill: {
       rolloutId: input.compatibilityRolloutId,
       mode: "compatibility-backfill" as const,
       planDigest: compatibility.planDigest,
-      requiresSeparateOperatorApproval: true as const,
     },
     candidatePromotion: {
       rolloutId: input.promotionRolloutId,
       mode: "candidate-promotion" as const,
       planDigest: promotion.planDigest,
-      eligibleRows: promotion.counts.eligible_for_operator_promotion,
-      requiresSeparateOperatorApproval: true as const,
+      eligibleRows: promotion.counts.eligible_for_promotion,
     },
   };
-  const controlDigest = hash(JSON.stringify({ snapshot, approvals, blockers }));
+  const controlDigest = hash(JSON.stringify({ snapshot, plans, blockers }));
   return {
     schemaVersion: 1,
     phase: "clawlore-phase7g-rollout-controls",
     readOnly: true,
     emitsMemoryContent: false,
-    status: blockers.length === 0 ? "ready_for_separate_approvals" : "blocked",
+    status: blockers.length === 0 ? "ready" : "blocked",
     blockers,
     snapshot,
-    approvals,
+    plans,
     isolation: {
-      oneApprovalCannotAuthorizeBothActions: true,
-      compatibilityApprovalCannotPromoteCandidates: true,
-      promotionApprovalCannotCreateProjection: true,
+      compatibilityPlanCannotPromoteCandidates: true,
+      promotionPlanCannotCreateProjection: true,
     },
     authorizesCompatibilityBackfill: false,
     authorizesCandidatePromotion: false,
@@ -258,31 +235,4 @@ export function buildPhase7GControlBundleV1(input: {
     authorizesFinalRecallCutover: false,
     controlDigest,
   };
-}
-
-export function validatePhase7GApprovalV1(input: {
-  approval: Phase7GApprovalV1;
-  expected: {
-    rolloutId: string;
-    mode: Phase7GRolloutModeV1;
-    planDigest: string;
-  };
-}): { valid: boolean; reasonCodes: string[] } {
-  const approval = input.approval;
-  const reasons: string[] = [];
-  if (approval.schemaVersion !== 1 || approval.decision !== "approved") reasons.push("approval_contract_invalid");
-  if (approval.rolloutId !== input.expected.rolloutId) reasons.push("approval_rollout_mismatch");
-  if (approval.mode !== input.expected.mode) reasons.push("approval_mode_mismatch");
-  if (approval.planDigest !== input.expected.planDigest || !validDigest(approval.planDigest)) {
-    reasons.push("approval_plan_digest_mismatch");
-  }
-  if (!approval.actor?.trim()) reasons.push("approval_actor_missing");
-  if (!Number.isFinite(Date.parse(approval.approvedAt))) reasons.push("approval_timestamp_invalid");
-  if (
-    approval.preserveV1Fallback !== true
-    || approval.allowContextEngine !== false
-    || approval.allowPromptMutation !== false
-    || approval.allowFinalRecallCutover !== false
-  ) reasons.push("approval_exceeds_authorized_boundary");
-  return { valid: reasons.length === 0, reasonCodes: reasons };
 }

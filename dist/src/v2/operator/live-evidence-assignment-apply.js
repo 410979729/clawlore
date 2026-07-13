@@ -75,38 +75,13 @@ function loadPlan(path, rolloutId, digest) {
         || value.authorizesPromptMutation !== false
         || value.authorizesFinalRecall !== false
         || value.requiresFreshSnapshotBeforeApply !== true
-        || value.requiresSeparateOperatorApproval !== true
         || hash(JSON.stringify(planCore(value))) !== value.planDigest)
-        throw new Error("approved evidence-assignment plan is invalid or digest-mismatched");
+        throw new Error("evidence-assignment plan is invalid or digest-mismatched");
     const targetRows = value.rows.filter((row) => row.decision.startsWith("propose_"));
     if (targetRows.length !== value.summary.proposedEvidenceAssignmentRows
         || targetRows.some((row) => !row.resolver || !row.resolverEvidenceDigest || !row.proposedEvidencePayloadDigest)
         || value.rows.some((row) => row.postLifecycle !== "candidate" || row.lifecycleMutationAllowed !== false))
-        throw new Error("approved evidence-assignment target coverage is invalid");
-    return loaded;
-}
-function loadApproval(path, rolloutId, planDigest) {
-    const loaded = privateJson(path, 128 * 1024);
-    const value = loaded.value;
-    if (value.schemaVersion !== 1
-        || value.phase !== "clawlore-evidence-assignment-approval"
-        || value.rolloutId !== rolloutId
-        || value.decision !== "approved"
-        || !value.actor?.trim()
-        || !Number.isFinite(Date.parse(value.approvedAt))
-        || value.planDigest !== planDigest
-        || value.allowFreshEncryptedSnapshot !== true
-        || value.allowEvidenceWrite !== true
-        || value.preserveLifecycle !== true
-        || value.preserveVerification !== true
-        || value.preserveV1Fallback !== true
-        || value.allowManualPrincipalAssignment !== false
-        || value.allowExternalSourceReceiptWrite !== false
-        || value.allowQuarantineMutation !== false
-        || value.allowContextEngine !== false
-        || value.allowPromptMutation !== false
-        || value.allowFinalRecallCutover !== false)
-        throw new Error("operator approval is invalid or exceeds the authorized boundary");
+        throw new Error("evidence-assignment target coverage is invalid");
     return loaded;
 }
 function loadFreshSnapshot(input) {
@@ -131,7 +106,7 @@ function loadFreshSnapshot(input) {
         throw new Error("fresh encrypted snapshot is invalid, stale, or checksum-mismatched");
     return loaded;
 }
-function assertTargetScopedPlanMatch(approved, current) {
+function assertTargetScopedPlanMatch(expected, current) {
     const stableFields = [
         "remediationPlanDigest",
         "remediationPreviewSha256",
@@ -140,8 +115,8 @@ function assertTargetScopedPlanMatch(approved, current) {
         "decisions",
         "rows",
     ];
-    if (stableFields.some((field) => JSON.stringify(approved[field]) !== JSON.stringify(current[field]))) {
-        throw new Error("live target evidence no longer matches the approved exact plan");
+    if (stableFields.some((field) => JSON.stringify(expected[field]) !== JSON.stringify(current[field]))) {
+        throw new Error("live target evidence no longer matches the exact plan");
     }
 }
 function scalar(db, sql) {
@@ -171,7 +146,6 @@ export async function executeLiveEvidenceAssignmentV1(input) {
         throw new Error("maximum snapshot age must be a positive integer");
     }
     const plan = loadPlan(input.planPath, input.rolloutId, input.planDigest);
-    const approval = loadApproval(input.approvalPath, input.rolloutId, input.planDigest);
     const snapshot = loadFreshSnapshot({
         receiptPath: input.snapshotReceiptPath,
         archivePath: input.snapshotArchivePath,
@@ -210,10 +184,10 @@ export async function executeLiveEvidenceAssignmentV1(input) {
         db.exec("BEGIN IMMEDIATE");
         const liveStates = db.prepare(`SELECT item_id,current_revision_id,address_json,lifecycle,verification
       FROM memory_items WHERE lifecycle='candidate' ORDER BY item_id`).all();
-        const approvedRows = new Map(plan.value.rows.map((row) => [row.itemIdSha256, row]));
+        const expectedRows = new Map(plan.value.rows.map((row) => [row.itemIdSha256, row]));
         if (liveStates.length !== plan.value.source.candidateRows
             || liveStates.some((state) => {
-                const row = approvedRows.get(hash(state.item_id));
+                const row = expectedRows.get(hash(state.item_id));
                 return !row || row.currentStateDigest !== stableStateDigest(state);
             }))
             throw new Error("candidate state changed after exact-plan validation");
@@ -283,7 +257,7 @@ export async function executeLiveEvidenceAssignmentV1(input) {
             || JSON.stringify(lifecycleCounts(db)) !== JSON.stringify(beforeLifecycle)
             || scalar(db, "SELECT COUNT(*) FROM projection_outbox WHERE processed_at IS NULL") !== beforePendingOutbox
             || scalar(db, "SELECT COUNT(*) FROM memory_fts_compat_v2") !== beforeCompatibility)
-            throw new Error("transaction exceeded the approved evidence-only boundary");
+            throw new Error("transaction exceeded the evidence-only boundary");
         const integrity = String(Object.values(db.prepare("PRAGMA integrity_check").get())[0]);
         const foreignKeyViolations = db.prepare("PRAGMA foreign_key_check").all().length;
         if (integrity !== "ok" || foreignKeyViolations !== 0)
@@ -328,7 +302,6 @@ export async function executeLiveEvidenceAssignmentV1(input) {
         status: "applied",
         appliedAt: appliedAtDate.toISOString(),
         planDigest: input.planDigest,
-        approvalSha256: approval.sha256,
         planSha256: plan.sha256,
         snapshotReceiptSha256: snapshot.sha256,
         snapshotArchiveSha256: snapshot.value.archiveSha256,

@@ -30,15 +30,6 @@ export interface ClawLoreRuntimeConfigV1 {
   candidateLimit: number;
 }
 
-export interface RuntimeRolloutApprovalV1 {
-  schemaVersion: 1;
-  rolloutId: string;
-  mode: "shadow";
-  decision: "approved";
-  actor: string;
-  approvedAt: string;
-}
-
 export type MessageReceivedHandlerV1 = (
   event: Record<string, unknown>,
   context: Record<string, unknown>,
@@ -152,22 +143,6 @@ function shadowVisibility(
   return chatType === "direct" ? "private" : "conversation";
 }
 
-function validApproval(
-  approval: RuntimeRolloutApprovalV1 | undefined,
-  readiness: ReleaseReadinessReceiptV1 | undefined,
-): boolean {
-  if (!approval || !readiness) return false;
-  return approval.schemaVersion === 1
-    && approval.decision === "approved"
-    && approval.mode === "shadow"
-    && typeof approval.actor === "string"
-    && Boolean(approval.actor.trim())
-    && typeof approval.rolloutId === "string"
-    && approval.rolloutId === readiness.rollout.rolloutId
-    && typeof approval.approvedAt === "string"
-    && Number.isFinite(Date.parse(approval.approvedAt));
-}
-
 async function observeWithoutBlockingReply(input: {
   operation: Promise<unknown>;
   maxLatencyMs: number;
@@ -191,7 +166,6 @@ async function observeWithoutBlockingReply(input: {
 function activationBlocks(input: {
   config: ClawLoreRuntimeConfigV1;
   readiness?: ReleaseReadinessReceiptV1;
-  approval?: RuntimeRolloutApprovalV1;
 }): string[] {
   if (input.config.mode === "disabled") return [];
   const blocks: string[] = [];
@@ -202,9 +176,7 @@ function activationBlocks(input: {
     if (readiness.status !== "ready" || !readiness.rollout.ready) blocks.push("release_readiness_blocked");
     if (readiness.rollout.requestedMode !== "shadow") blocks.push("readiness_mode_mismatch");
     if (!readiness.rollout.readOnly) blocks.push("readiness_not_read_only");
-    if (!readiness.rollout.requiresOperatorApproval) blocks.push("approval_contract_missing");
   }
-  if (!validApproval(input.approval, readiness)) blocks.push("operator_approval_missing_or_invalid");
   if (input.config.contextEngine !== "compatibility") blocks.push("native_context_engine_not_enabled_in_this_slice");
   return [...new Set(blocks)].sort();
 }
@@ -249,7 +221,6 @@ export function composeClawLoreRuntimeV1(input: {
   host: OpenClawRuntimeHostV1;
   dependencies: RuntimeCompositionDependenciesV1;
   readiness?: ReleaseReadinessReceiptV1;
-  approval?: RuntimeRolloutApprovalV1;
 }): RuntimeCompositionReceiptV1 {
   const contextEngine = negotiateContextEngineV2({
     requested: input.config.contextEngine,

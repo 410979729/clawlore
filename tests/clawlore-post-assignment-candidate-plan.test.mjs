@@ -310,7 +310,7 @@ test("post-assignment candidate plan validates new evidence without inferring ow
     assert.equal(result.assignment.directPrincipalRows, 1);
     assert.equal(result.assignment.conversationBoundaryRows, 1);
     assert.deepEqual(result.candidatePromotionPlan.counts, {
-      eligible_for_operator_promotion: 0,
+      eligible_for_promotion: 0,
       hold_candidate: 3,
       quarantine: 1,
       preserve_archived: 0,
@@ -369,7 +369,7 @@ test("post-assignment candidate plan binds an accepted delta into a complete can
     assert.equal(result.source.vectorRows, 6);
     assert.equal(result.source.relationRows, 6);
     assert.deepEqual(result.candidatePromotionPlan.counts, {
-      eligible_for_operator_promotion: 0,
+      eligible_for_promotion: 0,
       hold_candidate: 5,
       quarantine: 1,
       preserve_archived: 0,

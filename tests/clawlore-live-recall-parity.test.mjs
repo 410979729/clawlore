@@ -24,7 +24,6 @@ test("read-only parity proves corpus/ranking while enforcing stricter V2 policy"
   const root = await mkdtemp(join(tmpdir(), "clawlore-parity-"));
   const source = join(root, "memory.sqlite3");
   const readiness = join(root, "readiness.json");
-  const approval = join(root, "approval.json");
   const rolloutId = "fixture-parity";
   const defaults = { tenantId: "local", agentId: "main", workspaceId: "workspace-main" };
   try {
@@ -51,16 +50,13 @@ test("read-only parity proves corpus/ranking while enforcing stricter V2 policy"
     const plan = planLegacyMigrationV2({ legacyPath: source, defaults });
     await control(readiness, {
       schemaVersion: 1, status: "ready", compatibilityValid: true, authorizesV2Writes: false,
-      operatorApprovalPresent: false, writeActivationAllowed: false, manualDisposition: "candidate",
+      manualDisposition: "candidate",
       rollout: { rolloutId, requestedMode: "v2-write", currentMode: "shadow", ready: true, readOnly: false,
-        requiresOperatorApproval: true, blockingReasons: [] },
+        blockingReasons: [] },
       evidenceBindings: { migrationPlanDigest: plan.planDigest,
         memoryTruthLogicalDigest: snapshot.memoryTruth.logicalDigest, memoryTruthRows: snapshot.memoryTruth.rowCount },
     });
-    await control(approval, { schemaVersion: 1, rolloutId, mode: "v2-write", decision: "approved",
-      actor: "operator:test", approvedAt: "2026-07-12T00:00:00.000Z", preserveV1Fallback: true,
-      allowContextEngine: false, allowFinalRecallCutover: false });
-    await executeLiveV2WriteRolloutV1({ sourcePath: source, readinessPath: readiness, approvalPath: approval,
+    await executeLiveV2WriteRolloutV1({ sourcePath: source, readinessPath: readiness,
       rolloutId, defaults, expectedV1VectorRows: 3 });
     const report = inspectLiveV1V2RecallParityV1({ sqlitePath: source, queries: [{
       queryText: "Telegram boundary", legacyScopes: ["agent:main"],

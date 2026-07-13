@@ -81,7 +81,7 @@ async function fixture() {
       planDigest: sha256("candidate-plan"),
       automaticPromotionRows: 0,
       authorizesLiveMutation: false,
-      counts: { eligible_for_operator_promotion: 0, hold_candidate: 1, quarantine: 0 },
+      counts: { eligible_for_promotion: 0, hold_candidate: 1, quarantine: 0 },
     },
     decision: { eligibleRows: 0, lifecycleRolloutSelectable: false, automaticPromotionRows: 0 },
     authorizesLifecycleMutation: false,
@@ -123,7 +123,7 @@ test("append-only V1 delta plan is redacted, complete, and non-authorizing", asy
     assert.deepEqual(plan.proposed.verifications, { unverified: 1, user_confirmed: 1 });
     assert.equal(plan.proposed.reviewRequiredRows, 2);
     assert.equal(plan.projectionWork.outboxRows, 6);
-    assert.equal(plan.decision.deltaWritePlanReadyForSeparateApproval, true);
+    assert.equal(plan.decision.deltaWriteReady, true);
     assert.equal(plan.authorizesDeltaWrite, false);
     assert.equal(plan.authorizesFinalRecall, false);
     const serialized = JSON.stringify(plan);

@@ -19,7 +19,7 @@ function parseArgs(argv) {
     index += 1;
   }
   for (const required of [
-    "source", "sessions-registry", "remediation-preview", "baseline-preview", "plan", "approval",
+    "source", "sessions-registry", "remediation-preview", "baseline-preview", "plan",
     "snapshot-archive", "snapshot-receipt", "rollout-id", "plan-digest", "receipt",
   ]) {
     if (!args[required]) throw new Error(`--${required} is required`);
@@ -35,7 +35,6 @@ const receipt = await executeLiveEvidenceAssignmentV1({
   remediationPreviewPath: resolve(args["remediation-preview"]),
   baselinePromotionPreviewPath: resolve(args["baseline-preview"]),
   planPath: resolve(args.plan),
-  approvalPath: resolve(args.approval),
   snapshotArchivePath: resolve(args["snapshot-archive"]),
   snapshotReceiptPath: resolve(args["snapshot-receipt"]),
   rolloutId: args["rollout-id"],

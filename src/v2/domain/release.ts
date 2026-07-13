@@ -33,7 +33,6 @@ export interface RolloutPreviewV1 {
   currentMode: ClawLoreRolloutModeV1;
   ready: boolean;
   readOnly: boolean;
-  requiresOperatorApproval: boolean;
   blockingReasons: string[];
   steps: Array<{
     order: number;

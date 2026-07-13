@@ -37,7 +37,6 @@ export interface LiveV2WriteRolloutReceiptV1 {
   status: "applied";
   appliedAt: string;
   planDigest: string;
-  approvalSha256: string;
   readinessSha256: string;
   source: { memoryTruthRows: number; memoryTruthLogicalDigest: string; unchanged: true };
   v2: {
@@ -61,18 +60,6 @@ export interface LiveV2WriteRolloutReceiptV1 {
   };
 }
 
-interface ApprovalControlV1 {
-  schemaVersion: 1;
-  rolloutId: string;
-  mode: "v2-write";
-  decision: "approved";
-  actor: string;
-  approvedAt: string;
-  preserveV1Fallback: true;
-  allowContextEngine: false;
-  allowFinalRecallCutover: false;
-}
-
 function privateJson(path: string): { value: Record<string, unknown>; sha256: string } {
   const info = statSync(path);
   if (!info.isFile()) throw new Error("rollout control is not a file");
@@ -82,25 +69,6 @@ function privateJson(path: string): { value: Record<string, unknown>; sha256: st
   const value = JSON.parse(bytes.toString("utf8")) as Record<string, unknown>;
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("rollout control is invalid");
   return { value, sha256: createHash("sha256").update(bytes).digest("hex") };
-}
-
-function approval(path: string, rolloutId: string): { value: ApprovalControlV1; sha256: string } {
-  const loaded = privateJson(path);
-  const value = loaded.value;
-  if (
-    value.schemaVersion !== 1
-    || value.rolloutId !== rolloutId
-    || value.mode !== "v2-write"
-    || value.decision !== "approved"
-    || typeof value.actor !== "string"
-    || !value.actor.trim()
-    || typeof value.approvedAt !== "string"
-    || !Number.isFinite(Date.parse(value.approvedAt))
-    || value.preserveV1Fallback !== true
-    || value.allowContextEngine !== false
-    || value.allowFinalRecallCutover !== false
-  ) throw new Error("operator approval is invalid or exceeds the authorized boundary");
-  return { value: value as unknown as ApprovalControlV1, sha256: loaded.sha256 };
 }
 
 function readiness(path: string, rolloutId: string): {
@@ -120,12 +88,9 @@ function readiness(path: string, rolloutId: string): {
     || rollout.currentMode !== "shadow"
     || rollout.ready !== true
     || rollout.readOnly !== false
-    || rollout.requiresOperatorApproval !== true
     || !Array.isArray(rollout.blockingReasons)
     || rollout.blockingReasons.length !== 0
     || value.authorizesV2Writes !== false
-    || value.operatorApprovalPresent !== false
-    || value.writeActivationAllowed !== false
     || value.manualDisposition !== "candidate"
     || typeof evidence?.migrationPlanDigest !== "string"
     || typeof evidence?.memoryTruthLogicalDigest !== "string"
@@ -163,7 +128,6 @@ function insertOutbox(db: DatabaseSync, input: {
 export async function executeLiveV2WriteRolloutV1(input: {
   sourcePath: string;
   readinessPath: string;
-  approvalPath: string;
   rolloutId: string;
   defaults: { tenantId: string; agentId: string; workspaceId?: string };
   expectedV1VectorRows: number;
@@ -173,20 +137,19 @@ export async function executeLiveV2WriteRolloutV1(input: {
     throw new Error("verified V1 vector row count is required");
   }
   const ready = readiness(input.readinessPath, input.rolloutId);
-  const approved = approval(input.approvalPath, input.rolloutId);
   const evidence = ready.value.evidenceBindings as Record<string, unknown>;
   const before = await inspectLegacySqliteSnapshotV2(input.sourcePath);
   if (
     before.memoryTruth.rowCount !== evidence.memoryTruthRows
     || before.memoryTruth.logicalDigest !== evidence.memoryTruthLogicalDigest
-  ) throw new Error("live legacy truth no longer matches approved readiness");
+  ) throw new Error("live legacy truth no longer matches readiness");
   if (input.expectedV1VectorRows !== before.memoryTruth.rowCount) {
     throw new Error("V1 vector fallback is not fully converged");
   }
 
   const migration = buildLegacyMigrationBatchV2({ legacyPath: input.sourcePath, defaults: input.defaults });
   if (migration.plan.planDigest !== evidence.migrationPlanDigest) {
-    throw new Error("live migration plan no longer matches approved readiness");
+    throw new Error("live migration plan no longer matches readiness");
   }
 
   const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: new (path: string) => DatabaseSync };
@@ -212,7 +175,7 @@ export async function executeLiveV2WriteRolloutV1(input: {
         item_id TEXT PRIMARY KEY,state TEXT NOT NULL,verified_at TEXT NOT NULL
       );
       CREATE TABLE clawlore_rollouts_v2 (
-        rollout_id TEXT PRIMARY KEY,plan_digest TEXT NOT NULL,approval_sha256 TEXT NOT NULL,
+        rollout_id TEXT PRIMARY KEY,plan_digest TEXT NOT NULL,control_sha256 TEXT NOT NULL,
         readiness_sha256 TEXT NOT NULL,legacy_logical_digest TEXT NOT NULL,rows_applied INTEGER NOT NULL,
         applied_at TEXT NOT NULL,v1_fallback_reads INTEGER NOT NULL,context_engine_enabled INTEGER NOT NULL,
         final_recall_cutover_enabled INTEGER NOT NULL
@@ -256,7 +219,7 @@ export async function executeLiveV2WriteRolloutV1(input: {
       db.prepare(`INSERT INTO memory_events
         (event_id,item_id,revision_id,event_type,actor,reason,created_at)
         VALUES (?,?,?,?,?,?,?)`).run(
-        randomUUID(), itemId, revisionId, "remembered", "operator:approved-rollout", input.rolloutId, appliedAt,
+        randomUUID(), itemId, revisionId, "remembered", "operator:bounded-rollout", input.rolloutId, appliedAt,
       );
       db.prepare("INSERT INTO memory_fts_v2(item_id,content,category) VALUES (?,?,?)")
         .run(itemId, row.content.trim(), row.category.trim());
@@ -270,10 +233,10 @@ export async function executeLiveV2WriteRolloutV1(input: {
     }
 
     db.prepare(`INSERT INTO clawlore_rollouts_v2
-      (rollout_id,plan_digest,approval_sha256,readiness_sha256,legacy_logical_digest,rows_applied,
+      (rollout_id,plan_digest,control_sha256,readiness_sha256,legacy_logical_digest,rows_applied,
        applied_at,v1_fallback_reads,context_engine_enabled,final_recall_cutover_enabled)
       VALUES (?,?,?,?,?,?,?,1,0,0)`).run(
-      input.rolloutId, migration.plan.planDigest, approved.sha256, ready.sha256,
+      input.rolloutId, migration.plan.planDigest, ready.sha256, ready.sha256,
       before.memoryTruth.logicalDigest, migration.rows.length, appliedAt,
     );
     db.exec("COMMIT");
@@ -322,7 +285,6 @@ export async function executeLiveV2WriteRolloutV1(input: {
     status: "applied",
     appliedAt,
     planDigest: migration.plan.planDigest,
-    approvalSha256: approved.sha256,
     readinessSha256: ready.sha256,
     source: {
       memoryTruthRows: after.memoryTruth.rowCount,

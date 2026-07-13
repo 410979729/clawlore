@@ -38,6 +38,7 @@ const report = buildPhase7GControlBundleV1({
     expectedProjectionRows: fixture.promotion.rows.length,
     mappingMismatchRows: 0,
     rawLegacyMetadataCopied: false,
+    bootstrapSource: "memory_truth.metadata_text",
     indexedLegacyMetadataFields: [
       "l0_abstract", "l1_overview", "l2_content", "keywords",
       "entities", "tags", "category", "tier",
@@ -48,4 +49,7 @@ const report = buildPhase7GControlBundleV1({
   promotionPlan,
   now: () => new Date("2026-07-12T11:30:00.000Z"),
 });
+if (report.status !== "ready" || report.blockers.length !== 0) {
+  throw new Error(`phase 7G controls smoke blocked: ${report.blockers.join(",")}`);
+}
 process.stdout.write(`${JSON.stringify(report)}\n`);

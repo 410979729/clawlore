@@ -197,11 +197,9 @@ export async function applyLegacyMigrationV2(input: {
   destinationPath: string;
   defaults: { tenantId: string; agentId: string; workspaceId?: string };
   expectedPlanDigest: string;
-  approved: boolean;
   now?: () => Date;
   id?: () => string;
 }): Promise<LegacyMigrationApplyReceiptV2> {
-  if (input.approved !== true) throw new Error("migration apply requires explicit approval");
   if (existsSync(input.destinationPath)) throw new Error("migration destination already exists");
   const rows = planRows(input);
   const plan = publicPlan(rows);

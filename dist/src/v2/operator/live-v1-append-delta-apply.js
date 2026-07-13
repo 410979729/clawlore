@@ -43,41 +43,15 @@ function loadPlan(path, rolloutId, planDigest) {
         || value.proposed.invalidMetadataRows !== 0
         || value.proposed.reviewRequiredRows !== value.proposed.candidateRows
         || value.proposed.rows.length !== value.source.deltaRows
-        || value.decision.deltaWritePlanReadyForSeparateApproval !== true
+        || value.decision.deltaWriteReady !== true
         || value.decision.requiresFreshEncryptedSnapshot !== true
-        || value.decision.requiresSeparateExactApproval !== true
         || value.decision.finalRecallCutoverReady !== false
         || value.authorizesDeltaWrite !== false
         || value.authorizesLifecyclePromotion !== false
         || value.authorizesContextEngine !== false
         || value.authorizesPromptMutation !== false
         || value.authorizesFinalRecall !== false)
-        throw new Error("approved append-delta plan is invalid or exceeds the authorized boundary");
-    return loaded;
-}
-function loadApproval(path, rolloutId, planDigest) {
-    const loaded = privateJson(path, 128 * 1024);
-    const value = loaded.value;
-    if (value.schemaVersion !== 1
-        || value.phase !== "clawlore-v1-append-delta-approval"
-        || value.rolloutId !== rolloutId
-        || value.decision !== "approved"
-        || typeof value.actor !== "string"
-        || !value.actor.trim()
-        || !Number.isFinite(Date.parse(value.approvedAt))
-        || value.planDigest !== planDigest
-        || value.allowFreshEncryptedSnapshot !== true
-        || value.allowAppendOnlyDeltaWrite !== true
-        || value.preserveExistingCanonical !== true
-        || value.preserveExistingLifecycle !== true
-        || value.preserveExistingVerification !== true
-        || value.preserveExistingEvidence !== true
-        || value.preserveV1Fallback !== true
-        || value.allowExistingCandidateLifecycleMutation !== false
-        || value.allowContextEngine !== false
-        || value.allowPromptMutation !== false
-        || value.allowFinalRecallCutover !== false)
-        throw new Error("operator approval is invalid or exceeds the authorized boundary");
+        throw new Error("append-delta plan is invalid or exceeds the bounded write contract");
     return loaded;
 }
 function loadFreshSnapshot(input) {
@@ -106,6 +80,15 @@ function scalar(db, sql, ...args) {
     const row = db.prepare(sql).get(...args);
     return Number(Object.values(row)[0] ?? 0);
 }
+function ensureRolloutControlColumn(db) {
+    const columns = new Set(db.prepare("PRAGMA table_info(clawlore_rollouts_v2)").all()
+        .map((row) => row.name));
+    if (columns.has("control_sha256"))
+        return;
+    if (!columns.has("approval_sha256"))
+        throw new Error("rollout control digest column is missing");
+    db.exec("ALTER TABLE clawlore_rollouts_v2 RENAME COLUMN approval_sha256 TO control_sha256");
+}
 function lifecycleCounts(db) {
     const rows = db.prepare("SELECT lifecycle,COUNT(*) AS rows FROM memory_items GROUP BY lifecycle ORDER BY lifecycle")
         .all();
@@ -127,10 +110,10 @@ function existingStateDigests(db, itemIds) {
         events: digestRows(db, `SELECT * FROM memory_events WHERE item_id IN (__ITEM_IDS__) ORDER BY item_id,event_id`, itemIds),
     };
 }
-function assertCurrentPlanMatch(approved, current) {
+function assertCurrentPlanMatch(expected, current) {
     for (const field of ["baseline", "source", "proposed", "projectionWork", "decision"]) {
-        if (JSON.stringify(approved[field]) !== JSON.stringify(current[field])) {
-            throw new Error("live delta set or plan digest drifted after approval");
+        if (JSON.stringify(expected[field]) !== JSON.stringify(current[field])) {
+            throw new Error("live delta set or plan digest drifted after planning");
         }
     }
 }
@@ -148,7 +131,6 @@ export async function executeLiveV1AppendDeltaV1(input) {
         throw new Error("maximum snapshot age must be a positive integer");
     }
     const plan = loadPlan(input.planPath, input.rolloutId, input.planDigest);
-    const approval = loadApproval(input.approvalPath, input.rolloutId, input.planDigest);
     const snapshot = loadFreshSnapshot({
         receiptPath: input.snapshotReceiptPath,
         archivePath: input.snapshotArchivePath,
@@ -178,7 +160,7 @@ export async function executeLiveV1AppendDeltaV1(input) {
     const delta = migration.rows.filter((row) => !existingItemSet.has(`legacy:${row.legacyId}`));
     if (delta.length !== plan.value.source.deltaRows) {
         db.close();
-        throw new Error("live append-only delta coverage no longer matches the approved plan");
+        throw new Error("live append-only delta coverage no longer matches the plan");
     }
     const existingDigests = existingStateDigests(db, existingItemIds);
     const beforeV2Rows = existingItemIds.length;
@@ -193,12 +175,13 @@ export async function executeLiveV1AppendDeltaV1(input) {
     const newItemIds = [];
     try {
         db.exec("BEGIN IMMEDIATE");
+        ensureRolloutControlColumn(db);
         for (const row of delta) {
             if (row.lifecycle !== "candidate"
                 || row.verification !== "unverified"
                 || row.verificationDebt !== "legacy_identity"
                 || row.reviewRequired !== true)
-                throw new Error("delta row no longer satisfies the approved candidate-only classification");
+                throw new Error("delta row no longer satisfies the candidate-only classification");
             const itemId = `legacy:${row.legacyId}`;
             const revisionId = randomUUID();
             const address = row.address;
@@ -227,7 +210,7 @@ export async function executeLiveV1AppendDeltaV1(input) {
         VALUES (?,?,?,?,?,?)`).run(randomUUID(), itemId, address.principalId, address.visibility, "{}", appliedAt);
             db.prepare(`INSERT INTO memory_events
         (event_id,item_id,revision_id,event_type,actor,reason,created_at)
-        VALUES (?,?,?,?,?,?,?)`).run(randomUUID(), itemId, revisionId, "remembered", "operator:approved-delta-rollout", input.rolloutId, appliedAt);
+        VALUES (?,?,?,?,?,?,?)`).run(randomUUID(), itemId, revisionId, "remembered", "operator:bounded-delta-rollout", input.rolloutId, appliedAt);
             db.prepare("INSERT INTO memory_fts_compat_v2(item_id,content,metadata_text) VALUES (?,?,?)")
                 .run(itemId, row.content.trim(), String(legacy.metadata_text || ""));
             db.prepare("INSERT INTO memory_fts_v2(item_id,content,category) VALUES (?,?,?)")
@@ -241,9 +224,9 @@ export async function executeLiveV1AppendDeltaV1(input) {
             newItemIds.push(itemId);
         }
         db.prepare(`INSERT INTO clawlore_rollouts_v2
-      (rollout_id,plan_digest,approval_sha256,readiness_sha256,legacy_logical_digest,rows_applied,
+      (rollout_id,plan_digest,control_sha256,readiness_sha256,legacy_logical_digest,rows_applied,
        applied_at,v1_fallback_reads,context_engine_enabled,final_recall_cutover_enabled)
-      VALUES (?,?,?,?,?,?,?,1,0,0)`).run(input.rolloutId, input.planDigest, approval.sha256, snapshot.sha256, legacyBefore.memoryTruth.logicalDigest, delta.length, appliedAt);
+      VALUES (?,?,?,?,?,?,?,1,0,0)`).run(input.rolloutId, input.planDigest, plan.sha256, snapshot.sha256, legacyBefore.memoryTruth.logicalDigest, delta.length, appliedAt);
         const inTransactionDigests = existingStateDigests(db, existingItemIds);
         if (JSON.stringify(inTransactionDigests) !== JSON.stringify(existingDigests)
             || scalar(db, "SELECT COUNT(*) FROM memory_items") !== beforeV2Rows + delta.length
@@ -254,7 +237,7 @@ export async function executeLiveV1AppendDeltaV1(input) {
             || scalar(db, "SELECT COUNT(*) FROM projection_outbox WHERE processed_at IS NOT NULL")
                 !== beforeProcessedOutbox + delta.length * 3
             || scalar(db, "SELECT COUNT(*) FROM projection_outbox WHERE processed_at IS NULL") !== beforePendingOutbox)
-            throw new Error("transaction exceeded the approved append-only delta boundary");
+            throw new Error("transaction exceeded the append-only delta boundary");
         const newLifecycle = scalar(db, `SELECT COUNT(*) FROM memory_items WHERE item_id IN (${newItemIds.map(() => "?").join(",")})
        AND lifecycle='candidate' AND verification='unverified'`, ...newItemIds);
         if (newLifecycle !== delta.length || JSON.stringify(beforeLifecycle) !== JSON.stringify(lifecycleCounts(db))) {
@@ -311,7 +294,6 @@ export async function executeLiveV1AppendDeltaV1(input) {
         status: "applied",
         appliedAt,
         planDigest: input.planDigest,
-        approvalSha256: approval.sha256,
         planSha256: plan.sha256,
         snapshotReceiptSha256: snapshot.sha256,
         snapshotArchiveSha256: snapshot.value.archiveSha256,

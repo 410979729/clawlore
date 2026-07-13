@@ -171,7 +171,7 @@ export async function writeShadowObservationReceipt(receiptFile, audit, now = ()
       promptMutationEnabled: false,
       contextEngineEnabled: false,
       authorizesV2Writes: false,
-      separateOperatorApprovalRequired: true,
+      boundedPlanValidationRequired: true,
     },
   };
   const directory = dirname(receiptFile);

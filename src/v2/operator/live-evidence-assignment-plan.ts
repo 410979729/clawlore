@@ -47,7 +47,6 @@ export interface EvidenceAssignmentPlanV1 {
   authorizesPromptMutation: false;
   authorizesFinalRecall: false;
   requiresFreshSnapshotBeforeApply: true;
-  requiresSeparateOperatorApproval: true;
   remediationPlanDigest: string;
   remediationPreviewSha256: string;
   sessionsRegistrySha256: string;
@@ -153,7 +152,7 @@ function assertSameRemediationPlan(
   actual: CandidateEvidenceRemediationPlanV1,
 ): void {
   if (actual.planDigest !== expected.planDigest || JSON.stringify(actual.source) !== JSON.stringify(expected.source)) {
-    throw new Error("live remediation plan no longer matches the approved read-only baseline");
+    throw new Error("live remediation plan no longer matches the read-only baseline");
   }
   const expectedRows = new Map(expected.rows.map((row) => [row.itemIdSha256, JSON.stringify(row)]));
   if (
@@ -296,7 +295,6 @@ export function createLiveEvidenceAssignmentPlanV1(input: {
     authorizesPromptMutation: false,
     authorizesFinalRecall: false,
     requiresFreshSnapshotBeforeApply: true,
-    requiresSeparateOperatorApproval: true,
     ...planCore,
     planDigest: hash(JSON.stringify(planCore)),
   };

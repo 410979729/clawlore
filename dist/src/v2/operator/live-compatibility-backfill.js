@@ -1,11 +1,10 @@
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
-import { PHASE7G_LEGACY_SEARCH_FIELD_ALLOWLIST_V1, validatePhase7GApprovalV1, } from "../application/phase7g-rollout-controls.js";
+import { PHASE7G_LEGACY_SEARCH_FIELD_ALLOWLIST_V1, } from "../application/phase7g-rollout-controls.js";
 import { buildLiveCompatibilityBackfillPlanV1, } from "./live-phase7g-preview.js";
 import { inspectLegacySqliteSnapshotV2 } from "./legacy-v1-snapshot.js";
 const require = createRequire(import.meta.url);
-const APPROVAL_MAX_BYTES = 128 * 1024;
 const PREVIEW_MAX_BYTES = 512 * 1024;
 function sha256(value) {
     return createHash("sha256").update(value).digest("hex");
@@ -29,7 +28,7 @@ function loadPreview(path, rolloutId, planDigest, now) {
     const loaded = privateJson(path, PREVIEW_MAX_BYTES);
     const value = loaded.value;
     const controls = value.controls;
-    const expected = controls?.approvals?.compatibilityBackfill;
+    const expected = controls?.plans?.compatibilityBackfill;
     const previewTime = Date.parse(value.createdAt);
     const elapsedSincePreview = Number.isFinite(previewTime)
         ? Math.max(0, Math.floor((now.getTime() - previewTime) / 1000))
@@ -42,7 +41,7 @@ function loadPreview(path, rolloutId, planDigest, now) {
         || value.sourceUnchanged !== true
         || value.compatibilityPlan?.planDigest !== planDigest
         || value.compatibilityPlan?.authorizesLiveMutation !== false
-        || controls?.status !== "ready_for_separate_approvals"
+        || controls?.status !== "ready"
         || controls.blockers.length !== 0
         || expected?.rolloutId !== rolloutId
         || expected.mode !== "compatibility-backfill"
@@ -55,16 +54,7 @@ function loadPreview(path, rolloutId, planDigest, now) {
         || value.liveMutation?.compatibilityProjectionCreated !== false
         || value.liveMutation?.lifecycleRowsChanged !== 0
         || snapshotAgeAtApply > controls.snapshot.maximumAgeSeconds)
-        throw new Error("compatibility preview is invalid, stale, or exceeds the authorized boundary");
-    return { value, sha256: loaded.sha256 };
-}
-function loadApproval(path, expected) {
-    const loaded = privateJson(path, APPROVAL_MAX_BYTES);
-    const value = loaded.value;
-    const validation = validatePhase7GApprovalV1({ approval: value, expected });
-    if (!validation.valid) {
-        throw new Error(`operator approval is invalid: ${validation.reasonCodes.join(",")}`);
-    }
+        throw new Error("compatibility preview is invalid, stale, or exceeds the bounded plan");
     return { value, sha256: loaded.sha256 };
 }
 function scalar(db, sql, ...args) {
@@ -79,15 +69,10 @@ function lifecycleCounts(db) {
 export async function executeLiveCompatibilityBackfillV1(input) {
     const appliedAtDate = input.now?.() ?? new Date();
     const preview = loadPreview(input.previewPath, input.rolloutId, input.planDigest, appliedAtDate);
-    const approved = loadApproval(input.approvalPath, {
-        rolloutId: input.rolloutId,
-        mode: "compatibility-backfill",
-        planDigest: input.planDigest,
-    });
     const before = await inspectLegacySqliteSnapshotV2(input.sourcePath);
     if (before.memoryTruth.rowCount !== preview.value.controls.snapshot.sourceRows
         || before.memoryTruth.logicalDigest !== preview.value.controls.snapshot.sourceLogicalDigest)
-        throw new Error("live legacy truth no longer matches the approved compatibility preview");
+        throw new Error("live legacy truth no longer matches the compatibility preview");
     const { DatabaseSync } = require("node:sqlite");
     const db = new DatabaseSync(input.sourcePath);
     db.exec("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=10000; PRAGMA synchronous=FULL;");
@@ -103,7 +88,7 @@ export async function executeLiveCompatibilityBackfillV1(input) {
         || livePlan.mappingMismatchRows !== 0
         || livePlan.existingProjectionRows !== 0) {
         db.close();
-        throw new Error("live compatibility plan no longer matches the approved digest");
+        throw new Error("live compatibility plan no longer matches the preview digest");
     }
     const beforeItems = scalar(db, "SELECT COUNT(*) FROM memory_items");
     const beforeLifecycle = lifecycleCounts(db);
@@ -159,7 +144,6 @@ export async function executeLiveCompatibilityBackfillV1(input) {
         status: "applied",
         appliedAt,
         planDigest: input.planDigest,
-        approvalSha256: approved.sha256,
         previewSha256: preview.sha256,
         source: {
             memoryTruthRows: after.memoryTruth.rowCount,

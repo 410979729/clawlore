@@ -132,7 +132,7 @@ test("shadow observation receipt is private and never authorizes V2 writes", asy
         promptMutationEnabled: false,
         contextEngineEnabled: false,
         authorizesV2Writes: false,
-        separateOperatorApprovalRequired: true,
+        boundedPlanValidationRequired: true,
       });
       const serialized = await readFile(receiptFile, "utf8");
       assert.equal(serialized.includes("traceId"), false);

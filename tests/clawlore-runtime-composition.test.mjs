@@ -33,18 +33,6 @@ function readiness() {
   });
 }
 
-function approval(overrides = {}) {
-  return {
-    schemaVersion: 1,
-    rolloutId: "fixture-shadow-rollout",
-    mode: "shadow",
-    decision: "approved",
-    actor: "operator:fixture",
-    approvedAt: "2026-07-12T03:01:00.000Z",
-    ...overrides,
-  };
-}
-
 function completeCapabilities() {
   return {
     ingest: true, assemble: true, afterTurn: true, maintain: true,
@@ -105,6 +93,10 @@ function dependencies(overrides = {}) {
 test("runtime composition is default-off and invalid config fails to disabled", async () => {
   const manifest = JSON.parse(await readFile("openclaw.plugin.json", "utf8"));
   assert.equal(manifest.configSchema.properties.clawloreV2.properties.mode.default, "disabled");
+  assert.match(
+    manifest.configSchema.properties.clawloreV2.properties.approvalFile.description,
+    /Deprecated compatibility field.*ignored/,
+  );
 
   for (const config of [undefined, {}, { mode: "v2-write" }, { mode: "cutover" }]) {
     const host = new FixtureHost();
@@ -120,32 +112,17 @@ test("runtime composition is default-off and invalid config fails to disabled", 
   }
 });
 
-test("shadow request registers nothing without matching readiness and operator approval", () => {
+test("shadow request registers nothing without matching readiness", () => {
   const config = normalizeClawLoreRuntimeConfigV1({ mode: "shadow" });
 
   const missing = new FixtureHost();
   const missingReceipt = composeClawLoreRuntimeV1({ config, host: missing, dependencies: dependencies() });
   assert.equal(missingReceipt.status, "blocked");
-  assert.deepEqual(missingReceipt.blockingReasons, [
-    "operator_approval_missing_or_invalid",
-    "release_readiness_missing",
-  ]);
+  assert.deepEqual(missingReceipt.blockingReasons, ["release_readiness_missing"]);
   assert.equal(missing.hooks.length, 0);
-
-  const mismatched = new FixtureHost();
-  const mismatchReceipt = composeClawLoreRuntimeV1({
-    config,
-    host: mismatched,
-    dependencies: dependencies(),
-    readiness: readiness(),
-    approval: approval({ rolloutId: "wrong-rollout" }),
-  });
-  assert.equal(mismatchReceipt.status, "blocked");
-  assert.deepEqual(mismatchReceipt.blockingReasons, ["operator_approval_missing_or_invalid"]);
-  assert.equal(mismatched.hooks.length, 0);
 });
 
-test("approved fixture shadow registers one observer and never mutates prompt or writes", async () => {
+test("ready fixture shadow registers one observer and never mutates prompt or writes", async () => {
   const host = new FixtureHost();
   const sink = new InMemoryRuntimeShadowSinkV1();
   let retrievalCalls = 0;
@@ -166,7 +143,6 @@ test("approved fixture shadow registers one observer and never mutates prompt or
       now: () => new Date("2026-07-12T03:02:00.000Z"),
     }),
     readiness: readiness(),
-    approval: approval(),
   });
 
   assert.equal(receipt.status, "registered");
@@ -223,7 +199,6 @@ test("trusted message_received preserves group sender and conversation boundarie
       },
     }),
     readiness: readiness(),
-    approval: approval(),
   });
 
   const results = await host.emitMessageReceived({
@@ -262,7 +237,6 @@ test("unknown message_received chat type fails toward conversation scope", async
       },
     }),
     readiness: readiness(),
-    approval: approval(),
   });
 
   await host.emitMessageReceived(
@@ -281,7 +255,6 @@ test("native ContextEngine request remains blocked even when fixture host is cap
     host,
     dependencies: dependencies(),
     readiness: readiness(),
-    approval: approval(),
   });
   assert.equal(receipt.status, "blocked");
   assert.equal(receipt.contextEngine.selected, "native-opt-in");
@@ -301,7 +274,6 @@ test("shadow observer fails open when retrieval times out or trace persistence f
       onObserverError: (code) => errors.push(code),
     }),
     readiness: readiness(),
-    approval: approval(),
   });
   const startedAt = Date.now();
   const timeoutResults = await timeoutHost.emitMessageReceived(
@@ -330,7 +302,6 @@ test("shadow observer fails open when retrieval times out or trace persistence f
       onObserverError: (code) => errors.push(code),
     }),
     readiness: readiness(),
-    approval: approval(),
   });
   const sinkResults = await sinkHost.emitMessageReceived(
     {

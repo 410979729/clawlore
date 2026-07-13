@@ -34,7 +34,7 @@ function privateBaseline(path) {
         || !hasDigest(value.candidatePromotionPlan.planDigest)
         || value.candidatePromotionPlan.automaticPromotionRows !== 0
         || value.candidatePromotionPlan.authorizesLiveMutation !== false
-        || value.candidatePromotionPlan.counts.eligible_for_operator_promotion !== 0
+        || value.candidatePromotionPlan.counts.eligible_for_promotion !== 0
         || value.decision.eligibleRows !== 0
         || value.decision.lifecycleRolloutSelectable !== false
         || value.decision.automaticPromotionRows !== 0
@@ -193,9 +193,8 @@ export async function createLiveV1AppendDeltaPlanV1(input) {
             outboxRows: deltaRows * 3,
         },
         decision: {
-            deltaWritePlanReadyForSeparateApproval: deltaRows > 0 && invalidMetadata === 0,
+            deltaWriteReady: deltaRows > 0 && invalidMetadata === 0,
             requiresFreshEncryptedSnapshot: true,
-            requiresSeparateExactApproval: true,
             finalRecallCutoverReady: false,
         },
         authorizesDeltaWrite: false,

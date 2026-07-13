@@ -35,18 +35,18 @@ test("fixture compatibility projection restores V1 ranking without indexing raw 
 test("candidate promotion policy separates eligible review from hold, quarantine, and archive", () => {
   const plan = planCandidatePromotionsV1(fixture.promotion.rows);
   assert.deepEqual(plan.counts, {
-    eligible_for_operator_promotion: 3,
+    eligible_for_promotion: 3,
     hold_candidate: 2,
     quarantine: 2,
     preserve_archived: 1,
   });
   assert.equal(plan.automaticPromotionRows, 0);
   assert.equal(plan.authorizesLiveMutation, false);
-  assert.equal(plan.requiresSeparateOperatorApproval, true);
+  assert.equal("requiresSeparateOperatorApproval" in plan, false);
   assert.equal(plan.rows.some((row) => "itemId" in row), false);
   assert.equal(JSON.stringify(plan).includes("telegram:default:joy"), false);
-  assert.equal(plan.rows.find((row) => row.disposition === "eligible_for_operator_promotion")
-    .reasonCodes.includes("evidence_complete_separate_approval_required"), true);
+  assert.equal(plan.rows.find((row) => row.disposition === "eligible_for_promotion")
+    .reasonCodes.includes("evidence_complete"), true);
 });
 
 test("candidate promotion policy fails closed on duplicate ids and spoofed private attribution", () => {

@@ -40,23 +40,6 @@ function privateJson(path) {
         throw new Error("rollout control is invalid");
     return { value, sha256: createHash("sha256").update(bytes).digest("hex") };
 }
-function approval(path, rolloutId) {
-    const loaded = privateJson(path);
-    const value = loaded.value;
-    if (value.schemaVersion !== 1
-        || value.rolloutId !== rolloutId
-        || value.mode !== "v2-write"
-        || value.decision !== "approved"
-        || typeof value.actor !== "string"
-        || !value.actor.trim()
-        || typeof value.approvedAt !== "string"
-        || !Number.isFinite(Date.parse(value.approvedAt))
-        || value.preserveV1Fallback !== true
-        || value.allowContextEngine !== false
-        || value.allowFinalRecallCutover !== false)
-        throw new Error("operator approval is invalid or exceeds the authorized boundary");
-    return { value: value, sha256: loaded.sha256 };
-}
 function readiness(path, rolloutId) {
     const loaded = privateJson(path);
     const value = loaded.value;
@@ -70,12 +53,9 @@ function readiness(path, rolloutId) {
         || rollout.currentMode !== "shadow"
         || rollout.ready !== true
         || rollout.readOnly !== false
-        || rollout.requiresOperatorApproval !== true
         || !Array.isArray(rollout.blockingReasons)
         || rollout.blockingReasons.length !== 0
         || value.authorizesV2Writes !== false
-        || value.operatorApprovalPresent !== false
-        || value.writeActivationAllowed !== false
         || value.manualDisposition !== "candidate"
         || typeof evidence?.migrationPlanDigest !== "string"
         || typeof evidence?.memoryTruthLogicalDigest !== "string"
@@ -104,18 +84,17 @@ export async function executeLiveV2WriteRolloutV1(input) {
         throw new Error("verified V1 vector row count is required");
     }
     const ready = readiness(input.readinessPath, input.rolloutId);
-    const approved = approval(input.approvalPath, input.rolloutId);
     const evidence = ready.value.evidenceBindings;
     const before = await inspectLegacySqliteSnapshotV2(input.sourcePath);
     if (before.memoryTruth.rowCount !== evidence.memoryTruthRows
         || before.memoryTruth.logicalDigest !== evidence.memoryTruthLogicalDigest)
-        throw new Error("live legacy truth no longer matches approved readiness");
+        throw new Error("live legacy truth no longer matches readiness");
     if (input.expectedV1VectorRows !== before.memoryTruth.rowCount) {
         throw new Error("V1 vector fallback is not fully converged");
     }
     const migration = buildLegacyMigrationBatchV2({ legacyPath: input.sourcePath, defaults: input.defaults });
     if (migration.plan.planDigest !== evidence.migrationPlanDigest) {
-        throw new Error("live migration plan no longer matches approved readiness");
+        throw new Error("live migration plan no longer matches readiness");
     }
     const { DatabaseSync } = require("node:sqlite");
     const db = new DatabaseSync(input.sourcePath);
@@ -140,7 +119,7 @@ export async function executeLiveV2WriteRolloutV1(input) {
         item_id TEXT PRIMARY KEY,state TEXT NOT NULL,verified_at TEXT NOT NULL
       );
       CREATE TABLE clawlore_rollouts_v2 (
-        rollout_id TEXT PRIMARY KEY,plan_digest TEXT NOT NULL,approval_sha256 TEXT NOT NULL,
+        rollout_id TEXT PRIMARY KEY,plan_digest TEXT NOT NULL,control_sha256 TEXT NOT NULL,
         readiness_sha256 TEXT NOT NULL,legacy_logical_digest TEXT NOT NULL,rows_applied INTEGER NOT NULL,
         applied_at TEXT NOT NULL,v1_fallback_reads INTEGER NOT NULL,context_engine_enabled INTEGER NOT NULL,
         final_recall_cutover_enabled INTEGER NOT NULL
@@ -171,7 +150,7 @@ export async function executeLiveV2WriteRolloutV1(input) {
         VALUES (?,?,?,?,?,?)`).run(randomUUID(), itemId, address.principalId, address.visibility, "{}", appliedAt);
             db.prepare(`INSERT INTO memory_events
         (event_id,item_id,revision_id,event_type,actor,reason,created_at)
-        VALUES (?,?,?,?,?,?,?)`).run(randomUUID(), itemId, revisionId, "remembered", "operator:approved-rollout", input.rolloutId, appliedAt);
+        VALUES (?,?,?,?,?,?,?)`).run(randomUUID(), itemId, revisionId, "remembered", "operator:bounded-rollout", input.rolloutId, appliedAt);
             db.prepare("INSERT INTO memory_fts_v2(item_id,content,category) VALUES (?,?,?)")
                 .run(itemId, row.content.trim(), row.category.trim());
             db.prepare(`INSERT INTO memory_vector_projection_v2
@@ -183,9 +162,9 @@ export async function executeLiveV2WriteRolloutV1(input) {
             insertOutbox(db, { itemId, revisionId, now: appliedAt });
         }
         db.prepare(`INSERT INTO clawlore_rollouts_v2
-      (rollout_id,plan_digest,approval_sha256,readiness_sha256,legacy_logical_digest,rows_applied,
+      (rollout_id,plan_digest,control_sha256,readiness_sha256,legacy_logical_digest,rows_applied,
        applied_at,v1_fallback_reads,context_engine_enabled,final_recall_cutover_enabled)
-      VALUES (?,?,?,?,?,?,?,1,0,0)`).run(input.rolloutId, migration.plan.planDigest, approved.sha256, ready.sha256, before.memoryTruth.logicalDigest, migration.rows.length, appliedAt);
+      VALUES (?,?,?,?,?,?,?,1,0,0)`).run(input.rolloutId, migration.plan.planDigest, ready.sha256, ready.sha256, before.memoryTruth.logicalDigest, migration.rows.length, appliedAt);
         db.exec("COMMIT");
     }
     catch (error) {
@@ -233,7 +212,6 @@ export async function executeLiveV2WriteRolloutV1(input) {
         status: "applied",
         appliedAt,
         planDigest: migration.plan.planDigest,
-        approvalSha256: approved.sha256,
         readinessSha256: ready.sha256,
         source: {
             memoryTruthRows: after.memoryTruth.rowCount,

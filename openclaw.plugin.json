@@ -1654,7 +1654,7 @@
       "clawloreV2": {
         "type": "object",
         "additionalProperties": false,
-        "description": "Default-off ClawLore V2 runtime request. Shadow activation still requires a separate verified readiness receipt and operator approval.",
+        "description": "Default-off ClawLore V2 runtime request. Shadow activation requires a verified readiness receipt.",
         "properties": {
           "mode": {
             "type": "string",
@@ -1713,7 +1713,7 @@
           "approvalFile": {
             "type": "string",
             "minLength": 1,
-            "description": "Separate 0600 operator approval JSON whose rollout id must match the readiness receipt."
+            "description": "Deprecated compatibility field. Accepted so existing configurations remain valid, but ignored and never used as an activation gate."
           }
         }
       }
@@ -1725,7 +1725,7 @@
   "uiHints": {
     "clawloreV2.mode": {
       "label": "ClawLore V2 Runtime",
-      "help": "Default disabled. Shadow still requires a separate readiness receipt and operator approval before any hook is registered.",
+      "help": "Default disabled. Shadow requires a verified readiness receipt before any hook is registered.",
       "advanced": true
     },
     "clawloreV2.contextEngine": {
@@ -1759,10 +1759,6 @@
     },
     "clawloreV2.readinessFile": {
       "label": "ClawLore Readiness Receipt",
-      "advanced": true
-    },
-    "clawloreV2.approvalFile": {
-      "label": "ClawLore Operator Approval",
       "advanced": true
     },
     "embedding.provider": {

@@ -17,7 +17,7 @@ function parseArgs(argv) {
     index += 1;
   }
   for (const required of [
-    "source", "readiness", "approval", "receipt", "rollout-id", "tenant", "agent", "v1-vector-rows",
+    "source", "readiness", "receipt", "rollout-id", "tenant", "agent", "v1-vector-rows",
   ]) {
     if (!args[required]) throw new Error(`--${required} is required`);
   }
@@ -31,7 +31,6 @@ const receiptPath = resolve(args.receipt);
 const receipt = await executeLiveV2WriteRolloutV1({
   sourcePath: resolve(args.source),
   readinessPath: resolve(args.readiness),
-  approvalPath: resolve(args.approval),
   rolloutId: args["rollout-id"],
   defaults: {
     tenantId: args.tenant,

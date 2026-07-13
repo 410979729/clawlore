@@ -32,7 +32,7 @@ test("release compatibility keeps package, manifest, CLI alias, config, and data
   assert.deepEqual(failures, []);
 });
 
-test("rollout preview is default-off, mode-aware, gated, and never self-approves", () => {
+test("rollout preview is default-off, mode-aware, and quality-gated", () => {
   const blocked = buildReleaseReadinessReceipt({
     rolloutId: "rollout-blocked", requestedMode: "cutover", currentMode: "disabled",
     evidence: evidence({ rollbackDrill: false, forbiddenScopeViolations: 1 }),
@@ -41,7 +41,7 @@ test("rollout preview is default-off, mode-aware, gated, and never self-approves
   assert.equal(blocked.status, "blocked");
   assert.ok(blocked.rollout.blockingReasons.includes("gate_failed:rollbackDrill"));
   assert.ok(blocked.rollout.blockingReasons.includes("forbidden_scope_violation"));
-  assert.equal(blocked.rollout.requiresOperatorApproval, true);
+  assert.equal("requiresOperatorApproval" in blocked.rollout, false);
   assert.equal(blocked.rollout.steps[0].mutatesLive, false);
 
   const shadow = buildReleaseReadinessReceipt({
@@ -50,7 +50,7 @@ test("rollout preview is default-off, mode-aware, gated, and never self-approves
   });
   assert.equal(shadow.status, "ready");
   assert.equal(shadow.rollout.readOnly, true);
-  assert.equal(shadow.rollout.requiresOperatorApproval, true);
+  assert.equal("requiresOperatorApproval" in shadow.rollout, false);
 
   const cutover = buildReleaseReadinessReceipt({
     rolloutId: "rollout-ready", requestedMode: "cutover", currentMode: "shadow", evidence: evidence(),

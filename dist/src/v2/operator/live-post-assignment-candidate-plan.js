@@ -174,7 +174,7 @@ function exactRegistryEvidence(value, plan, row) {
         || evidence.preservesLifecycle !== true
         || evidence.preservesVerification !== true
         || !Number.isFinite(Date.parse(String(evidence.assignedAt ?? ""))))
-        throw new Error("registry-resolved evidence does not match the approved plan");
+        throw new Error("registry-resolved evidence does not match the bounded plan");
     return evidence;
 }
 function reviewRow(row, source, registryEvidence) {
@@ -371,7 +371,7 @@ export function createLivePostAssignmentCandidatePlanV1(input) {
     finally {
         db.close();
     }
-    const eligibleRows = promotion.counts.eligible_for_operator_promotion;
+    const eligibleRows = promotion.counts.eligible_for_promotion;
     return {
         schemaVersion: 1,
         phase: "clawlore-post-assignment-candidate-plan",
@@ -424,7 +424,6 @@ export function createLivePostAssignmentCandidatePlanV1(input) {
             lifecycleRolloutSelectable: eligibleRows > 0,
             finalRecallCutoverBlockedByUnmirroredV1: unmirroredV1Rows > 0,
             automaticPromotionRows: 0,
-            requiresSeparateExactApproval: true,
         },
         authorizesLifecycleMutation: false,
         authorizesContextEngine: false,

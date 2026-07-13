@@ -22,7 +22,6 @@ async function privateControl(path, value) {
 async function fixture(root) {
   const sourcePath = join(root, "live.sqlite3");
   const readinessPath = join(root, "readiness.json");
-  const approvalPath = join(root, "approval.json");
   const defaults = { tenantId: "local", agentId: "main", workspaceId: "workspace-main" };
   const db = new DatabaseSync(sourcePath);
   db.exec(`CREATE TABLE memory_truth (
@@ -49,12 +48,9 @@ async function fixture(root) {
       currentMode: "shadow",
       ready: true,
       readOnly: false,
-      requiresOperatorApproval: true,
       blockingReasons: [],
     },
     authorizesV2Writes: false,
-    operatorApprovalPresent: false,
-    writeActivationAllowed: false,
     manualDisposition: "candidate",
     evidenceBindings: {
       migrationPlanDigest: plan.planDigest,
@@ -62,21 +58,10 @@ async function fixture(root) {
       memoryTruthLogicalDigest: manifest.memoryTruth.logicalDigest,
     },
   });
-  await privateControl(approvalPath, {
-    schemaVersion: 1,
-    rolloutId: "fixture-rollout-r1",
-    mode: "v2-write",
-    decision: "approved",
-    actor: "operator:fixture",
-    approvedAt: "2026-07-12T10:00:00.000Z",
-    preserveV1Fallback: true,
-    allowContextEngine: false,
-    allowFinalRecallCutover: false,
-  });
-  return { sourcePath, readinessPath, approvalPath, defaults, manifest };
+  return { sourcePath, readinessPath, defaults, manifest };
 }
 
-test("approved live rollout applies V2 atomically while preserving V1 fallback and boundaries", async () => {
+test("live rollout applies V2 atomically while preserving V1 fallback and boundaries", async () => {
   const root = await mkdtemp(join(tmpdir(), "clawlore-live-v2-write-"));
   try {
     const input = await fixture(root);
@@ -84,7 +69,6 @@ test("approved live rollout applies V2 atomically while preserving V1 fallback a
     const receipt = await executeLiveV2WriteRolloutV1({
       sourcePath: input.sourcePath,
       readinessPath: input.readinessPath,
-      approvalPath: input.approvalPath,
       rolloutId: "fixture-rollout-r1",
       defaults: input.defaults,
       expectedV1VectorRows: 3,
@@ -116,7 +100,6 @@ test("approved live rollout applies V2 atomically while preserving V1 fallback a
     await assert.rejects(() => executeLiveV2WriteRolloutV1({
       sourcePath: input.sourcePath,
       readinessPath: input.readinessPath,
-      approvalPath: input.approvalPath,
       rolloutId: "fixture-rollout-r1",
       defaults: input.defaults,
       expectedV1VectorRows: 3,
@@ -133,7 +116,6 @@ test("live rollout rejects incomplete V1 vector fallback before creating V2 tabl
     await assert.rejects(() => executeLiveV2WriteRolloutV1({
       sourcePath: input.sourcePath,
       readinessPath: input.readinessPath,
-      approvalPath: input.approvalPath,
       rolloutId: "fixture-rollout-r1",
       defaults: input.defaults,
       expectedV1VectorRows: 2,

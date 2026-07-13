@@ -105,7 +105,7 @@ try {
       sessionAttribution,
       manualReview,
     },
-    nextGate: "encrypted_live_snapshot_and_separate_v2_write_approval",
+    nextGate: "encrypted_live_snapshot_and_v2_write_plan_validation",
   };
   await mkdir(dirname(receiptPath), { recursive: true });
   await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, { flag: "wx", mode: 0o600 });

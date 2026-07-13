@@ -103,8 +103,8 @@ function reviewRow(row) {
             return { disposition: "quarantine", reasonCodes: ["unsupported_legacy_classification"] };
     }
     return {
-        disposition: "eligible_for_operator_promotion",
-        reasonCodes: ["evidence_complete_separate_approval_required"],
+        disposition: "eligible_for_promotion",
+        reasonCodes: ["evidence_complete"],
     };
 }
 export function planCandidatePromotionsV1(rows) {
@@ -116,7 +116,7 @@ export function planCandidatePromotionsV1(rows) {
         return { itemIdSha256: hash(row.itemId), ...reviewRow(row) };
     });
     const counts = {
-        eligible_for_operator_promotion: 0,
+        eligible_for_promotion: 0,
         hold_candidate: 0,
         quarantine: 0,
         preserve_archived: 0,
@@ -130,7 +130,6 @@ export function planCandidatePromotionsV1(rows) {
         emitsItemIds: false,
         automaticPromotionRows: 0,
         authorizesLiveMutation: false,
-        requiresSeparateOperatorApproval: true,
         counts,
         rows: reviewed,
         planDigest: hash(JSON.stringify(reviewed)),

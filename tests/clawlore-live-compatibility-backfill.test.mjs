@@ -28,7 +28,6 @@ async function fixture() {
   const restore = join(root, "restore.sqlite3");
   const snapshotReceipt = join(root, "snapshot.json");
   const previewPath = join(root, "preview.json");
-  const approvalPath = join(root, "approval.json");
   const key = join(root, "snapshot.key");
   await writeFile(key, Buffer.alloc(32, 9), { mode: 0o600 });
   await chmod(key, 0o600);
@@ -83,29 +82,15 @@ async function fixture() {
     promotionRolloutId: "clawlore-v2-promotion-fixture-r1", now: () => new Date("2026-07-12T12:10:00.000Z"),
   });
   await privateJson(previewPath, preview);
-  await privateJson(approvalPath, {
-    schemaVersion: 1,
-    rolloutId: "clawlore-v2-compat-fixture-r1",
-    mode: "compatibility-backfill",
-    decision: "approved",
-    actor: "operator:fixture",
-    approvedAt: "2026-07-12T12:11:00.000Z",
-    planDigest: preview.compatibilityPlan.planDigest,
-    preserveV1Fallback: true,
-    allowContextEngine: false,
-    allowPromptMutation: false,
-    allowFinalRecallCutover: false,
-  });
-  return { root, source, previewPath, approvalPath, preview };
+  return { root, source, previewPath, preview };
 }
 
-test("approved compatibility backfill is digest-bound and leaves canonical lifecycle unchanged", async () => {
+test("compatibility backfill is digest-bound and leaves canonical lifecycle unchanged", async () => {
   const paths = await fixture();
   try {
     const receipt = await executeLiveCompatibilityBackfillV1({
       sourcePath: paths.source,
       previewPath: paths.previewPath,
-      approvalPath: paths.approvalPath,
       rolloutId: "clawlore-v2-compat-fixture-r1",
       planDigest: paths.preview.compatibilityPlan.planDigest,
       now: () => new Date("2026-07-12T12:12:00.000Z"),
@@ -126,7 +111,6 @@ test("approved compatibility backfill is digest-bound and leaves canonical lifec
     await assert.rejects(() => executeLiveCompatibilityBackfillV1({
       sourcePath: paths.source,
       previewPath: paths.previewPath,
-      approvalPath: paths.approvalPath,
       rolloutId: "clawlore-v2-compat-fixture-r1",
       planDigest: paths.preview.compatibilityPlan.planDigest,
       now: () => new Date("2026-07-12T12:12:00.000Z"),
@@ -142,7 +126,6 @@ test("compatibility backfill rejects a stale preview or mismatched digest before
     await assert.rejects(() => executeLiveCompatibilityBackfillV1({
       sourcePath: paths.source,
       previewPath: paths.previewPath,
-      approvalPath: paths.approvalPath,
       rolloutId: "clawlore-v2-compat-fixture-r1",
       planDigest: "f".repeat(64),
       now: () => new Date("2026-07-12T12:12:00.000Z"),
@@ -150,7 +133,6 @@ test("compatibility backfill rejects a stale preview or mismatched digest before
     await assert.rejects(() => executeLiveCompatibilityBackfillV1({
       sourcePath: paths.source,
       previewPath: paths.previewPath,
-      approvalPath: paths.approvalPath,
       rolloutId: "clawlore-v2-compat-fixture-r1",
       planDigest: paths.preview.compatibilityPlan.planDigest,
       now: () => new Date("2026-07-12T13:30:01.000Z"),

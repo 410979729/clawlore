@@ -17,7 +17,7 @@ function parseArgs(argv) {
     index += 1;
   }
   for (const required of [
-    "source", "baseline", "plan", "approval", "snapshot-archive", "snapshot-receipt",
+    "source", "baseline", "plan", "snapshot-archive", "snapshot-receipt",
     "rollout-id", "plan-digest", "tenant-id", "agent-id", "receipt",
   ]) {
     if (!args[required]) throw new Error(`--${required} is required`);
@@ -31,7 +31,6 @@ const receipt = await executeLiveV1AppendDeltaV1({
   sourcePath: resolve(args.source),
   baselineReceiptPath: resolve(args.baseline),
   planPath: resolve(args.plan),
-  approvalPath: resolve(args.approval),
   snapshotArchivePath: resolve(args["snapshot-archive"]),
   snapshotReceiptPath: resolve(args["snapshot-receipt"]),
   rolloutId: args["rollout-id"],

@@ -52,15 +52,11 @@ test("legacy migration is preview-bound, additive, verification-debt aware, and 
     assert.equal(plan.archivedRows, 1);
     assert.equal(await hash(legacyPath), legacyBefore);
 
-    await assert.rejects(() => applyLegacyMigrationV2({
-      legacyPath, destinationPath, defaults, expectedPlanDigest: plan.planDigest, approved: false,
-    }), /explicit approval/);
     const receipt = await applyLegacyMigrationV2({
       legacyPath,
       destinationPath,
       defaults,
       expectedPlanDigest: plan.planDigest,
-      approved: true,
       now: () => new Date("2026-07-11T14:00:00Z"),
       id: () => "migration-fixture-1",
     });
@@ -106,7 +102,6 @@ test("legacy migration rejects stale preview digests before creating a destinati
       destinationPath,
       defaults: { tenantId: "local", agentId: "main" },
       expectedPlanDigest: "stale",
-      approved: true,
     }), /plan digest mismatch/);
     await assert.rejects(() => access(destinationPath));
   } finally {

@@ -21,7 +21,8 @@
    freshness, conflicts, and forbidden-scope leakage.
 5. Enable v2 writes while retaining v1 fallback reads.
 6. Rebuild projections from v2 SQL truth and verify checksums/counts.
-7. Cut over only after quality gates and operator approval.
+7. Cut over only after quality gates, an exact bounded plan, and a verified
+   rollback point; no separate human approval artifact is part of execution.
 8. Roll back by restoring the pre-apply snapshot and configuration pointer;
    never attempt an in-place reverse rewrite of partially migrated rows.
 
@@ -36,22 +37,22 @@
   live V2 lifecycle remains 0 active / 632 candidate / 320 archived.
 - Candidate evidence remediation belongs to stage 4 quality/policy comparison.
   Registry matches create a review queue, not confirmed ownership or promotion
-  authority. ContextEngine, prompt mutation, and final recall remain later,
-  separately approved gates.
+  authority. ContextEngine, prompt mutation, and final recall remain separate
+  later changes, outside evidence-assignment and migration executors.
 - Phase 7L remains in stage 4: it turns the review queue into an exact,
   non-authorizing evidence-assignment plan. Only 90 registry-resolved rows are
   proposed for evidence writes; every one remains candidate with its current
   verification. The other 542 rows are explicitly held or quarantined.
 - Applying that plan is not stage 7 cutover and requires a fresh encrypted
-  snapshot plus an exact-plan approval. Evidence assignment cannot authorize
+  snapshot plus an exact-plan digest. Evidence assignment cannot authorize
   lifecycle, ContextEngine, prompt mutation, or final recall.
 - Phase 7M consumed that exact approval and wrote registry-resolved evidence to
   only the planned 76 direct-principal and 14 conversation-boundary source
   rows. All 632 candidates preserved lifecycle and verification; the other 542
   rows and every runtime/cutover control were unchanged. This remains stage 4.
 - The next permissible step is a new read-only candidate-policy preview that
-  explicitly understands the new evidence shape. It cannot reuse Phase 7M
-  approval or infer lifecycle authority from a successful evidence write.
+  explicitly understands the new evidence shape. It cannot infer lifecycle
+  authority from a successful evidence write.
 - Phase 7N completed that read-only preview. All 90 assigned payloads match the
   approved exact plan, but the result remains 0 eligible / 476 hold / 156
   quarantine because registry resolution did not change address, verification,
@@ -60,14 +61,14 @@
   979 rows while V2 remains 952. The 27 append-only, unmirrored V1 rows do not
   invalidate the exact 632-row candidate review, but they are a separate stage
   4/5 parity blocker and prohibit final recall cutover until a new migration/
-  projection plan handles them under its own approval.
+  projection plan handles them under its own exact bounded plan.
 - Phase 7O mapped those 27 rows in a new non-authorizing delta preview. Every
   row is a reflection summary with unresolved legacy identity and unverified
   evidence, so the only safe proposed lifecycle is candidate (0 active / 27
   candidate / 0 archived). Existing V2 candidate state remains out of scope.
 - Applying the delta would add Truth, compatibility FTS, current FTS, vector
   fallback, relation projection, and processed outbox receipts atomically. It
-  requires a fresh encrypted snapshot and a separate exact-digest approval;
+  requires a fresh encrypted snapshot and a reproduced exact plan digest;
   the read-only plan cannot authorize a write or final recall cutover.
 - Phase 7P consumed the exact 27-row approval only as a pre-apply gate. The
   mandatory live replan found V1/V2 980/952 and 28 delta rows (27 reflection
@@ -75,8 +76,8 @@
   `6f1e6ac9...421d35`. The old approval therefore failed closed before snapshot
   or write. The new 28-row plan is isolated under rollout r2, remains
   non-authorizing, and all rows remain candidate/unverified with legacy-identity debt.
-- A later approved delta apply now has an executable transaction path, but it
-  may run only after a fresh encrypted snapshot and a new exact approval for
+- A later delta apply now has an executable transaction path, but it may run
+  only after a fresh encrypted snapshot and a reproduced exact plan for
   the 28-row digest. Existing V2 canonical/lifecycle/verification/evidence,
   V1 fallback, ContextEngine, prompt mutation, and final recall stay immutable.
 - Phase 7Q consumed the exact r2 approval only after reproducing the authorized
@@ -87,20 +88,27 @@
 - This closes the known append-only parity blocker but does not advance stage 7
   cutover: lifecycle is still 0 active / 660 candidate / 320 archived. The next
   permissible action is a new read-only 660-candidate policy/evidence baseline;
-  no prior approval authorizes lifecycle, ContextEngine, prompt, or final recall.
+  the delta executor cannot change lifecycle, ContextEngine, prompt, or final recall.
 - Phase 7R generated that new stage-4 baseline. It preserves the exact 632-row
   Phase 7L/7M assignment state and admits the 28 Phase 7Q rows only by binding
   the owner-only delta acceptance and validating their candidate/unverified/
   legacy-identity-debt shape plus all four 980-row projections.
 - The resulting 660-row policy plan is 0 eligible / 504 hold / 156 quarantine,
   automatic promotion 0. It authorizes no mutation and gives no reason to open
-  a lifecycle approval gate. The next plan-led step is read-only remediation of
+  a lifecycle write path. The next plan-led step is read-only remediation of
   the 504 hold and 156 quarantine lanes; any later evidence write needs a fresh
-  encrypted snapshot and a new exact approval.
+  encrypted snapshot and a reproduced exact bounded plan.
 - Phase 7S preserves that 504/156 policy split while refining the 504 holds into
   77 assignment-review and 427 evidence-review rows. Only one new registry-
   direct row is proposed for evidence assignment; the exact plan keeps the
   other 659 rows unchanged and grants no write/lifecycle/runtime authority.
+- Phase 7T removes the repeated human approval files from the executable
+  contract. Runtime shadow, migration, compatibility, append-delta, evidence
+  assignment, and promotion planning now rely on machine-enforced readiness,
+  exact plan digests, drift rejection, fresh encrypted snapshots, transactional
+  scope checks, rollback evidence, and projection verification. Historical
+  approval artifacts remain immutable audit evidence only. Hard-delete
+  confirmation remains because it protects irreversible deletion.
 
 ## Naming matrix
 

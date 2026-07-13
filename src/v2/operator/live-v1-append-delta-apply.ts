@@ -13,27 +13,6 @@ type DatabaseSync = any;
 const CONTROL_MAX_BYTES = 5 * 1024 * 1024;
 const DEFAULT_MAX_SNAPSHOT_AGE_SECONDS = 60 * 60;
 
-interface DeltaApprovalV1 {
-  schemaVersion: 1;
-  phase: "clawlore-v1-append-delta-approval";
-  rolloutId: string;
-  decision: "approved";
-  actor: string;
-  approvedAt: string;
-  planDigest: string;
-  allowFreshEncryptedSnapshot: true;
-  allowAppendOnlyDeltaWrite: true;
-  preserveExistingCanonical: true;
-  preserveExistingLifecycle: true;
-  preserveExistingVerification: true;
-  preserveExistingEvidence: true;
-  preserveV1Fallback: true;
-  allowExistingCandidateLifecycleMutation: false;
-  allowContextEngine: false;
-  allowPromptMutation: false;
-  allowFinalRecallCutover: false;
-}
-
 interface SnapshotReceiptV1 {
   schemaVersion: 1;
   phase: "clawlore-v2-live-encrypted-snapshot";
@@ -60,7 +39,6 @@ export interface LiveV1AppendDeltaApplyReceiptV1 {
   status: "applied";
   appliedAt: string;
   planDigest: string;
-  approvalSha256: string;
   planSha256: string;
   snapshotReceiptSha256: string;
   snapshotArchiveSha256: string;
@@ -142,46 +120,15 @@ function loadPlan(path: string, rolloutId: string, planDigest: string): {
     || value.proposed.invalidMetadataRows !== 0
     || value.proposed.reviewRequiredRows !== value.proposed.candidateRows
     || value.proposed.rows.length !== value.source.deltaRows
-    || value.decision.deltaWritePlanReadyForSeparateApproval !== true
+    || value.decision.deltaWriteReady !== true
     || value.decision.requiresFreshEncryptedSnapshot !== true
-    || value.decision.requiresSeparateExactApproval !== true
     || value.decision.finalRecallCutoverReady !== false
     || value.authorizesDeltaWrite !== false
     || value.authorizesLifecyclePromotion !== false
     || value.authorizesContextEngine !== false
     || value.authorizesPromptMutation !== false
     || value.authorizesFinalRecall !== false
-  ) throw new Error("approved append-delta plan is invalid or exceeds the authorized boundary");
-  return loaded;
-}
-
-function loadApproval(path: string, rolloutId: string, planDigest: string): {
-  value: DeltaApprovalV1;
-  sha256: string;
-} {
-  const loaded = privateJson<DeltaApprovalV1>(path, 128 * 1024);
-  const value = loaded.value;
-  if (
-    value.schemaVersion !== 1
-    || value.phase !== "clawlore-v1-append-delta-approval"
-    || value.rolloutId !== rolloutId
-    || value.decision !== "approved"
-    || typeof value.actor !== "string"
-    || !value.actor.trim()
-    || !Number.isFinite(Date.parse(value.approvedAt))
-    || value.planDigest !== planDigest
-    || value.allowFreshEncryptedSnapshot !== true
-    || value.allowAppendOnlyDeltaWrite !== true
-    || value.preserveExistingCanonical !== true
-    || value.preserveExistingLifecycle !== true
-    || value.preserveExistingVerification !== true
-    || value.preserveExistingEvidence !== true
-    || value.preserveV1Fallback !== true
-    || value.allowExistingCandidateLifecycleMutation !== false
-    || value.allowContextEngine !== false
-    || value.allowPromptMutation !== false
-    || value.allowFinalRecallCutover !== false
-  ) throw new Error("operator approval is invalid or exceeds the authorized boundary");
+  ) throw new Error("append-delta plan is invalid or exceeds the bounded write contract");
   return loaded;
 }
 
@@ -219,6 +166,14 @@ function scalar(db: DatabaseSync, sql: string, ...args: unknown[]): number {
   return Number(Object.values(row)[0] ?? 0);
 }
 
+function ensureRolloutControlColumn(db: DatabaseSync): void {
+  const columns = new Set((db.prepare("PRAGMA table_info(clawlore_rollouts_v2)").all() as Array<{ name: string }>)
+    .map((row) => row.name));
+  if (columns.has("control_sha256")) return;
+  if (!columns.has("approval_sha256")) throw new Error("rollout control digest column is missing");
+  db.exec("ALTER TABLE clawlore_rollouts_v2 RENAME COLUMN approval_sha256 TO control_sha256");
+}
+
 function lifecycleCounts(db: DatabaseSync): Record<string, number> {
   const rows = db.prepare("SELECT lifecycle,COUNT(*) AS rows FROM memory_items GROUP BY lifecycle ORDER BY lifecycle")
     .all() as Array<{ lifecycle: string; rows: number }>;
@@ -242,10 +197,10 @@ function existingStateDigests(db: DatabaseSync, itemIds: string[]): Record<strin
   };
 }
 
-function assertCurrentPlanMatch(approved: LiveV1AppendDeltaPlanReceiptV1, current: LiveV1AppendDeltaPlanReceiptV1): void {
+function assertCurrentPlanMatch(expected: LiveV1AppendDeltaPlanReceiptV1, current: LiveV1AppendDeltaPlanReceiptV1): void {
   for (const field of ["baseline", "source", "proposed", "projectionWork", "decision"] as const) {
-    if (JSON.stringify(approved[field]) !== JSON.stringify(current[field])) {
-      throw new Error("live delta set or plan digest drifted after approval");
+    if (JSON.stringify(expected[field]) !== JSON.stringify(current[field])) {
+      throw new Error("live delta set or plan digest drifted after planning");
     }
   }
 }
@@ -269,7 +224,6 @@ export async function executeLiveV1AppendDeltaV1(input: {
   sourcePath: string;
   baselineReceiptPath: string;
   planPath: string;
-  approvalPath: string;
   snapshotArchivePath: string;
   snapshotReceiptPath: string;
   rolloutId: string;
@@ -284,7 +238,6 @@ export async function executeLiveV1AppendDeltaV1(input: {
     throw new Error("maximum snapshot age must be a positive integer");
   }
   const plan = loadPlan(input.planPath, input.rolloutId, input.planDigest);
-  const approval = loadApproval(input.approvalPath, input.rolloutId, input.planDigest);
   const snapshot = loadFreshSnapshot({
     receiptPath: input.snapshotReceiptPath,
     archivePath: input.snapshotArchivePath,
@@ -316,7 +269,7 @@ export async function executeLiveV1AppendDeltaV1(input: {
   const delta = migration.rows.filter((row) => !existingItemSet.has(`legacy:${row.legacyId}`));
   if (delta.length !== plan.value.source.deltaRows) {
     db.close();
-    throw new Error("live append-only delta coverage no longer matches the approved plan");
+    throw new Error("live append-only delta coverage no longer matches the plan");
   }
   const existingDigests = existingStateDigests(db, existingItemIds);
   const beforeV2Rows = existingItemIds.length;
@@ -331,13 +284,14 @@ export async function executeLiveV1AppendDeltaV1(input: {
   const newItemIds: string[] = [];
   try {
     db.exec("BEGIN IMMEDIATE");
+    ensureRolloutControlColumn(db);
     for (const row of delta) {
       if (
         row.lifecycle !== "candidate"
         || row.verification !== "unverified"
         || row.verificationDebt !== "legacy_identity"
         || row.reviewRequired !== true
-      ) throw new Error("delta row no longer satisfies the approved candidate-only classification");
+      ) throw new Error("delta row no longer satisfies the candidate-only classification");
       const itemId = `legacy:${row.legacyId}`;
       const revisionId = randomUUID();
       const address = row.address;
@@ -379,7 +333,7 @@ export async function executeLiveV1AppendDeltaV1(input: {
       db.prepare(`INSERT INTO memory_events
         (event_id,item_id,revision_id,event_type,actor,reason,created_at)
         VALUES (?,?,?,?,?,?,?)`).run(
-        randomUUID(), itemId, revisionId, "remembered", "operator:approved-delta-rollout", input.rolloutId, appliedAt,
+        randomUUID(), itemId, revisionId, "remembered", "operator:bounded-delta-rollout", input.rolloutId, appliedAt,
       );
       db.prepare("INSERT INTO memory_fts_compat_v2(item_id,content,metadata_text) VALUES (?,?,?)")
         .run(itemId, row.content.trim(), String(legacy.metadata_text || ""));
@@ -394,10 +348,10 @@ export async function executeLiveV1AppendDeltaV1(input: {
       newItemIds.push(itemId);
     }
     db.prepare(`INSERT INTO clawlore_rollouts_v2
-      (rollout_id,plan_digest,approval_sha256,readiness_sha256,legacy_logical_digest,rows_applied,
+      (rollout_id,plan_digest,control_sha256,readiness_sha256,legacy_logical_digest,rows_applied,
        applied_at,v1_fallback_reads,context_engine_enabled,final_recall_cutover_enabled)
       VALUES (?,?,?,?,?,?,?,1,0,0)`).run(
-      input.rolloutId, input.planDigest, approval.sha256, snapshot.sha256,
+      input.rolloutId, input.planDigest, plan.sha256, snapshot.sha256,
       legacyBefore.memoryTruth.logicalDigest, delta.length, appliedAt,
     );
     const inTransactionDigests = existingStateDigests(db, existingItemIds);
@@ -411,7 +365,7 @@ export async function executeLiveV1AppendDeltaV1(input: {
       || scalar(db, "SELECT COUNT(*) FROM projection_outbox WHERE processed_at IS NOT NULL")
         !== beforeProcessedOutbox + delta.length * 3
       || scalar(db, "SELECT COUNT(*) FROM projection_outbox WHERE processed_at IS NULL") !== beforePendingOutbox
-    ) throw new Error("transaction exceeded the approved append-only delta boundary");
+    ) throw new Error("transaction exceeded the append-only delta boundary");
     const newLifecycle = scalar(db,
       `SELECT COUNT(*) FROM memory_items WHERE item_id IN (${newItemIds.map(() => "?").join(",")})
        AND lifecycle='candidate' AND verification='unverified'`, ...newItemIds);
@@ -467,7 +421,6 @@ export async function executeLiveV1AppendDeltaV1(input: {
     status: "applied",
     appliedAt,
     planDigest: input.planDigest,
-    approvalSha256: approval.sha256,
     planSha256: plan.sha256,
     snapshotReceiptSha256: snapshot.sha256,
     snapshotArchiveSha256: snapshot.value.archiveSha256,

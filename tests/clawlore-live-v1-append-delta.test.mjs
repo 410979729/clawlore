@@ -27,7 +27,6 @@ async function fixture() {
   const source = join(root, "live.sqlite3");
   const baseline = join(root, "baseline.json");
   const planPath = join(root, "plan.json");
-  const approval = join(root, "approval.json");
   const snapshotArchive = join(root, "fresh.clawlore2");
   const snapshotReceipt = join(root, "snapshot.json");
   const rolloutId = "clawlore-v2-v1-delta-migration-fixture-r1";
@@ -126,7 +125,7 @@ async function fixture() {
       planDigest: sha256("candidate-plan"),
       automaticPromotionRows: 0,
       authorizesLiveMutation: false,
-      counts: { eligible_for_operator_promotion: 0, hold_candidate: 1, quarantine: 0 },
+      counts: { eligible_for_promotion: 0, hold_candidate: 1, quarantine: 0 },
     },
     decision: { eligibleRows: 0, lifecycleRolloutSelectable: false, automaticPromotionRows: 0 },
     authorizesLifecycleMutation: false,
@@ -151,26 +150,6 @@ async function fixture() {
     now: () => new Date("2026-07-12T15:01:00.000Z"),
   });
   await privateJson(planPath, plan);
-  await privateJson(approval, {
-    schemaVersion: 1,
-    phase: "clawlore-v1-append-delta-approval",
-    rolloutId,
-    decision: "approved",
-    actor: "operator:fixture",
-    approvedAt: "2026-07-12T15:02:00.000Z",
-    planDigest: plan.proposed.planDigest,
-    allowFreshEncryptedSnapshot: true,
-    allowAppendOnlyDeltaWrite: true,
-    preserveExistingCanonical: true,
-    preserveExistingLifecycle: true,
-    preserveExistingVerification: true,
-    preserveExistingEvidence: true,
-    preserveV1Fallback: true,
-    allowExistingCandidateLifecycleMutation: false,
-    allowContextEngine: false,
-    allowPromptMutation: false,
-    allowFinalRecallCutover: false,
-  });
   const snapshot = await inspectLegacySqliteSnapshotV2(source, "2026-07-12T15:03:00.000Z");
   await writeFile(snapshotArchive, Buffer.from("fixture encrypted archive"), { mode: 0o600 });
   await chmod(snapshotArchive, 0o600);
@@ -193,7 +172,7 @@ async function fixture() {
     },
   });
   return {
-    root, source, baseline, planPath, approval, snapshotArchive, snapshotReceipt,
+    root, source, baseline, planPath, snapshotArchive, snapshotReceipt,
     rolloutId, plan,
   };
 }
@@ -203,7 +182,6 @@ function execute(paths) {
     sourcePath: paths.source,
     baselineReceiptPath: paths.baseline,
     planPath: paths.planPath,
-    approvalPath: paths.approval,
     snapshotArchivePath: paths.snapshotArchive,
     snapshotReceiptPath: paths.snapshotReceipt,
     rolloutId: paths.rolloutId,
@@ -213,7 +191,7 @@ function execute(paths) {
   });
 }
 
-test("approved append-only V1 delta writes candidate truth and converged projections", async () => {
+test("append-only V1 delta writes candidate truth and converged projections", async () => {
   const paths = await fixture();
   try {
     const beforeEvidence = new DatabaseSync(paths.source, { readOnly: true })
@@ -237,6 +215,9 @@ test("approved append-only V1 delta writes candidate truth and converged project
       beforeEvidence);
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM memory_fts_compat_v2 WHERE memory_fts_compat_v2 MATCH 'delta'")
       .get().n, 1);
+    const rolloutColumns = db.prepare("PRAGMA table_info(clawlore_rollouts_v2)").all().map((row) => row.name);
+    assert.equal(rolloutColumns.includes("control_sha256"), true);
+    assert.equal(rolloutColumns.includes("approval_sha256"), false);
     db.close();
     await assert.rejects(() => execute(paths), /no longer matches|already|coverage/);
   } finally {
@@ -248,7 +229,7 @@ test("append-only delta apply rejects plan drift before mutation", async () => {
   const paths = await fixture();
   try {
     const db = new DatabaseSync(paths.source);
-    db.prepare("UPDATE memory_truth SET text='changed after approval' WHERE id='delta'").run();
+    db.prepare("UPDATE memory_truth SET text='changed after planning' WHERE id='delta'").run();
     db.close();
     await assert.rejects(() => execute(paths), /drifted|snapshot|plan/);
     const check = new DatabaseSync(paths.source, { readOnly: true });
@@ -259,13 +240,13 @@ test("append-only delta apply rejects plan drift before mutation", async () => {
   }
 });
 
-test("append-only delta apply rejects an approval that permits lifecycle mutation", async () => {
+test("append-only delta apply rejects a plan that permits lifecycle mutation", async () => {
   const paths = await fixture();
   try {
-    const value = JSON.parse(await readFile(paths.approval, "utf8"));
-    value.allowExistingCandidateLifecycleMutation = true;
-    await privateJson(paths.approval, value);
-    await assert.rejects(() => execute(paths), /approval.*invalid|authorized boundary/);
+    const value = JSON.parse(await readFile(paths.planPath, "utf8"));
+    value.authorizesLifecyclePromotion = true;
+    await privateJson(paths.planPath, value);
+    await assert.rejects(() => execute(paths), /invalid|bounded write contract/);
     const check = new DatabaseSync(paths.source, { readOnly: true });
     assert.equal(check.prepare("SELECT COUNT(*) AS n FROM memory_items").get().n, 1);
     check.close();

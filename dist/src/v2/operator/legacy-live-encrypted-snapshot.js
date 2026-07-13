@@ -82,7 +82,7 @@ export async function createAndVerifyLegacyLiveEncryptedSnapshotV2(input) {
                 integrity: archive.snapshot.integrity,
                 foreignKeyViolations: 0,
             },
-            nextGate: "fresh_v2_write_readiness_and_separate_operator_approval",
+            nextGate: "fresh_v2_write_readiness_and_plan_validation",
         };
         await mkdir(dirname(input.receiptPath), { recursive: true });
         await writeFile(input.receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, { flag: "wx", mode: 0o600 });

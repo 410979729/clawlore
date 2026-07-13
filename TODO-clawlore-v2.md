@@ -74,7 +74,7 @@ Updated: 2026-07-13
 ## Phase 2C — Legacy migration drill
 
 - [x] Require a read-only migration plan and stable digest before apply.
-- [x] Require explicit approval and a destination that does not exist.
+- [x] Require the exact plan digest and a destination that does not exist.
 - [x] Preserve manual/user-confirmed rows as active only when identity resolves.
 - [x] Preserve ambiguous/auto-extracted rows as unverified candidates.
 - [x] Preserve archived/rejected/superseded legacy rows as non-active.
@@ -137,15 +137,15 @@ Updated: 2026-07-13
 - [x] Freeze package, manifest, config root, CLI aliases, data path, and source metadata compatibility.
 - [x] Define stable release-readiness and rollout-preview response schemas.
 - [x] Require mode-specific evidence for shadow, V2 write, and cutover previews.
-- [x] Keep every non-disabled rollout subject to separate operator approval.
+- [x] Keep every non-disabled rollout subject to mode-specific readiness evidence and bounded plans.
 - [x] Make shadow read-only and require snapshot/migration/rollback/hash gates before writes or cutover.
 - [x] Add recursively redacted support-bundle output for credentials, authorization, private keys, and local paths.
 
 ## Phase 6B — Default-off runtime composition
 
 - [x] Add an isolated `clawloreV2` schema request with `disabled` as the default.
-- [x] Require a matching release-readiness receipt and separate operator approval before shadow registration.
-- [x] Register exactly one low-priority `before_prompt_build` observer in approved fixture shadow mode.
+- [x] Require a matching release-readiness receipt before shadow registration.
+- [x] Register exactly one low-priority `before_prompt_build` observer in ready fixture shadow mode.
 - [x] Keep Agent tools, writes, prompt mutation, and ContextEngine registration at zero.
 - [x] Hash runtime trace ids and retain only the existing redacted shadow receipt.
 - [x] Fail open on retrieval timeout or trace-sink failure so memory observation cannot block ordinary replies.
@@ -179,15 +179,13 @@ Updated: 2026-07-13
 - [x] Add a redacted observation summary and explicit go/no-go receipt for the
       separately approved V2-write phase.
 
-## Phase 7 — Separately approved V2 write migration
+## Phase 7 — Bounded V2 write migration
 
 - [x] Create and verify a live encrypted snapshot before any schema change.
 - [x] Run the migration preview against a verified copy and adjudicate identity
       and scope debt before apply.
-- [x] Create a fresh evidence-bound V2-write readiness receipt that cannot
-      authorize writes by itself.
-- [x] Obtain separate operator approval for rollout
-      `clawlore-v2-write-20260712-r1`.
+- [x] Create a fresh evidence-bound V2-write readiness receipt and bind the
+      executor to its exact rollout id and migration-plan digest.
 - [x] Apply additive V2 schema/writes with V1 fallback, then verify SQL/FTS/vector/
       relation/Experience projection convergence and rollback evidence.
 - [x] Keep ContextEngine and final recall cutover disabled until a later gate.
@@ -254,13 +252,13 @@ Updated: 2026-07-13
       smoke, golden recall, and 349-file package scan PASS.
 - [x] Verify Gateway active/running, healthz live, port 19021 listening, recent
       warnings empty, and V2 table count still 0.
-- [x] Obtain the separate V2-write approval; Phase 7D applied the exact approved
-      rollout while the readiness receipt itself remained non-authorizing.
+- [x] Preserve the exact historical rollout evidence; Phase 7T later removed
+      the separate human-approval artifact from the executable contract.
 
-## Phase 7D — Approved additive live V2 write rollout
+## Phase 7D — Bounded additive live V2 write rollout
 
-- [x] Bind a 0600 operator approval to the exact rollout id, approved readiness,
-      implementation commit, V1 fallback, and explicit ContextEngine/cutover denial.
+- [x] Bind the 0600 readiness receipt to the exact rollout id, implementation
+      commit, V1 fallback, and explicit ContextEngine/cutover denial.
 - [x] Apply Truth V2, FTS, vector-fallback, relation-projection, rollout-ledger,
       and Experience schemas in one `BEGIN IMMEDIATE` transaction.
 - [x] Preserve all 952 V1 truth rows and V1 FTS/vector fallback without rewriting
@@ -271,7 +269,7 @@ Updated: 2026-07-13
 - [x] Verify SQLite integrity, foreign keys, V1 doctor, Gateway/healthz/port,
       warning logs, repository cleanliness, and owner-only rollout receipts.
 - [x] Keep live runtime mode `shadow`, compatibility ContextEngine, V1 reads,
-      and the existing shadow approval pointers unchanged; no restart occurred.
+      and the existing shadow readiness pointer unchanged; no restart occurred.
 
 ## Phase 7E — Live read-only V1/V2 recall parity
 
@@ -289,7 +287,7 @@ Updated: 2026-07-13
       current minimum is 0.6 because the indexed fields differ.
 - [x] Define and review an evidence-backed promotion policy for the 632
       candidate rows; do not bulk-promote or infer identity.
-- [x] Keep ContextEngine, prompt mutation, final recall cutover, and unapproved
+- [x] Keep ContextEngine, prompt mutation, final recall cutover, and out-of-plan
       live V2 mutations disabled.
 
 Phase 7E verification: focused 2/2 and full 166/166 tests PASS; typecheck,
@@ -315,13 +313,13 @@ overlap below 0.8.
 - [x] Run focused 3/3, full 169/169, typecheck, build, module, vector, golden,
       and release gates; final package scan 369 files.
 - [x] Run a read-only live compatibility-backfill preview under a new rollout;
-      this requires a fresh encrypted snapshot and separate operator approval.
+      this requires a fresh encrypted snapshot and an exact bounded plan.
 - [x] Build the live 632-row candidate review plan from address-bound evidence;
-      do not promote any row without an exact-digest operator approval.
-- [x] Keep ContextEngine, prompt mutation, final recall cutover, and unapproved
+      do not promote any row outside the exact-digest plan.
+- [x] Keep ContextEngine, prompt mutation, final recall cutover, and out-of-plan
       live V2 mutations disabled.
 
-## Phase 7G — Rollout control isolation
+## Phase 7G — Rollout plan isolation
 
 - [x] Require a fresh encrypted snapshot, verified restore, stable source
       digest, and zero plaintext residue before either later live action.
@@ -332,7 +330,7 @@ overlap below 0.8.
       plans and archived rows in an actionable candidate batch.
 - [x] Require distinct rollout ids, modes, and plan digests for compatibility
       backfill and candidate promotion.
-- [x] Prove one action's approval cannot authorize the other action or enable
+- [x] Prove one action's plan cannot authorize the other action or enable
       ContextEngine, prompt mutation, or final recall.
 - [x] Run focused 6/6, full 172/172, typecheck, build, module, vector, golden,
       and release gates; final package scan 373 files.
@@ -342,9 +340,8 @@ overlap below 0.8.
       mismatch, zero existing projection rows, and the exact eight-field allowlist.
 - [x] Review the exact 632-row candidate plan: 0 eligible, 476 held, 156
       quarantined, automatic promotion 0; do not request a lifecycle rollout.
-- [x] After live plans exist, obtain a separate exact-digest approval for the
-      compatibility projection backfill, if selected.
-- [x] Keep ContextEngine, prompt mutation, final recall cutover, and unapproved
+- [x] Apply only an exact-digest compatibility projection plan, if selected.
+- [x] Keep ContextEngine, prompt mutation, final recall cutover, and out-of-plan
       live V2 mutations disabled.
 
 ## Phase 7H verification
@@ -386,9 +383,9 @@ overlap below 0.8.
       Top-K overlap/rank agreement to 1.0 across six fixed probes.
 - [x] Run focused 7/7, full 176/176, typecheck, build, module, ranking/control,
       vector, golden, and release gates; package scan 383 files.
-- [x] Obtain and execute the new exact-digest approval for corrected rollout
-      `clawlore-v2-compatibility-backfill-20260712-r2`; r1 approval was not
-      reused.
+- [x] Execute corrected rollout
+      `clawlore-v2-compatibility-backfill-20260712-r2` under the then-current
+      exact-digest artifact; Phase 7T later removed that artifact requirement.
 - [x] Keep lifecycle mutation, ContextEngine, prompt mutation, final recall,
       configuration changes, and service restart disabled.
 
@@ -603,8 +600,29 @@ overlap below 0.8.
 - [x] Pass focused 4/4, affected 8/8, full 196/196, typecheck/build/module/
       ranking/control/vector/golden/release; pack 417.
 - [ ] Before the one-row evidence write, require a fresh encrypted snapshot and
-      exact approval bound to digest
+      reproduce the exact plan digest
       `5bcbfbfabd64638188cdb68ed58de0d6fb0ee79ef14f2859c21bd12dbb027c05`.
+
+## Phase 7T — Remove repeated human rollout approvals
+
+- [x] Remove approval JSON parsers, approval CLI arguments, and approval receipt
+      hashes from runtime shadow, migration, compatibility, V1-delta, and
+      evidence-assignment execution paths; tolerate the legacy `approvalFile`
+      config key as a deprecated ignored input so existing config still loads.
+- [x] Keep machine-enforced readiness, exact plan digests, drift detection,
+      fresh encrypted snapshots, transactional boundaries, rollback evidence,
+      projection convergence, and ContextEngine/prompt/final-recall denials.
+- [x] Rename the rollout ledger column to `control_sha256`; migrate the legacy
+      `approval_sha256` column transactionally when a later delta apply opens it.
+- [x] Keep the unrelated hard-delete confirmation boundary intact because it
+      protects irreversible deletion rather than staged rollout progress.
+- [x] Finish full regression, build, release gate, run report, and source-tree
+      cleanup: 196/196 tests, typecheck/build, all affected smokes, golden
+      recall, and release gate PASS; package scan 418 files.
+- [ ] Deploy the verified source to the live extension under the existing
+      authenticated service-change boundary, restart once, verify a real shadow
+      trace without the functional gate, then continue the one-row Phase 7S
+      evidence apply from a fresh snapshot and reproduced digest.
 
 ## Phase 0 verification
 
@@ -793,8 +811,8 @@ Run report:
 ## Boundaries
 
 - Phase 6C authorizes only the currently deployed read-only shadow observer.
-- Do not mutate the live memory database or enable V2 writes without the
-  separate Phase 7 readiness and operator-approval gate.
+- Do not mutate the live memory database or enable V2 writes outside a verified
+  readiness receipt, exact plan digest, fresh snapshot, and bounded executor.
 - Do not select the ContextEngine slot or enable prompt mutation.
 - Do not rename package, CLI, config root, tools, or data paths.
 - Do not replace the three legacy prompt hooks until shadow comparison passes.

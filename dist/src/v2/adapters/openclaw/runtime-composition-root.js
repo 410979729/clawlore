@@ -65,19 +65,6 @@ function shadowVisibility(chatType) {
     // can never be treated as a private-memory request.
     return chatType === "direct" ? "private" : "conversation";
 }
-function validApproval(approval, readiness) {
-    if (!approval || !readiness)
-        return false;
-    return approval.schemaVersion === 1
-        && approval.decision === "approved"
-        && approval.mode === "shadow"
-        && typeof approval.actor === "string"
-        && Boolean(approval.actor.trim())
-        && typeof approval.rolloutId === "string"
-        && approval.rolloutId === readiness.rollout.rolloutId
-        && typeof approval.approvedAt === "string"
-        && Number.isFinite(Date.parse(approval.approvedAt));
-}
 async function observeWithoutBlockingReply(input) {
     let timer;
     const operation = input.operation
@@ -110,11 +97,7 @@ function activationBlocks(input) {
             blocks.push("readiness_mode_mismatch");
         if (!readiness.rollout.readOnly)
             blocks.push("readiness_not_read_only");
-        if (!readiness.rollout.requiresOperatorApproval)
-            blocks.push("approval_contract_missing");
     }
-    if (!validApproval(input.approval, readiness))
-        blocks.push("operator_approval_missing_or_invalid");
     if (input.config.contextEngine !== "compatibility")
         blocks.push("native_context_engine_not_enabled_in_this_slice");
     return [...new Set(blocks)].sort();

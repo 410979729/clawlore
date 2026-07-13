@@ -87,13 +87,13 @@ test("live Phase 7G preview is snapshot-bound, complete, redacted, and query-onl
       promotionRolloutId: "clawlore-v2-promotion-fixture-r1",
       now: () => new Date("2026-07-12T12:10:00.000Z"),
     });
-    assert.equal(result.controls.status, "ready_for_separate_approvals");
+    assert.equal(result.controls.status, "ready");
     assert.equal(result.compatibilityPlan.sourceRows, 2);
     assert.equal(result.compatibilityPlan.v2Rows, 2);
     assert.equal(result.compatibilityPlan.mappingMismatchRows, 0);
     assert.equal(result.compatibilityPlan.bootstrapSource, "memory_truth.metadata_text");
     assert.equal(result.candidatePromotionPlan.rows.length, 2);
-    assert.equal(result.candidatePromotionPlan.counts.eligible_for_operator_promotion, 1);
+    assert.equal(result.candidatePromotionPlan.counts.eligible_for_promotion, 1);
     assert.equal(result.candidatePromotionPlan.counts.quarantine, 1);
     assert.equal(result.liveMutation.lifecycleRowsChanged, 0);
     assert.equal(result.controls.authorizesCompatibilityBackfill, false);

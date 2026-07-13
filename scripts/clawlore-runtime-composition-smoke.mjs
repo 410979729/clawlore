@@ -80,14 +80,6 @@ const shadow = composeClawLoreRuntimeV1({
   host: shadowHost,
   dependencies: { ...commonDependencies, traceSink: sink },
   readiness,
-  approval: {
-    schemaVersion: 1,
-    rolloutId: "fixture-host-smoke",
-    mode: "shadow",
-    decision: "approved",
-    actor: "operator:fixture-smoke",
-    approvedAt: "2026-07-12T03:10:00.000Z",
-  },
 });
 assert.equal(shadow.status, "registered");
 assert.equal(shadowHost.hooks.length, 1);
