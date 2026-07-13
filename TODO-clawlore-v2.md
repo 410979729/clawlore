@@ -1,6 +1,6 @@
 # ClawLore 2.0 TODO
 
-Updated: 2026-07-13
+Updated: 2026-07-14
 
 ## Phase 0
 
@@ -921,6 +921,30 @@ overlap below 0.8.
 - [ ] Phase 8F-B must create separate exact archive and rewrite controls. This
       read-only adjudication authorizes no archive, rewrite, verification,
       lifecycle, ContextEngine, prompt mutation, hard delete, or final recall.
+
+## Phase 8F-B1 — Exact disposition planning
+
+- [x] Fail closed when a new V1 operational checkpoint changes live truth from
+      1001/1001 to 1002/1001; create no disposition receipt or write.
+- [x] Under a fresh restore-verified encrypted snapshot, migrate exactly the
+      one-row r10 append as candidate/unverified/legacy-identity debt. Restore
+      V1/V2/four projections to 1002, candidate 665, active 0, archived 337,
+      pending 0, with existing canonical/lifecycle/verification/evidence
+      changes 0.
+- [x] Rebuild all controls from live truth: 0 eligible / 509 hold / 156
+      quarantine; 84 assignment / 425 evidence / 156 quarantine; 131 unsafe /
+      2 safe duplicate / 56 semantic review.
+- [x] Add a query-only disposition planner with 99 unique reversible archive
+      targets and 32 bounded rewrite designs (7 oversized segmentation + 25
+      durable-result extraction), overlap 0 and mutation-ready 0.
+- [x] Independently recompute plan digest
+      `527e209f...d09adc`, prove union 131 and no raw/content key leakage, and
+      require a fresh encrypted snapshot plus a separate exact apply.
+- [x] Pass focused 4/4, full 238/238, typecheck/build/module/vector/golden/
+      release gates; closing package scan 511 files.
+- [ ] Phase 8F-B2 may apply only the 99-row archive lane under a new fresh
+      encrypted snapshot and independent acceptance. The 32 rewrite designs
+      require a separate payload-bearing proposal and exact rewrite control.
 
 ## Phase 0 verification
 

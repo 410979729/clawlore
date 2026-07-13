@@ -249,6 +249,23 @@
   recall being 0. Phase 8F-B needs new exact controls and a fresh encrypted
   snapshot for any selected archive or rewrite; Phase 8G and Phase 9 remain
   independent.
+- Phase 8F-B1 first refused the disposition replay after a new V1 operational
+  checkpoint changed live truth to 1002/1001. A separate exact r10 plan, fresh
+  restore-verified encrypted snapshot, and one-row transaction converged V1/V2
+  and all four projections at 1002. Candidate became 665 while active 0,
+  archived 337, pending 0, and existing canonical/lifecycle/verification/
+  evidence state remained unchanged.
+- Every candidate control was then regenerated from live truth. The new
+  query-only disposition plan binds 99 unique reversible archive targets and
+  32 unique bounded rewrite designs, with overlap 0, union 131, and
+  mutation-ready 0. The rewrite designs separate 7 oversized segmentation
+  cases from 25 durable-result extraction cases and require removal of command/
+  tool envelopes, capture-safety validation, and corpus deduplication.
+- The disposition plan emits hashes and review metadata only. It authorizes no
+  soft archive, content rewrite, verification/lifecycle mutation, hard delete,
+  ContextEngine, prompt mutation, or final recall. Phase 8F-B2 requires a new
+  fresh snapshot and independent exact acceptance for only the 99-row archive
+  lane; the 32 designs need their own payload-bearing proposal and transaction.
 
 ## Naming matrix
 
