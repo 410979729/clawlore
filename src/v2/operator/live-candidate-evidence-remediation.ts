@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
+import { validateSourceLineageReceiptV1 } from "../application/candidate-content-quality-review.js";
 
 const require = createRequire(import.meta.url);
 type DatabaseSync = any;
@@ -212,27 +213,7 @@ function sourceLineageReceiptState(
 ): "absent" | "valid" | "invalid" {
   const raw = parseRecord(row.evidence_json).sourceLineageReceiptV1;
   if (raw === undefined) return "absent";
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return "invalid";
-  const receipt = raw as Record<string, unknown>;
-  const digest = (value: unknown): boolean => typeof value === "string" && /^[a-f0-9]{64}$/i.test(value);
-  const recordedAt = typeof receipt.recordedAt === "string" ? Date.parse(receipt.recordedAt) : Number.NaN;
-  return receipt.schemaVersion === 1
-    && receipt.evidenceKind === "source-lineage-receipt"
-    && receipt.supportsSourceLineageOnly === true
-    && receipt.authorizesLifecycleChange === false
-    && receipt.authorizesVerificationChange === false
-    && receipt.preservesLifecycle === true
-    && receipt.preservesVerification === true
-    && receipt.classification === classification(row, metadata)
-    && typeof receipt.rolloutId === "string"
-    && Boolean(receipt.rolloutId.trim())
-    && digest(receipt.planDigest)
-    && digest(receipt.proposedReceiptPayloadDigest)
-    && digest(receipt.sourceEvidenceDigest)
-    && digest(receipt.eventEvidenceDigest)
-    && Number.isFinite(recordedAt)
-    ? "valid"
-    : "invalid";
+  return validateSourceLineageReceiptV1(raw, classification(row, metadata)) ? "valid" : "invalid";
 }
 
 function derivedSystemLane(
