@@ -176,6 +176,16 @@
   converged under a fresh encrypted snapshot and exact one-row r6 delta, leaving
   V1/V2/projections at 984 and all mutation authorities disabled. Every rewrite
   or soft archive still needs a separate exact control and acceptance.
+- Phase 8B turns the three durable duplicate groups into three bounded rewrite
+  representatives plus three post-rewrite dedupe holds. A separate owner-only
+  payload carries the proposed prose; the operator plan exposes hashes/actions
+  only. Proposals must be capture-safe, non-empty, changed from the source,
+  mutually distinct, and absent from the current candidate corpus. Two facts
+  are already covered by existing ClawLore truth and one is materially new
+  bounded truth. The live plan remains query-only and leaves all six rows
+  candidate/unverified. A later exact apply may rewrite only the three
+  representatives under a fresh encrypted snapshot; companion archive decisions
+  require a new post-rewrite plan.
 
 ## Naming matrix
 

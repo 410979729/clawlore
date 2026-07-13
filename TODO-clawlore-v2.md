@@ -794,6 +794,26 @@ overlap below 0.8.
       encrypted snapshot and a separate exact soft-archive transaction plus
       independent acceptance. Do not expand it to the other 131 unsafe rows.
 
+## Phase 8B — Durable rewrite proposals
+
+- [x] Deduplicate the 3 durable-fact groups against canonical knowledge: 2 are
+      covered by existing ClawLore truth and 1 is materially new bounded truth.
+- [x] Select one deterministic representative per exact pair and keep the
+      companion candidate/unverified for post-rewrite dedupe review.
+- [x] Add fail-closed proposal/payload/acceptance controls covering incomplete
+      groups, unsafe prose, no-op rewrites, current-corpus collisions, duplicate
+      proposals, payload tamper, live drift, and source convergence.
+- [x] Generate and independently accept the 0600 live query-only plan: 3
+      representatives / 3 dedupe holds / 0 collision / 0 mismatch / 0 leak /
+      0 mutation-ready. Live remains 984/984 with candidate 664.
+- [x] Pass focused 16/16, full 221/221, typecheck/build/module/runtime/ranking/
+      control/vector/golden/release gates. Closing package scan is 459 files.
+- [ ] If live rewrite is selected, create a fresh encrypted snapshot and an
+      exact three-representative transaction that preserves candidate/
+      unverified state and leaves all three companions unchanged.
+- [ ] Rebuild content-quality and duplicate plans after rewrite before any
+      companion soft archive; do not reuse Phase 8A/8B plans across revisions.
+
 ## Phase 0 verification
 
 - Focused Memory Address V2 tests: 8/8 PASS.
