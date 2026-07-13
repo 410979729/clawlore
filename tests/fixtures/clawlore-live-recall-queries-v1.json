@@ -1,0 +1,37 @@
+{
+  "queries": [
+    {
+      "queryText": "OpenClaw Gateway healthz",
+      "legacyScopes": ["agent:main"],
+      "actor": {
+        "tenantId": "local",
+        "principalId": "legacy:unresolved",
+        "agentId": "main",
+        "workspaceId": "tianji-main-workspace"
+      },
+      "limit": 10
+    },
+    {
+      "queryText": "ClawLore candidate lifecycle",
+      "legacyScopes": ["agent:main"],
+      "actor": {
+        "tenantId": "local",
+        "principalId": "legacy:unresolved",
+        "agentId": "main",
+        "workspaceId": "tianji-main-workspace"
+      },
+      "limit": 10
+    },
+    {
+      "queryText": "memory evidence source lineage",
+      "legacyScopes": ["agent:main"],
+      "actor": {
+        "tenantId": "local",
+        "principalId": "legacy:unresolved",
+        "agentId": "main",
+        "workspaceId": "tianji-main-workspace"
+      },
+      "limit": 10
+    }
+  ]
+}

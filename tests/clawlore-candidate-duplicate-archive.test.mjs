@@ -593,7 +593,11 @@ test("post-append candidate rebase adds only one conservative operational checkp
       proposed: { activeRows: 0, candidateRows: 1, archivedRows: 0,
         classifications: { operational_checkpoint: 1 }, verifications: { unverified: 1 },
         verificationDebt: { legacy_identity: 1 }, reviewRequiredRows: 1, invalidMetadataRows: 0,
-        rows: [{ legacyIdSha256: sha256("append-checkpoint") }], planDigest },
+        rows: [{ legacyIdSha256: sha256("append-checkpoint"),
+          contentSha256: sha256("bounded checkpoint"), addressSha256: sha256(address),
+          classification: "operational_checkpoint", lifecycle: "candidate",
+          verification: "unverified", reviewRequired: true,
+          verificationDebt: "legacy_identity" }], planDigest },
       projectionWork: { truthRows: 1, compatibilityRows: 1, ftsRows: 1, vectorRows: 1,
         relationProjectionRows: 1, outboxRows: 3 },
       decision: { deltaWriteReady: true, requiresFreshEncryptedSnapshot: true,
@@ -647,7 +651,7 @@ test("post-append candidate rebase adds only one conservative operational checkp
     drift.close();
     assert.throws(() => createLivePostV1AppendCandidatePlanV1({ sourcePath: paths.source,
       priorBaselinePath: paths.baselinePath, deltaPlanPath: planPath, applyReceiptPath: applyPath,
-      acceptancePath, proposedRolloutId: "post-append-candidate-r2" }), /conservative checkpoint shape/);
+      acceptancePath, proposedRolloutId: "post-append-candidate-r2" }), /conservative delta shape/);
   } finally {
     await rm(paths.root, { recursive: true, force: true });
   }

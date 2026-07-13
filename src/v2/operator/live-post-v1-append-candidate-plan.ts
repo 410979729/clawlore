@@ -7,6 +7,7 @@ import {
   type CompanionDispositionSourceV1,
 } from "./live-candidate-companion-disposition.js";
 import type { LiveV1AppendDeltaApplyReceiptV1 } from "./live-v1-append-delta-apply.js";
+import type { LiveV1AppendDeltaAcceptanceV1 } from "./live-v1-append-delta-acceptance.js";
 import type { LiveV1AppendDeltaPlanReceiptV1 } from "./live-v1-append-delta-plan.js";
 
 const require = createRequire(import.meta.url);
@@ -71,46 +72,6 @@ interface PriorCandidatePlanV1 {
     finalRecallCutoverEnabled: false;
   };
   [key: string]: unknown;
-}
-
-interface DeltaAcceptanceV1 {
-  schemaVersion: 1;
-  phase: "clawlore-v2-live-v1-append-delta-acceptance";
-  rolloutId: string;
-  status: "pass";
-  planDigest: string;
-  source: { v1Rows: number; v2Rows: number; sourceLogicalDigestUnchanged: true };
-  delta: {
-    rows: number;
-    reflectionSummaryRows: number;
-    operationalCheckpointRows: number;
-    candidateRows: number;
-    unverifiedRows: number;
-    legacyIdentityDebtRows: number;
-  };
-  preserved: {
-    existingCanonicalRowsChanged: 0;
-    existingLifecycleRowsChanged: 0;
-    existingVerificationRowsChanged: 0;
-    existingEvidenceRowsChanged: 0;
-  };
-  lifecycle: { activeRows: number; candidateRows: number; archivedRows: number };
-  projections: {
-    compatibilityRows: number;
-    ftsRows: number;
-    vectorRows: number;
-    relationRows: number;
-    newProcessedOutboxRows: number;
-    pendingOutboxRows: 0;
-  };
-  database: { integrity: "ok"; foreignKeyViolations: 0; v1DoctorHealthy: true; sqlVectorScopeMatch: true };
-  runtime: {
-    v1FallbackReads: true;
-    existingCandidateLifecycleMutationEnabled: false;
-    contextEngineEnabled: false;
-    promptMutationEnabled: false;
-    finalRecallCutoverEnabled: false;
-  };
 }
 
 export interface LivePostV1AppendCandidatePlanV1 extends PriorCandidatePlanV1 {
@@ -208,8 +169,14 @@ function validateControls(
   plan: LiveV1AppendDeltaPlanReceiptV1,
   planSha256: string,
   apply: LiveV1AppendDeltaApplyReceiptV1,
-  acceptance: DeltaAcceptanceV1,
+  acceptance: LiveV1AppendDeltaAcceptanceV1,
 ): void {
+  const reflectionRows = plan.proposed.classifications.reflection_summary ?? 0;
+  const checkpointRows = plan.proposed.classifications.operational_checkpoint ?? 0;
+  const supportedClassifications = Object.entries(plan.proposed.classifications)
+    .filter(([, rows]) => rows !== 0)
+    .every(([classification]) => classification === "reflection_summary"
+      || classification === "operational_checkpoint");
   if (
     plan.schemaVersion !== 1
     || plan.phase !== "clawlore-v1-append-delta-plan"
@@ -221,15 +188,16 @@ function validateControls(
     || plan.baseline.candidatePlanDigest !== prior.candidatePromotionPlan.planDigest
     || plan.baseline.candidateRows !== prior.source.candidateRows
     || plan.source.v2Rows !== prior.source.v2Rows
-    || plan.source.deltaRows !== 1
-    || plan.proposed.rows.length !== 1
-    || plan.proposed.candidateRows !== 1
+    || plan.source.deltaRows <= 0
+    || plan.proposed.rows.length !== plan.source.deltaRows
+    || plan.proposed.candidateRows !== plan.source.deltaRows
     || plan.proposed.activeRows !== 0
     || plan.proposed.archivedRows !== 0
-    || plan.proposed.classifications.operational_checkpoint !== 1
-    || plan.proposed.verifications.unverified !== 1
-    || plan.proposed.verificationDebt.legacy_identity !== 1
-    || plan.proposed.reviewRequiredRows !== 1
+    || !supportedClassifications
+    || reflectionRows + checkpointRows !== plan.source.deltaRows
+    || plan.proposed.verifications.unverified !== plan.source.deltaRows
+    || plan.proposed.verificationDebt.legacy_identity !== plan.source.deltaRows
+    || plan.proposed.reviewRequiredRows !== plan.source.deltaRows
     || plan.proposed.invalidMetadataRows !== 0
     || plan.decision.deltaWriteReady !== true
     || plan.authorizesDeltaWrite !== false
@@ -240,10 +208,10 @@ function validateControls(
     || apply.planDigest !== plan.proposed.planDigest
     || apply.planSha256 !== planSha256
     || apply.v2.beforeRows !== prior.source.v2Rows
-    || apply.v2.afterRows !== prior.source.v2Rows + 1
-    || apply.v2.deltaRows !== 1
+    || apply.v2.afterRows !== prior.source.v2Rows + plan.source.deltaRows
+    || apply.v2.deltaRows !== plan.source.deltaRows
     || apply.v2.activeRows !== prior.source.activeRows
-    || apply.v2.candidateRows !== prior.source.candidateRows + 1
+    || apply.v2.candidateRows !== prior.source.candidateRows + plan.source.deltaRows
     || apply.v2.archivedRows !== prior.source.archivedRows
     || apply.v2.existingCanonicalRowsChanged !== 0
     || apply.v2.existingLifecycleRowsChanged !== 0
@@ -256,11 +224,12 @@ function validateControls(
     || acceptance.status !== "pass"
     || acceptance.rolloutId !== apply.rolloutId
     || acceptance.planDigest !== apply.planDigest
-    || acceptance.delta.rows !== 1
-    || acceptance.delta.operationalCheckpointRows !== 1
-    || acceptance.delta.candidateRows !== 1
-    || acceptance.delta.unverifiedRows !== 1
-    || acceptance.delta.legacyIdentityDebtRows !== 1
+    || acceptance.delta.rows !== plan.source.deltaRows
+    || acceptance.delta.reflectionSummaryRows !== reflectionRows
+    || acceptance.delta.operationalCheckpointRows !== checkpointRows
+    || acceptance.delta.candidateRows !== plan.source.deltaRows
+    || acceptance.delta.unverifiedRows !== plan.source.deltaRows
+    || acceptance.delta.legacyIdentityDebtRows !== plan.source.deltaRows
     || acceptance.preserved.existingCanonicalRowsChanged !== 0
     || acceptance.preserved.existingLifecycleRowsChanged !== 0
     || acceptance.preserved.existingVerificationRowsChanged !== 0
@@ -292,7 +261,7 @@ export function createLivePostV1AppendCandidatePlanV1(input: {
   validatePrior(loadedPrior.value);
   const loadedPlan = privateJson<LiveV1AppendDeltaPlanReceiptV1>(input.deltaPlanPath);
   const loadedApply = privateJson<LiveV1AppendDeltaApplyReceiptV1>(input.applyReceiptPath);
-  const loadedAcceptance = privateJson<DeltaAcceptanceV1>(input.acceptancePath);
+  const loadedAcceptance = privateJson<LiveV1AppendDeltaAcceptanceV1>(input.acceptancePath);
   validateControls(loadedPrior.value, loadedPrior.sha256, loadedPlan.value, loadedPlan.sha256,
     loadedApply.value, loadedAcceptance.value);
   const priorHashes = new Set(loadedPrior.value.candidatePromotionPlan.rows.map((row) => row.itemIdSha256));
@@ -327,13 +296,16 @@ export function createLivePostV1AppendCandidatePlanV1(input: {
     if (missingLegacyRowsForV2 !== 0 || unmirroredV1Rows !== 0) {
       throw new Error("post-append candidate source is not converged");
     }
-    const rows = db.prepare(`SELECT i.item_id,i.lifecycle,i.verification,i.address_json,s.evidence_json
+    const rows = db.prepare(`SELECT i.item_id,i.content,i.lifecycle,i.verification,i.address_json,
+      s.external_id,s.evidence_json
       FROM memory_items i JOIN memory_sources s ON s.revision_id=i.current_revision_id
       WHERE i.lifecycle='candidate' ORDER BY i.item_id,s.source_id`).all() as Array<{
       item_id: string;
+      content: string;
       lifecycle: string;
       verification: string;
       address_json: string;
+      external_id: string;
       evidence_json: string;
     }>;
     const liveHashes = rows.map((row) => hash(row.item_id));
@@ -343,15 +315,23 @@ export function createLivePostV1AppendCandidatePlanV1(input: {
       throw new Error("prior candidate set is not preserved after append");
     }
     const addedRows = rows.filter((row) => !priorHashes.has(hash(row.item_id)));
-    if (addedRows.length !== 1) throw new Error("append rebase is not the exact one-row lane");
+    if (addedRows.length !== loadedPlan.value.source.deltaRows) {
+      throw new Error("append rebase is not the exact accepted delta lane");
+    }
+    const plannedByLegacyId = new Map(loadedPlan.value.proposed.rows
+      .map((row) => [row.legacyIdSha256, row]));
     added = addedRows.map((row) => {
       const evidence = parseRecord(row.evidence_json);
       const address = parseRecord(row.address_json);
+      const planned = plannedByLegacyId.get(hash(row.external_id));
       if (row.lifecycle !== "candidate" || row.verification !== "unverified"
-        || evidence.classification !== "operational_checkpoint"
+        || !planned
+        || hash(row.content) !== planned.contentSha256
+        || hash(row.address_json) !== planned.addressSha256
+        || evidence.classification !== planned.classification
         || evidence.verificationDebt !== "legacy_identity" || evidence.reviewRequired !== true
         || evidence.registryResolvedEvidenceV1 !== undefined || address.principalId !== "legacy:unresolved") {
-        throw new Error("appended candidate is not the accepted conservative checkpoint shape");
+        throw new Error("appended candidate is not the accepted conservative delta shape");
       }
       return {
         itemIdSha256: hash(row.item_id),
@@ -403,7 +383,7 @@ export function createLivePostV1AppendCandidatePlanV1(input: {
       applyReceiptSha256: loadedApply.sha256,
       acceptanceSha256: loadedAcceptance.sha256,
       priorBaselineSha256: loadedPrior.sha256,
-      appendedCandidateRows: 1,
+      appendedCandidateRows: added.length,
       preservedCandidateRows: loadedPrior.value.source.candidateRows,
       addedItemIdSha256: added.map((row) => row.itemIdSha256),
     },

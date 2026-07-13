@@ -14,6 +14,8 @@ const { TRUTH_V2_SCHEMA_SQL } = jiti("../src/v2/storage/sqlite-truth-v2.ts");
 const { inspectLegacySqliteSnapshotV2 } = jiti("../src/v2/operator/legacy-v1-snapshot.ts");
 const { createLiveV1AppendDeltaPlanV1 } = jiti("../src/v2/operator/live-v1-append-delta-plan.ts");
 const { executeLiveV1AppendDeltaV1 } = jiti("../src/v2/operator/live-v1-append-delta-apply.ts");
+const { createLiveV1AppendDeltaAcceptanceV1 } =
+  jiti("../src/v2/operator/live-v1-append-delta-acceptance.ts");
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
@@ -220,6 +222,37 @@ test("append-only V1 delta writes candidate truth and converged projections", as
     assert.equal(rolloutColumns.includes("approval_sha256"), false);
     db.close();
     await assert.rejects(() => execute(paths), /no longer matches|already|coverage/);
+  } finally {
+    await rm(paths.root, { recursive: true, force: true });
+  }
+});
+
+test("append-only V1 delta acceptance binds every migrated row to the redacted plan", async () => {
+  const paths = await fixture();
+  try {
+    const receipt = await execute(paths);
+    const applyPath = join(paths.root, "apply.json");
+    await privateJson(applyPath, receipt);
+    const acceptance = await createLiveV1AppendDeltaAcceptanceV1({
+      sourcePath: paths.source,
+      planPath: paths.planPath,
+      applyReceiptPath: applyPath,
+      now: () => new Date("2026-07-12T15:05:00.000Z"),
+    });
+    assert.equal(acceptance.status, "pass");
+    assert.equal(acceptance.delta.rows, 1);
+    assert.equal(acceptance.delta.reflectionSummaryRows, 1);
+    assert.equal(acceptance.delta.operationalCheckpointRows, 0);
+    assert.equal(acceptance.lifecycle.candidateRows, 2);
+    assert.equal(acceptance.projections.vectorRows, 2);
+    const db = new DatabaseSync(paths.source);
+    db.prepare("UPDATE memory_items SET content='drifted' WHERE item_id='legacy:delta'").run();
+    db.close();
+    await assert.rejects(() => createLiveV1AppendDeltaAcceptanceV1({
+      sourcePath: paths.source,
+      planPath: paths.planPath,
+      applyReceiptPath: applyPath,
+    }), /redacted plan binding/);
   } finally {
     await rm(paths.root, { recursive: true, force: true });
   }
