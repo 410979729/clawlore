@@ -52,6 +52,7 @@
     "smoke:clawlore-phase7g-controls": "node scripts/clawlore-phase7g-rollout-controls-smoke.mjs",
     "preview:clawlore-phase7g-live": "node scripts/clawlore-phase7g-live-preview.mjs",
     "preview:clawlore-candidate-evidence": "node scripts/clawlore-candidate-evidence-remediation.mjs",
+    "preview:clawlore-source-lineage": "node scripts/clawlore-source-lineage-receipt-plan.mjs",
     "preview:clawlore-evidence-assignment": "node scripts/clawlore-evidence-assignment-plan.mjs",
     "preview:clawlore-post-assignment-candidates": "node scripts/clawlore-post-assignment-candidate-plan.mjs",
     "preview:clawlore-v1-append-delta": "node scripts/clawlore-v1-append-delta-plan.mjs",
