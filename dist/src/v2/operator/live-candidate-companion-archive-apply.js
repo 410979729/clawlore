@@ -375,3 +375,130 @@ export async function executeLiveCandidateCompanionArchiveV1(input) {
         },
     };
 }
+export function inspectLiveCandidateCompanionArchiveV1(input) {
+    const loadedPlan = privateJson(input.planPath);
+    const plan = validateLiveCandidateCompanionDispositionPlanV1(loadedPlan.value, input.planDigest);
+    const loadedApply = privateJson(input.applyReceiptPath);
+    const apply = loadedApply.value;
+    if (apply?.schemaVersion !== 1
+        || apply.phase !== "clawlore-candidate-companion-soft-archive-live-apply"
+        || apply.status !== "applied"
+        || apply.planDigest !== plan.planDigest
+        || apply.planSha256 !== loadedPlan.sha256
+        || apply.archive.targetRows !== 3
+        || apply.archive.candidateRowsArchived !== 3
+        || apply.archive.currentContentRowsChanged !== 0
+        || apply.archive.currentVerificationRowsChanged !== 0
+        || apply.archive.addressRowsChanged !== 0
+        || apply.archive.aclRowsChanged !== 0
+        || apply.archive.nonTargetRowsChanged !== 0
+        || Object.values(apply.projections).some((value) => value !== 0)
+        || apply.database.integrity !== "ok"
+        || apply.database.foreignKeyViolations !== 0)
+        throw new Error("companion archive apply receipt is invalid or outside the exact three-row lane");
+    const { DatabaseSync } = require("node:sqlite");
+    const db = new DatabaseSync(input.sourcePath, { readOnly: true });
+    try {
+        db.exec("PRAGMA query_only=ON; PRAGMA busy_timeout=10000;");
+        const source = companionDispositionSourceStateV1(db);
+        if (!sameCompanionDispositionSourceV1(source, apply.sourceAfter)) {
+            throw new Error("live source no longer matches the companion archive apply receipt");
+        }
+        const allRows = db.prepare(`SELECT i.item_id,i.current_revision_id,i.content,i.category,i.lifecycle,i.verification,
+      r.lifecycle AS revision_lifecycle,r.verification AS revision_verification,
+      COALESCE((SELECT s.evidence_json FROM memory_sources s WHERE s.revision_id=i.current_revision_id
+        ORDER BY s.source_id LIMIT 1),'{}') AS evidence_json
+      FROM memory_items i JOIN memory_revisions r ON r.revision_id=i.current_revision_id`).all();
+        const byHash = new Map(allRows.map((row) => [hash(String(row.item_id)), row]));
+        let archivedCompanionRows = 0;
+        let preservedRepresentativeRows = 0;
+        let validDispositionReceiptRows = 0;
+        let supersedesRelationRows = 0;
+        let archivedEventRows = 0;
+        let projectionBindingRows = 0;
+        for (const planned of plan.rows) {
+            const companion = byHash.get(planned.companionItemIdSha256);
+            const representative = byHash.get(planned.representativeItemIdSha256);
+            if (!companion || !representative)
+                throw new Error("companion archive postcheck target mapping is incomplete");
+            if (companion.lifecycle !== "archived"
+                || companion.verification !== "unverified"
+                || companion.revision_lifecycle !== "archived"
+                || companion.revision_verification !== "unverified"
+                || hash(String(companion.content)) !== planned.companionContentDigest
+                || String(companion.category) !== planned.category)
+                throw new Error("companion archive postcheck archived row is invalid");
+            archivedCompanionRows += 1;
+            if (representative.lifecycle !== "candidate"
+                || representative.verification !== "unverified"
+                || hash(String(representative.current_revision_id)) !== planned.representativeCurrentRevisionIdSha256
+                || hash(String(representative.content)) !== planned.representativeContentDigest)
+                throw new Error("companion archive postcheck representative was not preserved");
+            preservedRepresentativeRows += 1;
+            const evidence = parseRecord(String(companion.evidence_json));
+            const disposition = evidence.companionDispositionReceiptV1;
+            if (disposition?.rolloutId !== apply.rolloutId
+                || disposition.planDigest !== plan.planDigest
+                || disposition.factKey !== planned.factKey
+                || disposition.representativeItemIdSha256 !== planned.representativeItemIdSha256
+                || disposition.representativeCurrentRevisionIdSha256 !== planned.representativeCurrentRevisionIdSha256
+                || disposition.representativeRewriteReceiptDigest !== planned.representativeRewriteReceiptDigest
+                || disposition.archivedContentDigest !== planned.companionContentDigest
+                || disposition.sourceLineageReceiptDigest !== planned.companionSourceLineageReceiptDigest
+                || disposition.preservesContent !== true
+                || disposition.preservesVerification !== true
+                || disposition.preservesAddress !== true
+                || disposition.preservesProjections !== true)
+                throw new Error("companion archive postcheck disposition receipt is invalid");
+            validDispositionReceiptRows += 1;
+            const relation = scalar(db, `SELECT COUNT(*) FROM memory_relations
+        WHERE from_revision_id=? AND relation_type='supersedes'`, String(companion.current_revision_id));
+            if (relation !== 1)
+                throw new Error("companion archive postcheck supersedes relation is invalid");
+            supersedesRelationRows += relation;
+            const events = scalar(db, `SELECT COUNT(*) FROM memory_events
+        WHERE item_id=? AND revision_id=? AND event_type='archived' AND reason=?`, String(companion.item_id), String(companion.current_revision_id), apply.rolloutId);
+            if (events !== 1)
+                throw new Error("companion archive postcheck archived event is invalid");
+            archivedEventRows += events;
+            const projections = [
+                scalar(db, "SELECT COUNT(*) FROM memory_fts_compat_v2 WHERE item_id=?", String(companion.item_id)),
+                scalar(db, "SELECT COUNT(*) FROM memory_fts_v2 WHERE item_id=?", String(companion.item_id)),
+                scalar(db, "SELECT COUNT(*) FROM memory_vector_projection_v2 WHERE item_id=?", String(companion.item_id)),
+                scalar(db, "SELECT COUNT(*) FROM memory_relation_projection_v2 WHERE item_id=?", String(companion.item_id)),
+            ];
+            if (projections.some((count) => count !== 1))
+                throw new Error("companion archive postcheck projection binding is invalid");
+            projectionBindingRows += 1;
+        }
+        const integrity = String(Object.values(db.prepare("PRAGMA integrity_check").get())[0]);
+        const foreignKeyViolations = db.prepare("PRAGMA foreign_key_check").all().length;
+        if (integrity !== "ok" || foreignKeyViolations !== 0)
+            throw new Error("companion archive postcheck database integrity failed");
+        return {
+            schemaVersion: 1,
+            phase: "clawlore-candidate-companion-soft-archive-postcheck",
+            verifiedAt: (input.now ?? (() => new Date()))().toISOString(),
+            status: "pass",
+            rolloutId: apply.rolloutId,
+            planDigest: plan.planDigest,
+            planSha256: loadedPlan.sha256,
+            applyReceiptSha256: loadedApply.sha256,
+            source,
+            targetBinding: {
+                archivedCompanionRows: 3,
+                preservedRepresentativeRows: 3,
+                validDispositionReceiptRows: 3,
+                supersedesRelationRows: 3,
+                archivedEventRows: 3,
+                projectionBindingRows: 3,
+                mismatches: 0,
+            },
+            database: { integrity: "ok", foreignKeyViolations: 0 },
+            runtime: apply.runtime,
+        };
+    }
+    finally {
+        db.close();
+    }
+}

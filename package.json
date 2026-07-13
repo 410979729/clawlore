@@ -61,6 +61,8 @@
     "preview:clawlore-companion-disposition": "node scripts/clawlore-candidate-companion-disposition.mjs",
     "accept:clawlore-companion-disposition": "node scripts/clawlore-candidate-companion-disposition-acceptance.mjs",
     "rollout:clawlore-companion-archive": "node scripts/clawlore-live-candidate-companion-archive.mjs",
+    "accept:clawlore-companion-archive": "node scripts/clawlore-candidate-companion-archive-postcheck.mjs",
+    "preview:clawlore-post-companion-archive-candidates": "node scripts/clawlore-post-companion-archive-candidate-plan.mjs",
     "preview:clawlore-source-lineage": "node scripts/clawlore-source-lineage-receipt-plan.mjs",
     "rollout:clawlore-source-lineage": "node scripts/clawlore-live-source-lineage-receipt.mjs",
     "preview:clawlore-evidence-assignment": "node scripts/clawlore-evidence-assignment-plan.mjs",

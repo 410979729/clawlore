@@ -20,6 +20,10 @@ const {
 } = jiti("../src/v2/operator/live-candidate-companion-disposition.ts");
 const { executeLiveCandidateCompanionArchiveV1 } =
   jiti("../src/v2/operator/live-candidate-companion-archive-apply.ts");
+const { inspectLiveCandidateCompanionArchiveV1 } =
+  jiti("../src/v2/operator/live-candidate-companion-archive-apply.ts");
+const { createLivePostCompanionArchiveCandidatePlanV1 } =
+  jiti("../src/v2/operator/live-post-companion-archive-candidate-plan.ts");
 const { inspectLegacySqliteSnapshotV2 } =
   jiti("../src/v2/operator/legacy-v1-snapshot.ts");
 
@@ -591,6 +595,70 @@ test("live companion disposition fails closed on control tamper or target drift"
 test("exact companion archive creates three archived revisions and preserves truth projections", async () => {
   const paths = await applyFixture();
   try {
+    const priorBaselinePath = join(paths.root, "prior-baseline.json");
+    const priorRows = facts.flatMap((fact) => [
+      sha256(`legacy:${fact.key}:representative`),
+      sha256(`legacy:${fact.key}:companion`),
+    ]).sort().map((itemIdSha256) => ({
+      itemIdSha256,
+      disposition: "hold_candidate",
+      reasonCodes: ["operator_review_required"],
+    }));
+    await writePrivateJson(priorBaselinePath, {
+      schemaVersion: 1,
+      phase: "clawlore-post-assignment-candidate-plan",
+      createdAt: now,
+      proposedRolloutId: "candidate-baseline-before-archive-r1",
+      readOnly: true,
+      queryOnly: true,
+      emitsMemoryContent: false,
+      emitsTranscriptContent: false,
+      emitsRawIdentifiers: false,
+      assignment: {},
+      source: {
+        ...sourceState(),
+        baselineV1Rows: 6,
+        unmirroredV1Rows: 0,
+        missingLegacyRowsForV2: 0,
+        candidateBaselineUnchanged: true,
+        sourceUnchangedDuringPlan: true,
+      },
+      candidatePromotionPlan: {
+        schemaVersion: 1,
+        phase: "clawlore-candidate-promotion-review-plan",
+        readOnly: true,
+        emitsItemIds: false,
+        authorizesLiveMutation: false,
+        automaticPromotionRows: 0,
+        counts: {
+          eligible_for_promotion: 0,
+          hold_candidate: 6,
+          quarantine: 0,
+          preserve_archived: 0,
+        },
+        rows: priorRows,
+        planDigest: sha256(JSON.stringify(priorRows)),
+      },
+      decision: {
+        eligibleRows: 0,
+        lifecycleRolloutSelectable: false,
+        finalRecallCutoverBlockedByUnmirroredV1: false,
+        automaticPromotionRows: 0,
+      },
+      authorizesLifecycleMutation: false,
+      authorizesContextEngine: false,
+      authorizesPromptMutation: false,
+      authorizesFinalRecall: false,
+      liveMutation: {
+        evidenceRowsChanged: 0,
+        lifecycleRowsChanged: 0,
+        verificationRowsChanged: 0,
+        addressRowsChanged: 0,
+        contextEngineEnabled: false,
+        promptMutationEnabled: false,
+        finalRecallCutoverEnabled: false,
+      },
+    });
     const receipt = await executeLiveCandidateCompanionArchiveV1({
       sourcePath: paths.source,
       planPath: paths.planPath,
@@ -616,6 +684,36 @@ test("exact companion archive creates three archived revisions and preserves tru
     assert.equal(db.prepare("SELECT COUNT(*) AS rows FROM memory_vector_projection_v2").get().rows, 6);
     assert.equal(db.prepare("SELECT COUNT(*) AS rows FROM projection_outbox").get().rows, 0);
     db.close();
+    const applyReceiptPath = join(paths.root, "apply-receipt.json");
+    await writePrivateJson(applyReceiptPath, receipt);
+    const postcheck = inspectLiveCandidateCompanionArchiveV1({
+      sourcePath: paths.source,
+      planPath: paths.planPath,
+      applyReceiptPath,
+      planDigest: paths.plan.planDigest,
+      now: () => new Date("2026-07-13T10:04:00.000Z"),
+    });
+    assert.equal(postcheck.targetBinding.archivedCompanionRows, 3);
+    assert.equal(postcheck.targetBinding.preservedRepresentativeRows, 3);
+    assert.equal(postcheck.targetBinding.validDispositionReceiptRows, 3);
+    assert.equal(postcheck.targetBinding.mismatches, 0);
+    const postcheckPath = join(paths.root, "postcheck.json");
+    await writePrivateJson(postcheckPath, postcheck);
+    const rebased = createLivePostCompanionArchiveCandidatePlanV1({
+      sourcePath: paths.source,
+      priorBaselinePath,
+      companionPlanPath: paths.planPath,
+      applyReceiptPath,
+      postcheckPath,
+      planDigest: paths.plan.planDigest,
+      proposedRolloutId: "candidate-baseline-after-archive-r1",
+      now: () => new Date("2026-07-13T10:05:00.000Z"),
+    });
+    assert.equal(rebased.source.candidateRows, 3);
+    assert.equal(rebased.source.archivedRows, 3);
+    assert.equal(rebased.candidatePromotionPlan.counts.hold_candidate, 3);
+    assert.equal(rebased.archiveRebase.archivedCandidateRows, 3);
+    assert.equal(rebased.archiveRebase.removedItemIdSha256.length, 3);
   } finally {
     await rm(paths.root, { recursive: true, force: true });
   }
