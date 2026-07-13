@@ -152,6 +152,13 @@
   to 983. The current 663-candidate baseline therefore binds both non-overlapping
   r4 and r5 delta controls, remains 0 eligible / 507 hold / 156 quarantine, and
   grants no lifecycle, ContextEngine, prompt, or final-recall authority.
+- Phase 7Y adds the next stage as query-only structural content triage. The
+  exact 206-row plan reuses capture-safety, length, and normalized-duplicate
+  signals while emitting only hashes and review metadata. Live findings are
+  151 operational-trace rejects, 2 safe duplicate rows, and 53 safe unique rows
+  awaiting manual semantics; no row is mutation-ready. Rejection, canonical
+  selection, rewrite, archive, verification, and lifecycle decisions remain
+  separate future controls and cannot be inferred from this plan.
 
 ## Naming matrix
 

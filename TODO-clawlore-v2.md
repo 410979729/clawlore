@@ -727,6 +727,31 @@ overlap below 0.8.
       from source lineage and do not enable lifecycle, ContextEngine, prompt
       mutation, or final recall.
 
+## Phase 7Y — Query-only candidate content-quality review
+
+- [x] Add a redacted content-quality planner bound to the exact Phase 7X
+      remediation, live source counts, current revision/content digests, and
+      structurally valid source-lineage receipts.
+- [x] Reuse capture-safety, the 4,000-character admission boundary, and exact
+      normalized duplicate grouping without emitting memory text, transcript
+      text, or raw identifiers.
+- [x] Fix false drift caused by comparing unordered semantic state with ordinary
+      JSON serialization; compare source fields explicitly and retain a live-
+      order regression fixture.
+- [x] Generate the mode-0600 live plan for 206 rows: 151 capture-safety reject
+      review / 0 safe oversized review / 2 safe duplicate review / 53 manual
+      semantic review. Independent signals include 22 duplicate rows in 9
+      groups and 10 over-limit rows; mutation-ready remains 0.
+- [x] Prove all 206 item/revision/content/lineage digests match live truth and
+      the plan contains no raw content or raw item/revision ids. V1/V2 and all
+      projections remain 983, active 0, pending outbox 0.
+- [x] Pass focused 7/7, full 208/208, typecheck/build/vector/golden/runtime/
+      release gates. Closing package scan is 438 files.
+- [ ] Adjudicate the 151 unsafe rows, 2 safe duplicate rows, and 53 clean rows
+      as separate operator batches. Any rewrite/archive/verification/lifecycle
+      action requires a new exact plan and must remain isolated from runtime
+      cutover.
+
 ## Phase 0 verification
 
 - Focused Memory Address V2 tests: 8/8 PASS.
