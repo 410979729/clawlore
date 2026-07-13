@@ -133,6 +133,14 @@
   encrypted snapshot before any bounded delta apply; afterward the candidate,
   remediation, and source-lineage plans must be regenerated. The old 206-row
   digest cannot be reused across this drift.
+- Phase 7W completed that bounded sequence. The fresh snapshot restored and
+  verified all 982 V1 rows, the exact r4 transaction appended one candidate-only
+  V2 row, and V1/V2 plus all four projections converged at 982. Candidate
+  replanning exposed that assignment evidence spans two immutable rollout
+  generations; the planner now requires the complete, non-overlapping plan/
+  acceptance chain and rejects incomplete chains. The regenerated 662-row
+  baseline remains 0 eligible, and the new 206-row source-lineage plan is still
+  query-only and non-authorizing.
 
 ## Naming matrix
 

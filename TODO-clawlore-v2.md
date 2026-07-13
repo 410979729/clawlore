@@ -674,9 +674,31 @@ overlap below 0.8.
       checkpoint, digest
       `cef0b285d178bfdf0fdd27a518a184ee51ae121c4021de2ba715de31aa2c6c3a`;
       it authorizes no delta write or runtime cutover.
-- [ ] If the live write is selected, create a fresh encrypted snapshot, replay
+- [x] When Joy continued the live write, create a fresh encrypted snapshot, replay
       the exact one-row r4 delta, restore parity, then regenerate the candidate/
       remediation/source-lineage plans before considering the 206-row apply.
+
+## Phase 7W — One-row convergence and assignment-control chain
+
+- [x] Restore-verify a fresh encrypted 982-row V1 snapshot, then replay the
+      exact r4 delta digest `cef0b285...2c6c3a` and append only one operational
+      checkpoint as candidate/unverified/legacy-identity debt.
+- [x] Prove V1/V2 and compatibility/current FTS/vector/relation projections
+      converge at 982, pending outbox remains 0, integrity is `ok`, and existing
+      canonical/lifecycle/verification/evidence changes remain 0.
+- [x] Fix the post-assignment planner to validate a non-overlapping chain of
+      exact assignment plan/acceptance controls. The live baseline now proves
+      all 91 evidence rows across the 90-row Phase 7M and 1-row Phase 7S
+      controls; an incomplete or overlapping chain fails closed.
+- [x] Regenerate the 662-candidate baseline (0 eligible / 506 hold / 156
+      quarantine), remediation (78 assignment / 428 evidence / 156 quarantine),
+      and 206-row source-lineage plan with 0 incomplete rows. The new lineage
+      digest is `6754fa858dd6c9b3ffefe312651f15de3d92d368c6e7f92d97bac474e0424c15`.
+- [x] Pass focused 15/15, full 204/204, typecheck/build/module/runtime/ranking/
+      control/vector/golden/release gates; closing package scan 430 files.
+- [ ] Keep the 206-row source-lineage apply separate: the regenerated plan is
+      query-only and authorizes no evidence, lifecycle, verification, prompt,
+      ContextEngine, or final-recall mutation.
 
 ## Phase 0 verification
 
