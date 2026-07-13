@@ -153,3 +153,23 @@ test("source lineage plan fails closed on remediation or live drift", async () =
     await rm(paths.root, { recursive: true, force: true });
   }
 });
+
+test("source lineage plan rejects a stale remediation after a receipt was attached", async () => {
+  const paths = await fixture();
+  try {
+    const db = new DatabaseSync(paths.source);
+    const row = db.prepare("SELECT evidence_json FROM memory_sources WHERE source_id='source:reflection'").get();
+    const evidence = JSON.parse(row.evidence_json);
+    evidence.sourceLineageReceiptV1 = { schemaVersion: 1 };
+    db.prepare("UPDATE memory_sources SET evidence_json=? WHERE source_id='source:reflection'")
+      .run(JSON.stringify(evidence));
+    db.close();
+    assert.throws(() => createLiveSourceLineageReceiptPlanV1({
+      sourcePath: paths.source,
+      remediationPreviewPath: paths.remediation,
+      proposedRolloutId: "clawlore-v2-source-lineage-20260713-r1",
+    }), /already has a receipt; regenerate remediation preview/);
+  } finally {
+    await rm(paths.root, { recursive: true, force: true });
+  }
+});

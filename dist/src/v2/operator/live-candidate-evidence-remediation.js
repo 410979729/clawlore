@@ -111,6 +111,52 @@ function assignedEvidenceKind(row) {
     const kind = evidence.evidenceKind;
     return kind === "direct-principal" || kind === "conversation-boundary" ? kind : undefined;
 }
+function sourceLineageReceiptState(row, metadata) {
+    const raw = parseRecord(row.evidence_json).sourceLineageReceiptV1;
+    if (raw === undefined)
+        return "absent";
+    if (!raw || typeof raw !== "object" || Array.isArray(raw))
+        return "invalid";
+    const receipt = raw;
+    const digest = (value) => typeof value === "string" && /^[a-f0-9]{64}$/i.test(value);
+    const recordedAt = typeof receipt.recordedAt === "string" ? Date.parse(receipt.recordedAt) : Number.NaN;
+    return receipt.schemaVersion === 1
+        && receipt.evidenceKind === "source-lineage-receipt"
+        && receipt.supportsSourceLineageOnly === true
+        && receipt.authorizesLifecycleChange === false
+        && receipt.authorizesVerificationChange === false
+        && receipt.preservesLifecycle === true
+        && receipt.preservesVerification === true
+        && receipt.classification === classification(row, metadata)
+        && typeof receipt.rolloutId === "string"
+        && Boolean(receipt.rolloutId.trim())
+        && digest(receipt.planDigest)
+        && digest(receipt.proposedReceiptPayloadDigest)
+        && digest(receipt.sourceEvidenceDigest)
+        && digest(receipt.eventEvidenceDigest)
+        && Number.isFinite(recordedAt)
+        ? "valid"
+        : "invalid";
+}
+function derivedSystemLane(row, metadata) {
+    const receipt = sourceLineageReceiptState(row, metadata);
+    if (receipt === "valid") {
+        return {
+            lane: "source_lineage_content_review",
+            requiredActions: ["review_content_quality", "operator_review", "keep_candidate_until_verified"],
+        };
+    }
+    if (receipt === "invalid") {
+        return {
+            lane: "derived_system_evidence_review",
+            requiredActions: ["repair_invalid_source_lineage_receipt", "operator_review", "keep_candidate_until_verified"],
+        };
+    }
+    return {
+        lane: "derived_system_evidence_review",
+        requiredActions: ["attach_source_receipt", "operator_review", "keep_candidate_until_verified"],
+    };
+}
 function laneFor(row, registry) {
     const metadata = parseRecord(row.metadata);
     const references = sessionReferences(metadata);
@@ -153,10 +199,7 @@ function laneFor(row, registry) {
             };
         }
         if (derivedSystem(metadata)) {
-            return {
-                lane: "derived_system_evidence_review",
-                requiredActions: ["attach_source_receipt", "operator_review", "keep_candidate_until_verified"],
-            };
+            return derivedSystemLane(row, metadata);
         }
         if (first.startsWith("agent:")) {
             return {
@@ -183,10 +226,7 @@ function laneFor(row, registry) {
         };
     }
     if (derivedSystem(metadata) || ["reflection_summary", "operational_checkpoint"].includes(kind)) {
-        return {
-            lane: "derived_system_evidence_review",
-            requiredActions: ["attach_source_receipt", "operator_review", "keep_candidate_until_verified"],
-        };
+        return derivedSystemLane(row, metadata);
     }
     return {
         lane: "known_source_evidence_review",
@@ -315,7 +355,7 @@ export function createLiveCandidateEvidenceRemediationPlanV1(input) {
             "registry_private_assignment_review", "registry_conversation_assignment_review",
             "registry_other_boundary_review", "assigned_private_evidence_review",
             "assigned_conversation_evidence_review", "manual_principal_assignment_review",
-            "derived_system_evidence_review", "known_source_evidence_review",
+            "derived_system_evidence_review", "source_lineage_content_review", "known_source_evidence_review",
             "unresolved_session_review", "legacy_provenance_hold_review", "policy_quarantine_review",
             "conflicting_registry_quarantine",
             "legacy_agent_alias_quarantine", "opaque_reference_quarantine",
@@ -331,6 +371,7 @@ export function createLiveCandidateEvidenceRemediationPlanV1(input) {
         const evidenceReviewRows = counts.assigned_private_evidence_review
             + counts.assigned_conversation_evidence_review
             + counts.derived_system_evidence_review
+            + counts.source_lineage_content_review
             + counts.known_source_evidence_review
             + counts.unresolved_session_review
             + counts.legacy_provenance_hold_review;

@@ -201,7 +201,7 @@ test("source-lineage apply writes only exact target receipts and preserves runti
     assert.equal(rows.every((row) => row.lifecycle === "candidate" && row.verification === "unverified"), true);
     assert.equal(JSON.parse(rows.find((row) => row.item_id === "legacy:manual").evidence_json).original, true);
     db.close();
-    await assert.rejects(() => execute(paths), /no longer matches|already exists/);
+    await assert.rejects(() => execute(paths), /no longer matches|already exists|already has a receipt/);
   } finally {
     await rm(paths.root, { recursive: true, force: true });
   }

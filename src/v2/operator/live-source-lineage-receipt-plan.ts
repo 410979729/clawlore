@@ -262,6 +262,9 @@ export function createLiveSourceLineageReceiptPlanV1(input: {
       remediationRows.get(hash(row.item_id))?.lane === "derived_system_evidence_review");
     const rows = targets.map((row) => {
       const evidence = record(row.evidence_json);
+      if ("sourceLineageReceiptV1" in evidence) {
+        throw new Error("source-lineage target already has a receipt; regenerate remediation preview");
+      }
       const kind = classification(evidence);
       const source = sourceEvidence(row, evidence);
       const event = matchingEvent(row, evidence, events);

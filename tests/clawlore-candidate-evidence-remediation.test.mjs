@@ -79,6 +79,26 @@ async function upgradeToCurrentBaseline(paths) {
     db.prepare("UPDATE memory_sources SET evidence_json=? WHERE source_id=?")
       .run(JSON.stringify(evidence), `source:${id}`);
   }
+  const systemRow = db.prepare("SELECT evidence_json FROM memory_sources WHERE source_id='source:system'").get();
+  const systemEvidence = JSON.parse(systemRow.evidence_json);
+  systemEvidence.sourceLineageReceiptV1 = {
+    schemaVersion: 1,
+    evidenceKind: "source-lineage-receipt",
+    supportsSourceLineageOnly: true,
+    authorizesLifecycleChange: false,
+    authorizesVerificationChange: false,
+    classification: "reflection_summary",
+    sourceEvidenceDigest: sha256("source"),
+    eventEvidenceDigest: sha256("event"),
+    rolloutId: "lineage-rollout-r1",
+    planDigest: sha256("lineage-plan"),
+    proposedReceiptPayloadDigest: sha256("lineage-payload"),
+    recordedAt: "2026-07-13T07:42:15.918Z",
+    preservesLifecycle: true,
+    preservesVerification: true,
+  };
+  db.prepare("UPDATE memory_sources SET evidence_json=? WHERE source_id='source:system'")
+    .run(JSON.stringify(systemEvidence));
   db.close();
   const dispositions = {
     direct: "hold_candidate",
@@ -131,6 +151,7 @@ test("candidate evidence remediation creates a redacted query-only workbench", a
     assert.equal(plan.counts.registry_conversation_assignment_review, 1);
     assert.equal(plan.counts.manual_principal_assignment_review, 1);
     assert.equal(plan.counts.derived_system_evidence_review, 1);
+    assert.equal(plan.counts.source_lineage_content_review, 0);
     assert.equal(plan.counts.legacy_agent_alias_quarantine, 1);
     assert.equal(plan.counts.opaque_reference_quarantine, 1);
     assert.equal(plan.counts.unknown_legacy_quarantine, 1);
@@ -182,7 +203,8 @@ test("candidate evidence remediation preserves the current hold/quarantine basel
     assert.equal(plan.counts.assigned_private_evidence_review, 1);
     assert.equal(plan.counts.assigned_conversation_evidence_review, 1);
     assert.equal(plan.counts.manual_principal_assignment_review, 1);
-    assert.equal(plan.counts.derived_system_evidence_review, 1);
+    assert.equal(plan.counts.derived_system_evidence_review, 0);
+    assert.equal(plan.counts.source_lineage_content_review, 1);
     assert.equal(plan.counts.legacy_provenance_hold_review, 1);
     assert.equal(plan.counts.opaque_reference_quarantine, 1);
     assert.equal(plan.counts.unknown_legacy_quarantine, 1);
