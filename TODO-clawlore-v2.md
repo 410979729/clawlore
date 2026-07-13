@@ -752,6 +752,27 @@ overlap below 0.8.
       action requires a new exact plan and must remain isolated from runtime
       cutover.
 
+## Phase 7Z — Query-only capture-safety operator batches
+
+- [x] Add a fail-closed planner bound to the exact owner-only Phase 7Y plan,
+      all 206 current candidate/revision/content/normalized-content/lineage
+      digests, and unchanged V1/V2/projection counts.
+- [x] Split the 151 unsafe operational traces into exact operator batches:
+      20 exact-duplicate trace review / 7 unique oversized rewrite review /
+      109 command-trace rejection review / 15 tool-payload rejection review.
+- [x] Preserve overlapping signals without double counting: 10 total oversized
+      rows, 20 duplicate rows, and 3 rows carrying both signals. Automatic
+      archive and mutation-ready rows remain 0.
+- [x] Prove the mode-0600 plan contains only hashes/review metadata, has 151
+      unique live bindings and 0 mismatches, and emits no raw content or raw
+      item/revision ids.
+- [x] Pass focused capture-safety/content tests 6/6, full 211/211, typecheck,
+      build, vector/golden/runtime/release gates. Closing package scan is 445
+      files.
+- [ ] Make operator decisions for the four batches. Any rejection, rewrite,
+      canonical selection, archive, verification, or lifecycle apply must use
+      a new exact control and cannot be inferred from this review plan.
+
 ## Phase 0 verification
 
 - Focused Memory Address V2 tests: 8/8 PASS.

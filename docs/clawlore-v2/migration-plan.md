@@ -159,6 +159,12 @@
   awaiting manual semantics; no row is mutation-ready. Rejection, canonical
   selection, rewrite, archive, verification, and lifecycle decisions remain
   separate future controls and cannot be inferred from this plan.
+- Phase 7Z isolates the unsafe lane into four query-only operator batches:
+  exact-duplicate operational traces, unique oversized traces needing possible
+  bounded rewrite, command traces, and tool payloads. The plan revalidates all
+  Phase 7Y target digests against live truth and carries no rejection, rewrite,
+  archive, verification, lifecycle, or runtime authority. Batch membership is
+  prioritization for review, not an automatic disposition.
 
 ## Naming matrix
 
