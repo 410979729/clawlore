@@ -93,7 +93,12 @@ verification, lifecycle, ContextEngine, prompt mutation, or final recall.
 - golden recall: 1.0; forbidden violations: 0;
 - scope-recall doctor: `ok=true`, issues 0, SQL/FTS/vector 985/985/985;
 - Gateway: `active/running`, MainPID 328735, NRestarts 1, healthz live;
-- no ClawLore warning/error entry was present in the Phase 8D journal window.
+- no ClawLore warning/error entry was present in the Phase 8D journal window;
+- project repository clean and `WORKSPACE_LAYOUT_OK`;
+- state hygiene remains the pre-existing 70 outside-workspace findings; Phase
+  8D introduced no new category or retained temporary artifact;
+- goal `6b780c84-f205-441d-bdc6-8c24a84435eb` remains `active` with the same
+  objective; it was neither duplicated nor completed.
 
 The first live preview intentionally failed closed on a semantically identical
 projection-count field that used two historical names. The comparison was
