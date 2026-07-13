@@ -53,6 +53,7 @@
     "preview:clawlore-phase7g-live": "node scripts/clawlore-phase7g-live-preview.mjs",
     "preview:clawlore-candidate-evidence": "node scripts/clawlore-candidate-evidence-remediation.mjs",
     "preview:clawlore-content-quality": "node scripts/clawlore-candidate-content-quality-review.mjs",
+    "preview:clawlore-capture-safety-review": "node scripts/clawlore-candidate-capture-safety-review.mjs",
     "preview:clawlore-source-lineage": "node scripts/clawlore-source-lineage-receipt-plan.mjs",
     "rollout:clawlore-source-lineage": "node scripts/clawlore-live-source-lineage-receipt.mjs",
     "preview:clawlore-evidence-assignment": "node scripts/clawlore-evidence-assignment-plan.mjs",

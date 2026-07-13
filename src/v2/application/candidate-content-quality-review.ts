@@ -62,7 +62,7 @@ function hash(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function normalizedContent(value: string): string {
+export function normalizeCandidateContentV1(value: string): string {
   return sanitizeCaptureText(value).replace(/\s+/g, " ").trim().toLowerCase();
 }
 
@@ -136,7 +136,7 @@ export function assessCandidateContentQualityV1(
   const seen = new Set<string>();
   const targetDigests = new Map<string, number>();
   const corpusDigests = new Map<string, number>();
-  for (const content of corpusContents) increment(corpusDigests, hash(normalizedContent(content)));
+  for (const content of corpusContents) increment(corpusDigests, hash(normalizeCandidateContentV1(content)));
   for (const target of targets) {
     if (!target.itemId.trim() || seen.has(target.itemId)) throw new Error("content review item ids must be unique and non-empty");
     if (target.lifecycle !== "candidate" || target.verification !== "unverified") {
@@ -146,11 +146,11 @@ export function assessCandidateContentQualityV1(
       throw new Error("content review requires a source-lineage receipt digest");
     }
     seen.add(target.itemId);
-    increment(targetDigests, hash(normalizedContent(target.content)));
+    increment(targetDigests, hash(normalizeCandidateContentV1(target.content)));
   }
 
   const rows = targets.map((target): CandidateContentQualityReviewRowV1 => {
-    const normalized = normalizedContent(target.content);
+    const normalized = normalizeCandidateContentV1(target.content);
     const normalizedDigest = hash(normalized);
     const safety = evaluateCaptureSafety(target.content);
     const targetDuplicateGroupSize = targetDigests.get(normalizedDigest) ?? 0;

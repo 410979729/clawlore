@@ -3,7 +3,7 @@ import { evaluateCaptureSafety, sanitizeCaptureText, } from "../../capture-safet
 function hash(value) {
     return createHash("sha256").update(value).digest("hex");
 }
-function normalizedContent(value) {
+export function normalizeCandidateContentV1(value) {
     return sanitizeCaptureText(value).replace(/\s+/g, " ").trim().toLowerCase();
 }
 function lengthBand(length) {
@@ -71,7 +71,7 @@ export function assessCandidateContentQualityV1(targets, corpusContents) {
     const targetDigests = new Map();
     const corpusDigests = new Map();
     for (const content of corpusContents)
-        increment(corpusDigests, hash(normalizedContent(content)));
+        increment(corpusDigests, hash(normalizeCandidateContentV1(content)));
     for (const target of targets) {
         if (!target.itemId.trim() || seen.has(target.itemId))
             throw new Error("content review item ids must be unique and non-empty");
@@ -82,10 +82,10 @@ export function assessCandidateContentQualityV1(targets, corpusContents) {
             throw new Error("content review requires a source-lineage receipt digest");
         }
         seen.add(target.itemId);
-        increment(targetDigests, hash(normalizedContent(target.content)));
+        increment(targetDigests, hash(normalizeCandidateContentV1(target.content)));
     }
     const rows = targets.map((target) => {
-        const normalized = normalizedContent(target.content);
+        const normalized = normalizeCandidateContentV1(target.content);
         const normalizedDigest = hash(normalized);
         const safety = evaluateCaptureSafety(target.content);
         const targetDuplicateGroupSize = targetDigests.get(normalizedDigest) ?? 0;
