@@ -50,6 +50,9 @@ function planCore(plan) {
         remediationPlanDigest: plan.remediationPlanDigest,
         remediationPreviewSha256: plan.remediationPreviewSha256,
         sessionsRegistrySha256: plan.sessionsRegistrySha256,
+        ...(plan.targetItemSha256Allowlist
+            ? { targetItemSha256Allowlist: plan.targetItemSha256Allowlist }
+            : {}),
         source: plan.source,
         summary: plan.summary,
         decisions: plan.decisions,
@@ -158,6 +161,7 @@ export async function executeLiveEvidenceAssignmentV1(input) {
         remediationPreviewPath: input.remediationPreviewPath,
         baselinePromotionPreviewPath: input.baselinePromotionPreviewPath,
         proposedRolloutId: input.rolloutId,
+        targetItemSha256Allowlist: plan.value.targetItemSha256Allowlist,
     });
     assertTargetScopedPlanMatch(plan.value, currentPlan);
     const legacyBefore = await inspectLegacySqliteSnapshotV2(input.sourcePath);

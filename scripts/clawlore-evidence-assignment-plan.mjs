@@ -34,6 +34,9 @@ const plan = createLiveEvidenceAssignmentPlanV1({
   remediationPreviewPath: resolve(args["remediation-preview"]),
   baselinePromotionPreviewPath: resolve(args["promotion-baseline"]),
   proposedRolloutId: args["rollout-id"],
+  ...(args["target-item-sha256"] ? {
+    targetItemSha256Allowlist: args["target-item-sha256"].split(",").map((value) => value.trim()),
+  } : {}),
 });
 await mkdir(dirname(receiptPath), { recursive: true });
 await writeFile(receiptPath, `${JSON.stringify(plan, null, 2)}\n`, { flag: "wx", mode: 0o600 });
@@ -49,4 +52,3 @@ process.stdout.write(`${JSON.stringify({
   authorizesEvidenceWrite: plan.authorizesEvidenceWrite,
   authorizesLifecycleMutation: plan.authorizesLifecycleMutation,
 })}\n`);
-

@@ -35,6 +35,9 @@ function planCore(plan) {
         remediationPlanDigest: plan.remediationPlanDigest,
         remediationPreviewSha256: plan.remediationPreviewSha256,
         sessionsRegistrySha256: plan.sessionsRegistrySha256,
+        ...(plan.targetItemSha256Allowlist
+            ? { targetItemSha256Allowlist: plan.targetItemSha256Allowlist }
+            : {}),
         source: plan.source,
         summary: plan.summary,
         decisions: plan.decisions,

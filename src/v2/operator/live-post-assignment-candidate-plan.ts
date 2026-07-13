@@ -53,6 +53,7 @@ interface AssignmentPlanV1 {
   remediationPlanDigest: string;
   remediationPreviewSha256: string;
   sessionsRegistrySha256: string;
+  targetItemSha256Allowlist?: string[];
   source: {
     v1Rows: number;
     v2Rows: number;
@@ -290,6 +291,9 @@ function planCore(plan: AssignmentPlanV1): Record<string, unknown> {
     remediationPlanDigest: plan.remediationPlanDigest,
     remediationPreviewSha256: plan.remediationPreviewSha256,
     sessionsRegistrySha256: plan.sessionsRegistrySha256,
+    ...(plan.targetItemSha256Allowlist
+      ? { targetItemSha256Allowlist: plan.targetItemSha256Allowlist }
+      : {}),
     source: plan.source,
     summary: plan.summary,
     decisions: plan.decisions,

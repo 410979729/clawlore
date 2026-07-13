@@ -50,6 +50,7 @@ export interface EvidenceAssignmentPlanV1 {
   remediationPlanDigest: string;
   remediationPreviewSha256: string;
   sessionsRegistrySha256: string;
+  targetItemSha256Allowlist?: string[];
   source: CandidateEvidenceRemediationPlanV1["source"];
   summary: {
     proposedEvidenceAssignmentRows: number;
@@ -167,10 +168,21 @@ export function createLiveEvidenceAssignmentPlanV1(input: {
   remediationPreviewPath: string;
   baselinePromotionPreviewPath: string;
   proposedRolloutId: string;
+  targetItemSha256Allowlist?: string[];
 }): EvidenceAssignmentPlanV1 {
   if (!/^clawlore-v2-evidence-assignment-[a-z0-9-]+$/i.test(input.proposedRolloutId)) {
     throw new Error("proposed rollout id is invalid");
   }
+  const targetItemSha256Allowlist = input.targetItemSha256Allowlist
+    ? [...new Set(input.targetItemSha256Allowlist)].sort()
+    : undefined;
+  if (targetItemSha256Allowlist?.length === 0
+    || targetItemSha256Allowlist?.some((value) => !/^[a-f0-9]{64}$/i.test(value))) {
+    throw new Error("target item allowlist is invalid");
+  }
+  const allowedTargets = targetItemSha256Allowlist
+    ? new Set(targetItemSha256Allowlist)
+    : undefined;
   const loaded = loadRemediationPreview(input.remediationPreviewPath);
   const registry = privateFile(input.sessionsRegistryPath, 4 * 1024 * 1024);
   const baseline = privateFile(input.baselinePromotionPreviewPath);
@@ -202,11 +214,18 @@ export function createLiveEvidenceAssignmentPlanV1(input: {
   const remediationRows = new Map(loaded.value.rows.map((row) => [row.itemIdSha256, row]));
   if (remediationRows.size !== states.length) throw new Error("remediation candidate coverage is incomplete");
 
+  const eligibleTargets = new Set<string>();
   const rows = states.map((state) => {
     const itemIdSha256 = hash(state.item_id);
     const remediation = remediationRows.get(itemIdSha256);
     if (!remediation) throw new Error("live candidate is missing from remediation preview");
-    const route = decisionFor(remediation);
+    let route = decisionFor(remediation);
+    if (route.resolver) {
+      eligibleTargets.add(itemIdSha256);
+      if (allowedTargets && !allowedTargets.has(itemIdSha256)) {
+        route = { decision: "keep_candidate_unassigned" };
+      }
+    }
     const currentStateDigest = stableStateDigest(state);
     if (route.resolver && !/^[a-f0-9]{64}$/i.test(remediation.evidenceDigest ?? "")) {
       throw new Error("registry assignment is missing exact resolver evidence");
@@ -239,6 +258,9 @@ export function createLiveEvidenceAssignmentPlanV1(input: {
       lifecycleMutationAllowed: false as const,
     };
   });
+  if (allowedTargets && [...allowedTargets].some((itemIdSha256) => !eligibleTargets.has(itemIdSha256))) {
+    throw new Error("target item allowlist contains a non-assignable candidate");
+  }
   const decisionNames: EvidenceAssignmentDecisionV1[] = [
     "propose_private_principal_evidence_assignment",
     "propose_conversation_boundary_evidence_assignment",
@@ -269,6 +291,7 @@ export function createLiveEvidenceAssignmentPlanV1(input: {
     remediationPlanDigest: loaded.value.planDigest,
     remediationPreviewSha256: loaded.sha256,
     sessionsRegistrySha256: registry.sha256,
+    ...(targetItemSha256Allowlist ? { targetItemSha256Allowlist } : {}),
     source: loaded.value.source,
     summary: {
       proposedEvidenceAssignmentRows,

@@ -131,3 +131,25 @@ test("evidence assignment plan fails closed when registry evidence drifts", asyn
   }
 });
 
+test("evidence assignment plan can bind a strict hashed target allowlist", async () => {
+  const paths = await fixture();
+  try {
+    const target = sha256("legacy:direct");
+    const plan = createLiveEvidenceAssignmentPlanV1({
+      sourcePath: paths.source,
+      sessionsRegistryPath: paths.registry,
+      remediationPreviewPath: paths.remediation,
+      baselinePromotionPreviewPath: paths.baseline,
+      proposedRolloutId: "clawlore-v2-evidence-assignment-fixture-r2",
+      targetItemSha256Allowlist: [target],
+    });
+    assert.deepEqual(plan.targetItemSha256Allowlist, [target]);
+    assert.equal(plan.summary.proposedEvidenceAssignmentRows, 1);
+    assert.equal(plan.summary.explicitHoldRows, 3);
+    assert.equal(plan.rows.find((row) => row.itemIdSha256 === target)?.decision,
+      "propose_private_principal_evidence_assignment");
+    assert.equal(plan.decisions.propose_conversation_boundary_evidence_assignment, 0);
+  } finally {
+    await rm(paths.root, { recursive: true, force: true });
+  }
+});
