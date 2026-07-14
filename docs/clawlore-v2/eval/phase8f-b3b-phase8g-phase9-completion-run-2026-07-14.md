@@ -158,3 +158,20 @@ decision and adjudication controls, and the Phase 9 no-cutover receipt.
 The run did not change `openclaw.json`, plugin deployment files, Gateway
 service configuration, model routing, runtime shadow settings, or the active
 ContextEngine/prompt/final-recall boundary. No Gateway restart was needed.
+
+## Cleanup
+
+- removed the temporary project `node_modules` dependency symlink and verified
+  its live-extension target remains intact;
+- removed a generated `tools/__pycache__` cache and restored
+  `WORKSPACE_LAYOUT_OK`;
+- found no npm debug logs created by this run and no project scratch/log/tmp
+  residue;
+- retained only named encrypted snapshots and owner-only control/apply/
+  postcheck evidence in the task archive;
+- project repository is clean after the closing code and documentation commits.
+
+The state-hygiene audit still reports the same 74 outside-workspace findings
+(legacy root backups, reset/deleted session copies, and foreign plugin cache
+documents). They predate this task and were not deleted as part of the ClawLore
+transaction.
