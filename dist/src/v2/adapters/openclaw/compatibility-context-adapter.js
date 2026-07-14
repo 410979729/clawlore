@@ -1,6 +1,33 @@
+import { createHash } from "node:crypto";
 import { composeContextPack, renderCompatibilityContextPack, } from "../../application/context-composer.js";
 import { resolveMemoryIdentity, } from "../../application/identity-resolver.js";
 import { decideMemoryAccess } from "../../application/policy-decision.js";
+function comparisonId(id) {
+    return id.startsWith("legacy:") ? id.slice("legacy:".length) : id;
+}
+function idsDigest(ids) {
+    return createHash("sha256").update(JSON.stringify(ids.map(comparisonId))).digest("hex");
+}
+function comparisonMetrics(primary, comparison, primaryLatencyMs, comparisonLatencyMs) {
+    const primaryIds = primary.map((item) => comparisonId(item.id));
+    const comparisonIds = comparison.map((item) => comparisonId(item.id));
+    const comparisonRank = new Map(comparisonIds.map((id, index) => [id, index]));
+    const shared = primaryIds.map((id, index) => ({ index, other: comparisonRank.get(id) }))
+        .filter((entry) => entry.other !== undefined);
+    const denominator = Math.max(primaryIds.length, comparisonIds.length, 1);
+    const span = Math.max(primaryIds.length, comparisonIds.length, 2) - 1;
+    return {
+        status: "completed",
+        primaryCandidateCount: primaryIds.length,
+        comparisonCandidateCount: comparisonIds.length,
+        overlapRatio: shared.length / denominator,
+        rankAgreement: shared.reduce((sum, entry) => sum + (1 - Math.abs(entry.index - entry.other) / span), 0) / denominator,
+        primaryLatencyMs,
+        comparisonLatencyMs,
+        primaryIdsDigest: idsDigest(primaryIds),
+        comparisonIdsDigest: idsDigest(comparisonIds),
+    };
+}
 function retrievalBoundary(address) {
     return {
         tenantId: address.tenantId,
@@ -63,7 +90,20 @@ export async function runCompatibilityContextShadow(input) {
             trace,
         };
     }
-    const candidates = await input.retrieveCandidates({ boundary, queryText });
+    const request = { boundary, queryText, ...(input.signal ? { signal: input.signal } : {}) };
+    const primaryStartedAt = Date.now();
+    const primaryPromise = input.retrieveCandidates(request).then((candidates) => ({
+        candidates,
+        latencyMs: Date.now() - primaryStartedAt,
+    }));
+    const comparisonStartedAt = Date.now();
+    const comparisonPromise = input.retrieveComparisonCandidates
+        ? input.retrieveComparisonCandidates(request)
+            .then((candidates) => ({ candidates, latencyMs: Date.now() - comparisonStartedAt }))
+            .catch(() => undefined)
+        : Promise.resolve(undefined);
+    const [primary, comparison] = await Promise.all([primaryPromise, comparisonPromise]);
+    const candidates = primary.candidates;
     trace.push({ stage: "candidate_retrieval", outcome: "pass", detail: `${candidates.length}_candidates` });
     const pack = composeContextPack({
         traceId: input.traceId,
@@ -81,6 +121,21 @@ export async function runCompatibilityContextShadow(input) {
         retrievalInvoked: true,
         pack,
         renderedContext: renderCompatibilityContextPack(pack),
+        ...(input.retrieveComparisonCandidates
+            ? { comparison: comparison
+                    ? comparisonMetrics(candidates, comparison.candidates, primary.latencyMs, comparison.latencyMs)
+                    : {
+                        status: "failed",
+                        primaryCandidateCount: candidates.length,
+                        comparisonCandidateCount: 0,
+                        overlapRatio: 0,
+                        rankAgreement: 0,
+                        primaryLatencyMs: primary.latencyMs,
+                        comparisonLatencyMs: Date.now() - comparisonStartedAt,
+                        primaryIdsDigest: idsDigest(candidates.map((item) => item.id)),
+                        comparisonIdsDigest: idsDigest([]),
+                    } }
+            : {}),
         hookResult: undefined,
         trace,
     };

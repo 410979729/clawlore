@@ -21,6 +21,17 @@ The live read-only preview found no orphan blockers. Full tests are 260/260 and
 typecheck/build/diff check pass. The live migration has not been applied;
 extension/config/database/service are unchanged.
 
+H3 replaces the former V1-adapted primary observer with a native V2
+truth/FTS/vector-projection retriever. It applies the full address policy before
+returning content, dual-runs one cached V1 comparison lane, and records only
+counts, latency, overlap/rank metrics, and SHA-256 digests. AbortSignal now
+reaches retrieval; duplicate in-flight sessions are skipped and a configurable
+hard concurrency limit retains slots until the underlying operation settles.
+Focused tests are 19/19 and full tests are 265/265 with typecheck/build/diff
+check PASS. A live read-only smoke returned zero V2 candidates because the
+current migration corpus still carries unresolved-principal identity debt; no
+memory content or raw item ids were emitted. Live deployment remains unchanged.
+
 ## Live position
 
 - OpenClaw runtime remains read-only shadow: hooks=1, writes=false,

@@ -23,6 +23,7 @@ export interface LegacyShadowRetrievalDependenciesV1 {
     limit: number;
     scopeFilter?: string[];
     source: "auto-recall";
+    signal?: AbortSignal;
   }): Promise<LegacyShadowRetrievalResultV1[]>;
 }
 
@@ -58,6 +59,7 @@ export function createLegacyShadowCandidateRetrieverV1(
       limit: dependencies.candidateLimit,
       scopeFilter,
       source: "auto-recall",
+      ...(request.signal ? { signal: request.signal } : {}),
     });
     return adaptLegacyContextSources({
       autoRecall: results.map((result) => ({

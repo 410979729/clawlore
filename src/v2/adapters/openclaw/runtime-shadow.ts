@@ -26,6 +26,7 @@ export interface RuntimeShadowReceiptV1 {
   usedTokens: number;
   stages: CompatibilityContextShadowResult["trace"];
   rejectionReasons: string[];
+  comparison?: CompatibilityContextShadowResult["comparison"];
   errorCode?: string;
   createdAt: string;
 }
@@ -128,6 +129,7 @@ export async function runDefaultOffRuntimeShadow(params: {
       usedTokens: result.pack?.budget.usedTokens ?? 0,
       stages: sanitizeStages(result.trace),
       rejectionReasons: [...new Set(result.pack?.trace.rejected.map((item) => item.reason) ?? [])].sort(),
+      ...(result.comparison ? { comparison: result.comparison } : {}),
       createdAt,
     };
   } catch (error) {

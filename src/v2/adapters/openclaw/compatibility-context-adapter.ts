@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   composeContextPack,
   renderCompatibilityContextPack,
@@ -30,6 +31,19 @@ export interface CompatibilityRetrievalBoundaryV1 {
 export interface CompatibilityRetrievalRequestV1 {
   boundary: CompatibilityRetrievalBoundaryV1;
   queryText: string;
+  signal?: AbortSignal;
+}
+
+export interface CompatibilityShadowComparisonV1 {
+  status: "completed" | "failed";
+  primaryCandidateCount: number;
+  comparisonCandidateCount: number;
+  overlapRatio: number;
+  rankAgreement: number;
+  primaryLatencyMs: number;
+  comparisonLatencyMs: number;
+  primaryIdsDigest: string;
+  comparisonIdsDigest: string;
 }
 
 export interface CompatibilityContextShadowInput {
@@ -39,6 +53,8 @@ export interface CompatibilityContextShadowInput {
   queryText?: string;
   identity: IdentityResolverInput;
   retrieveCandidates(request: CompatibilityRetrievalRequestV1): Promise<ContextCandidateV1[]>;
+  retrieveComparisonCandidates?(request: CompatibilityRetrievalRequestV1): Promise<ContextCandidateV1[]>;
+  signal?: AbortSignal;
 }
 
 export interface CompatibilityContextShadowResult {
@@ -50,12 +66,47 @@ export interface CompatibilityContextShadowResult {
   retrievalInvoked: boolean;
   pack?: ContextPackV1;
   renderedContext?: string;
+  comparison?: CompatibilityShadowComparisonV1;
   hookResult?: undefined;
   trace: Array<{
     stage: "identity" | "policy_preflight" | "candidate_retrieval" | "compose";
     outcome: "pass" | "skip";
     detail: string;
   }>;
+}
+
+function comparisonId(id: string): string {
+  return id.startsWith("legacy:") ? id.slice("legacy:".length) : id;
+}
+
+function idsDigest(ids: string[]): string {
+  return createHash("sha256").update(JSON.stringify(ids.map(comparisonId))).digest("hex");
+}
+
+function comparisonMetrics(
+  primary: ContextCandidateV1[],
+  comparison: ContextCandidateV1[],
+  primaryLatencyMs: number,
+  comparisonLatencyMs: number,
+): CompatibilityShadowComparisonV1 {
+  const primaryIds = primary.map((item) => comparisonId(item.id));
+  const comparisonIds = comparison.map((item) => comparisonId(item.id));
+  const comparisonRank = new Map(comparisonIds.map((id, index) => [id, index]));
+  const shared = primaryIds.map((id, index) => ({ index, other: comparisonRank.get(id) }))
+    .filter((entry): entry is { index: number; other: number } => entry.other !== undefined);
+  const denominator = Math.max(primaryIds.length, comparisonIds.length, 1);
+  const span = Math.max(primaryIds.length, comparisonIds.length, 2) - 1;
+  return {
+    status: "completed",
+    primaryCandidateCount: primaryIds.length,
+    comparisonCandidateCount: comparisonIds.length,
+    overlapRatio: shared.length / denominator,
+    rankAgreement: shared.reduce((sum, entry) => sum + (1 - Math.abs(entry.index - entry.other) / span), 0) / denominator,
+    primaryLatencyMs,
+    comparisonLatencyMs,
+    primaryIdsDigest: idsDigest(primaryIds),
+    comparisonIdsDigest: idsDigest(comparisonIds),
+  };
 }
 
 function retrievalBoundary(address: MemoryAddressV2): CompatibilityRetrievalBoundaryV1 {
@@ -125,7 +176,20 @@ export async function runCompatibilityContextShadow(
       trace,
     };
   }
-  const candidates = await input.retrieveCandidates({ boundary, queryText });
+  const request = { boundary, queryText, ...(input.signal ? { signal: input.signal } : {}) };
+  const primaryStartedAt = Date.now();
+  const primaryPromise = input.retrieveCandidates(request).then((candidates) => ({
+    candidates,
+    latencyMs: Date.now() - primaryStartedAt,
+  }));
+  const comparisonStartedAt = Date.now();
+  const comparisonPromise = input.retrieveComparisonCandidates
+    ? input.retrieveComparisonCandidates(request)
+      .then((candidates) => ({ candidates, latencyMs: Date.now() - comparisonStartedAt }))
+      .catch(() => undefined)
+    : Promise.resolve(undefined);
+  const [primary, comparison] = await Promise.all([primaryPromise, comparisonPromise]);
+  const candidates = primary.candidates;
   trace.push({ stage: "candidate_retrieval", outcome: "pass", detail: `${candidates.length}_candidates` });
 
   const pack = composeContextPack({
@@ -144,6 +208,21 @@ export async function runCompatibilityContextShadow(
     retrievalInvoked: true,
     pack,
     renderedContext: renderCompatibilityContextPack(pack),
+    ...(input.retrieveComparisonCandidates
+      ? { comparison: comparison
+        ? comparisonMetrics(candidates, comparison.candidates, primary.latencyMs, comparison.latencyMs)
+        : {
+            status: "failed" as const,
+            primaryCandidateCount: candidates.length,
+            comparisonCandidateCount: 0,
+            overlapRatio: 0,
+            rankAgreement: 0,
+            primaryLatencyMs: primary.latencyMs,
+            comparisonLatencyMs: Date.now() - comparisonStartedAt,
+            primaryIdsDigest: idsDigest(candidates.map((item) => item.id)),
+            comparisonIdsDigest: idsDigest([]),
+          } }
+      : {}),
     hookResult: undefined,
     trace,
   };

@@ -26,6 +26,17 @@ function receipt(overrides = {}) {
       { stage: "candidate_retrieval", outcome: "pass", detail: "2_candidates" },
     ],
     rejectionReasons: [],
+    comparison: {
+      status: "completed",
+      primaryCandidateCount: 2,
+      comparisonCandidateCount: 2,
+      overlapRatio: 1,
+      rankAgreement: 1,
+      primaryLatencyMs: 12,
+      comparisonLatencyMs: 15,
+      primaryIdsDigest: "a".repeat(64),
+      comparisonIdsDigest: "b".repeat(64),
+    },
     createdAt: "2026-07-12T05:58:08.713Z",
     ...overrides,
   };
@@ -58,6 +69,14 @@ test("shadow observation audit summarizes redacted accepted samples", async () =
     assert.equal(result.acceptedGroupSampleCount, 0);
     assert.equal(result.positiveCandidateSampleCount, 1);
     assert.equal(result.maxCandidateCount, 2);
+    assert.deepEqual(result.comparison, {
+      completedSamples: 1,
+      failedSamples: 0,
+      minimumOverlapRatio: 1,
+      minimumRankAgreement: 1,
+      maximumPrimaryLatencyMs: 12,
+      maximumComparisonLatencyMs: 15,
+    });
     assert.equal(result.latest.retrievalInvoked, true);
     assert.equal(result.goNoGo.decision, "observe");
     assert.deepEqual(result.goNoGo.blockers, [
@@ -72,6 +91,14 @@ test("shadow observation audit rejects unexpected raw-payload fields", async () 
     const result = await auditShadowObservation(traceFile);
     assert.equal(result.status, "fail");
     assert.deepEqual(result.issues, ["line_1:unexpected_receipt_key:messageText"]);
+  });
+});
+
+test("shadow observation audit rejects raw fields inside comparison evidence", async () => {
+  await withTrace([receipt({ comparison: { ...receipt().comparison, candidateIds: ["raw-id"] } })], 0o600, async (traceFile) => {
+    const result = await auditShadowObservation(traceFile);
+    assert.equal(result.status, "fail");
+    assert.deepEqual(result.issues, ["line_1:unexpected_comparison_key:candidateIds"]);
   });
 });
 

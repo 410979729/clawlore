@@ -1705,6 +1705,13 @@
             "maximum": 20,
             "default": 6
           },
+          "maxConcurrent": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 16,
+            "default": 2,
+            "description": "Maximum concurrent read-only shadow observations. Duplicate in-flight session observations are skipped."
+          },
           "readinessFile": {
             "type": "string",
             "minLength": 1,
@@ -1755,6 +1762,10 @@
     },
     "clawloreV2.candidateLimit": {
       "label": "ClawLore Shadow Candidate Limit",
+      "advanced": true
+    },
+    "clawloreV2.maxConcurrent": {
+      "label": "ClawLore Shadow Concurrency Limit",
       "advanced": true
     },
     "clawloreV2.readinessFile": {

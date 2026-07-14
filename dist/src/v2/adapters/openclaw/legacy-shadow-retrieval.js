@@ -29,6 +29,7 @@ export function createLegacyShadowCandidateRetrieverV1(dependencies) {
             limit: dependencies.candidateLimit,
             scopeFilter,
             source: "auto-recall",
+            ...(request.signal ? { signal: request.signal } : {}),
         });
         return adaptLegacyContextSources({
             autoRecall: results.map((result) => ({

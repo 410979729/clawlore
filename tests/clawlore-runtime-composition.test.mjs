@@ -97,6 +97,8 @@ test("runtime composition is default-off and invalid config fails to disabled", 
     manifest.configSchema.properties.clawloreV2.properties.approvalFile.description,
     /Deprecated compatibility field.*ignored/,
   );
+  assert.equal(manifest.configSchema.properties.clawloreV2.properties.maxConcurrent.default, 2);
+  assert.equal(normalizeClawLoreRuntimeConfigV1({ mode: "shadow" }).maxConcurrent, 2);
 
   for (const config of [undefined, {}, { mode: "v2-write" }, { mode: "cutover" }]) {
     const host = new FixtureHost();
@@ -270,7 +272,9 @@ test("shadow observer fails open when retrieval times out or trace persistence f
     config: normalizeClawLoreRuntimeConfigV1({ mode: "shadow", maxLatencyMs: 25 }),
     host: timeoutHost,
     dependencies: dependencies({
-      retrieveCandidates: async () => new Promise(() => undefined),
+      retrieveCandidates: async ({ signal }) => new Promise((resolve, reject) => {
+        signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })), { once: true });
+      }),
       onObserverError: (code) => errors.push(code),
     }),
     readiness: readiness(),
@@ -318,4 +322,73 @@ test("shadow observer fails open when retrieval times out or trace persistence f
   );
   assert.deepEqual(sinkResults, [undefined]);
   assert.deepEqual(errors, ["shadow_observer_timeout", "shadow_observer_failed"]);
+});
+
+test("shadow comparison emits only redacted lane metrics", async () => {
+  const host = new FixtureHost();
+  const sink = new InMemoryRuntimeShadowSinkV1();
+  const targetAddress = {
+    schemaVersion: 2, tenantId: "local", principalId: "telegram:default:user-1",
+    agentId: "main", workspaceId: "workspace-1", platform: "telegram", accountId: "default",
+    visibility: "private", retention: "durable",
+  };
+  composeClawLoreRuntimeV1({
+    config: normalizeClawLoreRuntimeConfigV1({ mode: "shadow" }),
+    host,
+    dependencies: dependencies({
+      traceSink: sink,
+      retrieveCandidates: async () => [{ id: "legacy:raw-secret-id", section: "projectFacts",
+        text: "primary secret content", targetAddress, lifecycle: "active", verification: "user_confirmed" }],
+      retrieveComparisonCandidates: async () => [{ id: "raw-secret-id", section: "projectFacts",
+        text: "comparison secret content", targetAddress, lifecycle: "active", verification: "user_confirmed" }],
+    }),
+    readiness: readiness(),
+  });
+  await host.emitMessageReceived({ content: "secret query", senderId: "user-1" }, {
+    channelId: "telegram", accountId: "default", conversationId: "user-1",
+    sessionKey: "agent:main:telegram:default:direct:user-1",
+  });
+  assert.equal(sink.receipts[0].comparison.status, "completed");
+  assert.equal(sink.receipts[0].comparison.overlapRatio, 1);
+  assert.equal(sink.receipts[0].comparison.rankAgreement, 1);
+  assert.match(sink.receipts[0].comparison.primaryIdsDigest, /^[a-f0-9]{64}$/);
+  const serialized = JSON.stringify(sink.receipts[0]);
+  assert.doesNotMatch(serialized, /raw-secret-id|secret content|secret query/);
+});
+
+test("shadow observers deduplicate sessions and enforce a hard concurrency bound", async () => {
+  const host = new FixtureHost();
+  const errors = [];
+  const releases = [];
+  let active = 0;
+  let maximumActive = 0;
+  composeClawLoreRuntimeV1({
+    config: normalizeClawLoreRuntimeConfigV1({ mode: "shadow", maxLatencyMs: 25, maxConcurrent: 2 }),
+    host,
+    dependencies: dependencies({
+      retrieveCandidates: async () => new Promise((resolve) => {
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        releases.push(() => { active -= 1; resolve([]); });
+      }),
+      onObserverError: (code) => errors.push(code),
+    }),
+    readiness: readiness(),
+  });
+  const emit = (index, session = `session-${index}`) => host.emitMessageReceived(
+    { content: "bounded query", senderId: `user-${index}` },
+    { channelId: "telegram", accountId: "default", conversationId: `room-${index}`, sessionKey: session },
+  );
+  const first = emit(0, "same-session");
+  const duplicate = emit(0, "same-session");
+  const rest = Array.from({ length: 19 }, (_, index) => emit(index + 1));
+  await Promise.all([first, duplicate, ...rest]);
+  assert.equal(maximumActive, 2);
+  assert.equal(releases.length, 2);
+  assert.equal(errors.filter((code) => code === "shadow_observer_deduplicated").length, 1);
+  assert.equal(errors.filter((code) => code === "shadow_observer_saturated").length, 18);
+  assert.equal(errors.filter((code) => code === "shadow_observer_timeout").length, 2);
+  for (const release of releases) release();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(active, 0);
 });

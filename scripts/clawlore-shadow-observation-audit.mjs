@@ -15,11 +15,23 @@ const RECEIPT_KEYS = new Set([
   "usedTokens",
   "stages",
   "rejectionReasons",
+  "comparison",
   "errorCode",
   "createdAt",
 ]);
 
 const STAGE_KEYS = new Set(["stage", "outcome", "detail"]);
+const COMPARISON_KEYS = new Set([
+  "status",
+  "primaryCandidateCount",
+  "comparisonCandidateCount",
+  "overlapRatio",
+  "rankAgreement",
+  "primaryLatencyMs",
+  "comparisonLatencyMs",
+  "primaryIdsDigest",
+  "comparisonIdsDigest",
+]);
 
 function countBy(values) {
   const counts = {};
@@ -66,6 +78,34 @@ function validateReceipt(receipt, lineNumber) {
       && !["private", "conversation", "project", "team", "global"].includes(receipt.visibility)) {
     issues.push(`line_${lineNumber}:invalid_visibility`);
   }
+  if (receipt.comparison !== undefined) {
+    if (!receipt.comparison || typeof receipt.comparison !== "object" || Array.isArray(receipt.comparison)) {
+      issues.push(`line_${lineNumber}:comparison_not_object`);
+    } else {
+      for (const key of Object.keys(receipt.comparison)) {
+        if (!COMPARISON_KEYS.has(key)) issues.push(`line_${lineNumber}:unexpected_comparison_key:${key}`);
+      }
+      if (!["completed", "failed"].includes(receipt.comparison.status)) {
+        issues.push(`line_${lineNumber}:invalid_comparison_status`);
+      }
+      for (const field of ["primaryCandidateCount", "comparisonCandidateCount", "primaryLatencyMs", "comparisonLatencyMs"]) {
+        if (!Number.isInteger(receipt.comparison[field]) || receipt.comparison[field] < 0) {
+          issues.push(`line_${lineNumber}:invalid_comparison_${field}`);
+        }
+      }
+      for (const field of ["overlapRatio", "rankAgreement"]) {
+        if (typeof receipt.comparison[field] !== "number"
+            || receipt.comparison[field] < 0 || receipt.comparison[field] > 1) {
+          issues.push(`line_${lineNumber}:invalid_comparison_${field}`);
+        }
+      }
+      for (const field of ["primaryIdsDigest", "comparisonIdsDigest"]) {
+        if (!/^[a-f0-9]{64}$/.test(String(receipt.comparison[field] ?? ""))) {
+          issues.push(`line_${lineNumber}:invalid_comparison_${field}`);
+        }
+      }
+    }
+  }
   return issues;
 }
 
@@ -99,6 +139,9 @@ export async function auditShadowObservation(traceFile) {
   const acceptedGroupSamples = acceptedSamples.filter((receipt) =>
     receipt.ingressKind === "group" && receipt.visibility === "conversation");
   const positiveCandidateSamples = acceptedSamples.filter((receipt) => receipt.candidateCount > 0);
+  const comparisonSamples = acceptedSamples
+    .map((receipt) => receipt.comparison)
+    .filter((comparison) => comparison?.status === "completed");
   const gateBlockers = [];
   if (issues.length > 0) gateBlockers.push("trace_integrity_failed");
   if (validReceipts.some((receipt) => receipt.status === "failed")) gateBlockers.push("failed_receipt_present");
@@ -124,6 +167,18 @@ export async function auditShadowObservation(traceFile) {
     positiveCandidateSampleCount: positiveCandidateSamples.length,
     maxCandidateCount: Math.max(0, ...validReceipts.map((receipt) => receipt.candidateCount ?? 0)),
     maxSelectedCount: Math.max(0, ...validReceipts.map((receipt) => receipt.selectedCount ?? 0)),
+    comparison: {
+      completedSamples: comparisonSamples.length,
+      failedSamples: acceptedSamples.filter((receipt) => receipt.comparison?.status === "failed").length,
+      minimumOverlapRatio: comparisonSamples.length > 0
+        ? Math.min(...comparisonSamples.map((comparison) => comparison.overlapRatio))
+        : null,
+      minimumRankAgreement: comparisonSamples.length > 0
+        ? Math.min(...comparisonSamples.map((comparison) => comparison.rankAgreement))
+        : null,
+      maximumPrimaryLatencyMs: Math.max(0, ...comparisonSamples.map((comparison) => comparison.primaryLatencyMs)),
+      maximumComparisonLatencyMs: Math.max(0, ...comparisonSamples.map((comparison) => comparison.comparisonLatencyMs)),
+    },
     latest: latest ? {
       status: latest.status,
       retrievalInvoked: latest.retrievalInvoked,
@@ -163,6 +218,7 @@ export async function writeShadowObservationReceipt(receiptFile, audit, now = ()
       positiveCandidateSampleCount: audit.positiveCandidateSampleCount,
       maxCandidateCount: audit.maxCandidateCount,
       maxSelectedCount: audit.maxSelectedCount,
+      comparison: audit.comparison,
       latest: audit.latest,
       issues: audit.issues,
     },

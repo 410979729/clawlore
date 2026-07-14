@@ -26,6 +26,7 @@ export function normalizeClawLoreRuntimeConfigV1(value) {
         maxTraceBytes: boundedInteger(raw.maxTraceBytes, 5_000_000, 16_384, 100_000_000),
         maxQueryChars: boundedInteger(raw.maxQueryChars, 4_000, 256, 12_000),
         candidateLimit: boundedInteger(raw.candidateLimit, 6, 1, 20),
+        maxConcurrent: boundedInteger(raw.maxConcurrent, 2, 1, 16),
     };
 }
 function shadowQueryText(event, context, maxChars) {
@@ -70,17 +71,31 @@ async function observeWithoutBlockingReply(input) {
     const operation = input.operation
         .then(() => "completed")
         .catch(() => {
-        input.onError?.("shadow_observer_failed");
-        return "failed";
+        if (!input.controller.signal.aborted)
+            input.onError?.("shadow_observer_failed");
+        return input.controller.signal.aborted ? "aborted" : "failed";
     });
     const timeout = new Promise((resolve) => {
-        timer = setTimeout(() => resolve("timeout"), input.maxLatencyMs);
+        timer = setTimeout(() => {
+            input.controller.abort("shadow_observer_timeout");
+            resolve("timeout");
+        }, input.maxLatencyMs);
     });
     const outcome = await Promise.race([operation, timeout]);
     if (timer)
         clearTimeout(timer);
     if (outcome === "timeout")
         input.onError?.("shadow_observer_timeout");
+}
+function observerKey(event, context) {
+    const material = [
+        context.sessionKey,
+        context.sessionId,
+        context.conversationId,
+        event.senderId,
+        context.senderId,
+    ].map((value) => String(value ?? "")).join("\u0000");
+    return createHash("sha256").update(material).digest("hex");
 }
 function activationBlocks(input) {
     if (input.config.mode === "disabled")
@@ -154,44 +169,63 @@ export function composeClawLoreRuntimeV1(input) {
             ? new JsonlRuntimeShadowTraceSink(input.config.traceFile, input.config.maxTraceBytes)
             : undefined);
     let sequence = 0;
+    const activeObservers = new Set();
     input.host.on("message_received", async (event, context) => {
         sequence += 1;
         const metadata = record(event.metadata);
         const chatType = shadowChatType(event, context);
+        const key = observerKey(event, context);
+        if (activeObservers.has(key)) {
+            input.dependencies.onObserverError?.("shadow_observer_deduplicated");
+            return;
+        }
+        if (activeObservers.size >= input.config.maxConcurrent) {
+            input.dependencies.onObserverError?.("shadow_observer_saturated");
+            return;
+        }
+        const controller = new AbortController();
+        activeObservers.add(key);
+        const operation = runDefaultOffRuntimeShadow({
+            config: { enabled: true },
+            sink,
+            now: input.dependencies.now,
+            input: {
+                traceId: opaqueTraceId(sequence, event, context),
+                ingressKind: chatType ?? "unknown",
+                availableTokens: numericBudget(event, context, input.config.tokenBudget),
+                queryText: shadowQueryText(event, context, input.config.maxQueryChars),
+                signal: controller.signal,
+                identity: {
+                    tenantId: input.dependencies.tenantId,
+                    agentId: typeof context.agentId === "string" && context.agentId.trim()
+                        ? context.agentId.trim()
+                        : input.dependencies.agentId,
+                    workspaceId: input.dependencies.workspaceId,
+                    requestedVisibility: shadowVisibility(chatType),
+                    runtimeContext: context,
+                    event,
+                    staticContext: {
+                        platform: context.channelId ?? metadata.originatingChannel
+                            ?? metadata.provider ?? metadata.surface,
+                        accountId: context.accountId,
+                        senderId: event.senderId ?? context.senderId ?? metadata.senderId,
+                        conversationId: context.conversationId ?? metadata.originatingTo,
+                        threadId: event.threadId ?? metadata.threadId,
+                        chatType: chatType ?? "unknown",
+                    },
+                },
+                retrieveCandidates: input.dependencies.retrieveCandidates,
+                ...(input.dependencies.retrieveComparisonCandidates
+                    ? { retrieveComparisonCandidates: input.dependencies.retrieveComparisonCandidates }
+                    : {}),
+            },
+        });
+        void operation.then(() => activeObservers.delete(key), () => activeObservers.delete(key));
         await observeWithoutBlockingReply({
+            operation,
+            controller,
             maxLatencyMs: input.config.maxLatencyMs,
             onError: input.dependencies.onObserverError,
-            operation: runDefaultOffRuntimeShadow({
-                config: { enabled: true },
-                sink,
-                now: input.dependencies.now,
-                input: {
-                    traceId: opaqueTraceId(sequence, event, context),
-                    ingressKind: chatType ?? "unknown",
-                    availableTokens: numericBudget(event, context, input.config.tokenBudget),
-                    queryText: shadowQueryText(event, context, input.config.maxQueryChars),
-                    identity: {
-                        tenantId: input.dependencies.tenantId,
-                        agentId: typeof context.agentId === "string" && context.agentId.trim()
-                            ? context.agentId.trim()
-                            : input.dependencies.agentId,
-                        workspaceId: input.dependencies.workspaceId,
-                        requestedVisibility: shadowVisibility(chatType),
-                        runtimeContext: context,
-                        event,
-                        staticContext: {
-                            platform: context.channelId ?? metadata.originatingChannel
-                                ?? metadata.provider ?? metadata.surface,
-                            accountId: context.accountId,
-                            senderId: event.senderId ?? context.senderId ?? metadata.senderId,
-                            conversationId: context.conversationId ?? metadata.originatingTo,
-                            threadId: event.threadId ?? metadata.threadId,
-                            chatType: chatType ?? "unknown",
-                        },
-                    },
-                    retrieveCandidates: input.dependencies.retrieveCandidates,
-                },
-            }),
         });
     }, { priority: -100 });
     return { ...base, status: "registered", registeredHooks: ["message_received"] };

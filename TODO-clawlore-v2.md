@@ -32,10 +32,16 @@ H5 deployment action and has not been authorized by this code-phase result.
 
 ### H3 — Native retrieval shadow and resource bounds
 
-- [ ] Implement a real V2 truth/FTS/vector shadow retriever.
-- [ ] Dual-run V1 and V2 without prompt mutation or writes.
-- [ ] Propagate cancellation and enforce concurrency/deduplication limits.
-- [ ] Add divergence/latency/scope regressions and redacted trace evidence.
+- [x] Implement a real V2 truth/FTS/vector shadow retriever.
+- [x] Dual-run V1 and V2 without prompt mutation or writes.
+- [x] Propagate cancellation and enforce concurrency/deduplication limits.
+- [x] Add divergence/latency/scope regressions and redacted trace evidence.
+
+H3 verification: focused 19/19 and full 265/265 pass with typecheck, build,
+and diff check. Live read-only smoke emits no content and returns zero V2
+candidates because current migrated rows retain legacy unresolved-principal
+debt; policy denial is therefore the expected safe outcome. V1 remains a
+comparison/fallback lane and no prompt mutation, write, or cutover is enabled.
 
 ### H4 — Reproducible release identity
 

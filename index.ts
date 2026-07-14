@@ -114,6 +114,7 @@ import {
 } from "./src/v2/adapters/openclaw/runtime-composition-root.js";
 import { loadRuntimeRolloutControlsV1 } from "./src/v2/adapters/openclaw/runtime-rollout-control.js";
 import { createLegacyShadowCandidateRetrieverV1 } from "./src/v2/adapters/openclaw/legacy-shadow-retrieval.js";
+import { createNativeShadowCandidateRetrieverV1 } from "./src/v2/adapters/openclaw/native-shadow-retrieval.js";
 
 // ============================================================================
 // Configuration & Types
@@ -272,6 +273,7 @@ interface PluginConfig {
     maxTraceBytes?: number;
     maxQueryChars?: number;
     candidateLimit?: number;
+    maxConcurrent?: number;
     readinessFile?: string;
     /** Deprecated compatibility input. Parsed but never used as an activation gate. */
     approvalFile?: string;
@@ -1979,6 +1981,36 @@ const scopeRecallOpenClawPlugin = {
         `clawlore-v2: shadow rollout controls blocked: ${rolloutControls.errors.join(",")}`,
       );
     }
+    const legacyShadowRetriever = createLegacyShadowCandidateRetrieverV1({
+      workspaceId: "tianji-main-workspace",
+      candidateLimit: clawloreRuntimeConfig.candidateLimit,
+      resolveScopeFilter: (agentId) => resolveScopeFilter(scopeManager, agentId),
+      retrieve: async (input) => filterUserMdExclusiveRecallResults(
+        await retrieveWithRetry(input),
+        config.workspaceBoundary,
+      ),
+    });
+    const legacyShadowCache = new WeakMap<object, ReturnType<typeof legacyShadowRetriever>>();
+    const cachedLegacyShadowRetriever = (request: Parameters<typeof legacyShadowRetriever>[0]) => {
+      const cached = legacyShadowCache.get(request);
+      if (cached) return cached;
+      const pending = legacyShadowRetriever(request);
+      legacyShadowCache.set(request, pending);
+      return pending;
+    };
+    const nativeShadowRetriever = createNativeShadowCandidateRetrieverV1({
+      sqlitePath: join(resolvedDbPath, "memory.sqlite3"),
+      candidateLimit: clawloreRuntimeConfig.candidateLimit,
+      async retrieveVectorCandidates({ request }) {
+        const candidates = await cachedLegacyShadowRetriever(request);
+        return candidates.map((candidate) => ({
+          legacyId: candidate.id.startsWith("legacy:")
+            ? candidate.id.slice("legacy:".length)
+            : candidate.id,
+          score: candidate.score,
+        }));
+      },
+    });
     const clawloreRuntimeReceipt = composeClawLoreRuntimeV1({
       config: clawloreRuntimeConfig,
       host: {
@@ -1990,15 +2022,8 @@ const scopeRecallOpenClawPlugin = {
         tenantId: "local",
         agentId: "main",
         workspaceId: "tianji-main-workspace",
-        retrieveCandidates: createLegacyShadowCandidateRetrieverV1({
-          workspaceId: "tianji-main-workspace",
-          candidateLimit: clawloreRuntimeConfig.candidateLimit,
-          resolveScopeFilter: (agentId) => resolveScopeFilter(scopeManager, agentId),
-          retrieve: async (input) => filterUserMdExclusiveRecallResults(
-            await retrieveWithRetry(input),
-            config.workspaceBoundary,
-          ),
-        }),
+        retrieveCandidates: nativeShadowRetriever,
+        retrieveComparisonCandidates: cachedLegacyShadowRetriever,
         onObserverError(code) {
           api.logger.warn(`clawlore-v2: read-only shadow observer ${code}`);
         },
@@ -4491,6 +4516,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
         maxTraceBytes: parseIntBetween(raw.maxTraceBytes, 16_384, 100_000_000) ?? 5_000_000,
         maxQueryChars: parseIntBetween(raw.maxQueryChars, 256, 12_000) ?? 4_000,
         candidateLimit: parseIntBetween(raw.candidateLimit, 1, 20) ?? 6,
+        maxConcurrent: parseIntBetween(raw.maxConcurrent, 1, 16) ?? 2,
         readinessFile: asNonEmptyString(raw.readinessFile),
         approvalFile: asNonEmptyString(raw.approvalFile),
       };
