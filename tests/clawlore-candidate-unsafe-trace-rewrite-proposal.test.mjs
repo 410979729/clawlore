@@ -18,6 +18,12 @@ const {
   acceptLiveCandidateUnsafeTraceRewriteProposalV1,
   createLiveCandidateUnsafeTraceRewriteProposalPlanV1,
 } = jiti("../src/v2/operator/live-candidate-unsafe-trace-rewrite-proposal.ts");
+const {
+  createLiveCandidateUnsafeTraceRewritePostcheckV1,
+  executeLiveCandidateUnsafeTraceRewriteV1,
+} = jiti("../src/v2/operator/live-candidate-unsafe-trace-rewrite-apply.ts");
+const { inspectLegacySqliteSnapshotV2 } =
+  jiti("../src/v2/operator/legacy-v1-snapshot.ts");
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const now = "2026-07-14T09:00:00.000Z";
@@ -63,6 +69,8 @@ function createSchema(db) {
       content TEXT NOT NULL,lifecycle TEXT NOT NULL,verification TEXT NOT NULL,valid_until TEXT,created_at TEXT NOT NULL);
     CREATE TABLE memory_sources(source_id TEXT PRIMARY KEY,revision_id TEXT NOT NULL,source_type TEXT NOT NULL,
       external_id TEXT,observed_at TEXT NOT NULL,evidence_json TEXT NOT NULL);
+    CREATE TABLE memory_relations(relation_id TEXT PRIMARY KEY,from_revision_id TEXT NOT NULL,to_revision_id TEXT NOT NULL,
+      relation_type TEXT NOT NULL,created_at TEXT NOT NULL);
     CREATE TABLE memory_acl(acl_id TEXT PRIMARY KEY,item_id TEXT NOT NULL,owner_principal_id TEXT NOT NULL,
       visibility TEXT NOT NULL,policy_json TEXT NOT NULL,created_at TEXT NOT NULL);
     CREATE TABLE memory_events(event_id TEXT PRIMARY KEY,item_id TEXT NOT NULL,revision_id TEXT,event_type TEXT NOT NULL,
@@ -72,7 +80,11 @@ function createSchema(db) {
     CREATE TABLE memory_vector_projection_v2(item_id TEXT PRIMARY KEY,legacy_id TEXT,backend TEXT,state TEXT,verified_at TEXT);
     CREATE TABLE memory_relation_projection_v2(item_id TEXT PRIMARY KEY,state TEXT,verified_at TEXT);
     CREATE TABLE projection_outbox(outbox_id TEXT PRIMARY KEY,item_id TEXT,revision_id TEXT,operation TEXT,projection TEXT,
-      attempts INTEGER,available_at TEXT,created_at TEXT,processed_at TEXT,last_error TEXT);`);
+      attempts INTEGER,available_at TEXT,created_at TEXT,processed_at TEXT,last_error TEXT);
+    CREATE TABLE clawlore_rollouts_v2(rollout_id TEXT PRIMARY KEY,plan_digest TEXT NOT NULL,control_sha256 TEXT NOT NULL,
+      readiness_sha256 TEXT NOT NULL,legacy_logical_digest TEXT NOT NULL,rows_applied INTEGER NOT NULL,
+      applied_at TEXT NOT NULL,v1_fallback_reads INTEGER NOT NULL,context_engine_enabled INTEGER NOT NULL,
+      final_recall_cutover_enabled INTEGER NOT NULL);`);
 }
 
 function insertRow(db, { seed, content, lifecycle = "candidate", withLineage = true }) {
@@ -532,5 +544,235 @@ test("unsafe trace rewrite acceptance fails closed on payload tamper and protect
     }), /live target no longer matches/);
   } finally {
     await rm(drifted.root, { recursive: true, force: true });
+  }
+});
+
+async function liveApplyFixture({ oneOutputPerTarget = true } = {}) {
+  const paths = await fixture();
+  if (oneOutputPerTarget) {
+    const payload = JSON.parse(await readFile(paths.rewritePayloadPath, "utf8"));
+    payload.specifications = payload.specifications.map((specification) => ({
+      ...specification,
+      proposedContents: [specification.proposedContents[0]],
+    }));
+    const payloadCore = {
+      dispositionPlanDigest: payload.dispositionPlanDigest,
+      dispositionPlanSha256: payload.dispositionPlanSha256,
+      archiveApplyReceiptSha256: payload.archiveApplyReceiptSha256,
+      archivePostcheckSha256: payload.archivePostcheckSha256,
+      specifications: payload.specifications,
+    };
+    payload.payloadDigest = sha256(JSON.stringify(payloadCore));
+    await writePrivateJson(paths.rewritePayloadPath, payload);
+    paths.rewritePayload = payload;
+  }
+  const planPath = join(paths.root, "rewrite-plan.json");
+  const acceptancePath = join(paths.root, "rewrite-acceptance.json");
+  const baselinePath = join(paths.root, "candidate-baseline.json");
+  const archivePath = join(paths.root, "fresh.clawlore2");
+  const snapshotReceiptPath = join(paths.root, "fresh.receipt.json");
+  const applyReceiptPath = join(paths.root, "rewrite-apply.json");
+  const plan = createPlan(paths);
+  await writePrivateJson(planPath, plan);
+  const acceptance = acceptLiveCandidateUnsafeTraceRewriteProposalV1({
+    sourcePath: paths.source,
+    dispositionPlanPath: paths.dispositionPlanPath,
+    archiveApplyReceiptPath: paths.archiveApplyPath,
+    archivePostcheckPath: paths.archivePostcheckPath,
+    rewritePayloadPath: paths.rewritePayloadPath,
+    proposalPlanPath: planPath,
+    now: () => new Date("2026-07-14T09:02:00.000Z"),
+  });
+  await writePrivateJson(acceptancePath, acceptance);
+  const db = new DatabaseSync(paths.source, { readOnly: true });
+  const promotionRows = db.prepare("SELECT item_id FROM memory_items WHERE lifecycle='candidate' ORDER BY item_id")
+    .all().map((row) => ({
+      itemIdSha256: sha256(row.item_id),
+      disposition: "hold_candidate",
+      reasonCodes: ["automatic_source_operator_review_missing"],
+    }));
+  db.close();
+  const baselineDigest = sha256(JSON.stringify(promotionRows));
+  await writePrivateJson(baselinePath, {
+    schemaVersion: 1,
+    phase: "clawlore-post-assignment-candidate-plan",
+    createdAt: "2026-07-14T09:02:30.000Z",
+    proposedRolloutId: "unsafe-rewrite-baseline-r1",
+    readOnly: true,
+    queryOnly: true,
+    emitsMemoryContent: false,
+    emitsTranscriptContent: false,
+    emitsRawIdentifiers: false,
+    source: {
+      ...plan.source,
+      baselineV1Rows: plan.source.v1Rows,
+      unmirroredV1Rows: 0,
+      missingLegacyRowsForV2: 0,
+      candidateBaselineUnchanged: true,
+      sourceUnchangedDuringPlan: true,
+    },
+    candidatePromotionPlan: {
+      schemaVersion: 1,
+      phase: "clawlore-candidate-promotion-plan",
+      readOnly: true,
+      emitsItemIds: false,
+      automaticPromotionRows: 0,
+      authorizesLiveMutation: false,
+      counts: { eligible_for_promotion: 0, hold_candidate: promotionRows.length, quarantine: 0, preserve_archived: 0 },
+      rows: promotionRows,
+      planDigest: baselineDigest,
+    },
+    decision: {
+      eligibleRows: 0,
+      lifecycleRolloutSelectable: false,
+      finalRecallCutoverBlockedByUnmirroredV1: false,
+      automaticPromotionRows: 0,
+    },
+    authorizesLifecycleMutation: false,
+    authorizesContextEngine: false,
+    authorizesPromptMutation: false,
+    authorizesFinalRecall: false,
+  });
+  const legacy = await inspectLegacySqliteSnapshotV2(paths.source);
+  const archive = Buffer.from("fixture encrypted snapshot");
+  await writeFile(archivePath, archive, { mode: 0o600 });
+  await chmod(archivePath, 0o600);
+  await writePrivateJson(snapshotReceiptPath, {
+    schemaVersion: 1,
+    phase: "clawlore-v2-live-encrypted-snapshot",
+    createdAt: "2026-07-14T09:03:00.000Z",
+    status: "pass",
+    authorizesV2Writes: false,
+    archiveSha256: sha256(archive),
+    sourceStableDuringBackup: true,
+    restoreVerified: true,
+    restoredPlaintextRemoved: true,
+    snapshot: {
+      schemaDigest: legacy.schemaDigest,
+      memoryTruthRows: legacy.memoryTruth.rowCount,
+      memoryTruthLogicalDigest: legacy.memoryTruth.logicalDigest,
+      integrity: "ok",
+      foreignKeyViolations: 0,
+    },
+  });
+  return {
+    ...paths,
+    plan,
+    planPath,
+    acceptancePath,
+    baselinePath,
+    baselineDigest,
+    archivePath,
+    snapshotReceiptPath,
+    applyReceiptPath,
+  };
+}
+
+test("unsafe trace rewrite exact apply changes 32 contents and independently postchecks protected state", async () => {
+  const paths = await liveApplyFixture();
+  try {
+    const receipt = await executeLiveCandidateUnsafeTraceRewriteV1({
+      sourcePath: paths.source,
+      planPath: paths.planPath,
+      payloadPath: paths.rewritePayloadPath,
+      proposalAcceptancePath: paths.acceptancePath,
+      candidateBaselinePath: paths.baselinePath,
+      candidateBaselineDigest: paths.baselineDigest,
+      snapshotArchivePath: paths.archivePath,
+      snapshotReceiptPath: paths.snapshotReceiptPath,
+      rolloutId: "clawlore-v2-unsafe-trace-rewrite-apply-r1",
+      planDigest: paths.plan.planDigest,
+      now: () => new Date("2026-07-14T09:04:00.000Z"),
+    });
+    assert.equal(receipt.rewrite.targetRows, 32);
+    assert.equal(receipt.rewrite.currentLifecycleRowsChanged, 0);
+    assert.equal(receipt.rewrite.nonTargetRowsChanged, 0);
+    assert.equal(receipt.projections.currentFtsRowsChanged, 32);
+    await writePrivateJson(paths.applyReceiptPath, receipt);
+    const postcheck = createLiveCandidateUnsafeTraceRewritePostcheckV1({
+      sourcePath: paths.source,
+      planPath: paths.planPath,
+      payloadPath: paths.rewritePayloadPath,
+      proposalAcceptancePath: paths.acceptancePath,
+      applyReceiptPath: paths.applyReceiptPath,
+      rolloutId: "clawlore-v2-unsafe-trace-rewrite-apply-r1",
+      planDigest: paths.plan.planDigest,
+      now: () => new Date("2026-07-14T09:05:00.000Z"),
+    });
+    assert.equal(postcheck.status, "pass");
+    assert.equal(postcheck.targetBinding.rewrittenRows, 32);
+    assert.equal(postcheck.targetBinding.mismatches, 0);
+    const db = new DatabaseSync(paths.source, { readOnly: true });
+    assert.equal(db.prepare("SELECT COUNT(*) AS rows FROM memory_items WHERE revision_no=2").get().rows, 32);
+    assert.equal(db.prepare("SELECT COUNT(*) AS rows FROM memory_revisions WHERE lifecycle='superseded'").get().rows, 32);
+    assert.equal(db.prepare("SELECT COUNT(*) AS rows FROM memory_relations WHERE relation_type='supersedes'").get().rows, 32);
+    assert.equal(db.prepare("SELECT COUNT(*) AS rows FROM clawlore_rollouts_v2").get().rows, 1);
+    assert.equal(db.prepare("SELECT COUNT(*) AS rows FROM projection_outbox").get().rows, 0);
+    db.close();
+  } finally {
+    await rm(paths.root, { recursive: true, force: true });
+  }
+});
+
+test("unsafe trace rewrite exact apply rejects multi-output materialization, target drift, and stale snapshot", async () => {
+  const multi = await liveApplyFixture({ oneOutputPerTarget: false });
+  try {
+    await assert.rejects(executeLiveCandidateUnsafeTraceRewriteV1({
+      sourcePath: multi.source,
+      planPath: multi.planPath,
+      payloadPath: multi.rewritePayloadPath,
+      proposalAcceptancePath: multi.acceptancePath,
+      candidateBaselinePath: multi.baselinePath,
+      candidateBaselineDigest: multi.baselineDigest,
+      snapshotArchivePath: multi.archivePath,
+      snapshotReceiptPath: multi.snapshotReceiptPath,
+      rolloutId: "clawlore-v2-unsafe-trace-rewrite-apply-r1",
+      planDigest: multi.plan.planDigest,
+      now: () => new Date("2026-07-14T09:04:00.000Z"),
+    }), /requires one final output per target/);
+  } finally {
+    await rm(multi.root, { recursive: true, force: true });
+  }
+
+  const drifted = await liveApplyFixture();
+  try {
+    const db = new DatabaseSync(drifted.source);
+    const target = db.prepare("SELECT item_id FROM memory_items WHERE item_id LIKE 'legacy:rewrite-%' ORDER BY item_id LIMIT 1").get();
+    db.prepare("UPDATE memory_items SET content=content || ' drift' WHERE item_id=?").run(target.item_id);
+    db.close();
+    await assert.rejects(executeLiveCandidateUnsafeTraceRewriteV1({
+      sourcePath: drifted.source,
+      planPath: drifted.planPath,
+      payloadPath: drifted.rewritePayloadPath,
+      proposalAcceptancePath: drifted.acceptancePath,
+      candidateBaselinePath: drifted.baselinePath,
+      candidateBaselineDigest: drifted.baselineDigest,
+      snapshotArchivePath: drifted.archivePath,
+      snapshotReceiptPath: drifted.snapshotReceiptPath,
+      rolloutId: "clawlore-v2-unsafe-trace-rewrite-apply-r1",
+      planDigest: drifted.plan.planDigest,
+      now: () => new Date("2026-07-14T09:04:00.000Z"),
+    }), /no longer matches/);
+  } finally {
+    await rm(drifted.root, { recursive: true, force: true });
+  }
+
+  const stale = await liveApplyFixture();
+  try {
+    await assert.rejects(executeLiveCandidateUnsafeTraceRewriteV1({
+      sourcePath: stale.source,
+      planPath: stale.planPath,
+      payloadPath: stale.rewritePayloadPath,
+      proposalAcceptancePath: stale.acceptancePath,
+      candidateBaselinePath: stale.baselinePath,
+      candidateBaselineDigest: stale.baselineDigest,
+      snapshotArchivePath: stale.archivePath,
+      snapshotReceiptPath: stale.snapshotReceiptPath,
+      rolloutId: "clawlore-v2-unsafe-trace-rewrite-apply-r1",
+      planDigest: stale.plan.planDigest,
+      now: () => new Date("2026-07-14T11:04:00.000Z"),
+    }), /snapshot is invalid, stale/);
+  } finally {
+    await rm(stale.root, { recursive: true, force: true });
   }
 });
