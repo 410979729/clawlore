@@ -297,6 +297,25 @@
   and only then create the private payload and a separate exact rewrite
   transaction. No content, lifecycle, verification, projection, runtime, or
   cutover mutation occurred in B3A.
+- Phase 8F-B3B converges the exact r12 two-row append under a fresh encrypted
+  snapshot, then binds a second snapshot to one final bounded output per 32
+  rewrite targets. The transaction creates 32 new current revisions/sources/
+  supersedes relations/events and updates 32 current-FTS rows. Independent
+  postcheck proves zero mismatch while V1, lifecycle, verification, address,
+  ACL, compatibility/vector/relation projections, outbox, non-target rows, and
+  runtime gates remain unchanged.
+- Phase 8G closes the post-rewrite state transition with a receipt-aware,
+  query-only plan. The 32 successfully rewritten rows are removed from generic
+  semantic review only after their proposal/apply/postcheck chain is valid.
+  Authenticated review of the exact remaining 2 safe duplicates + 56 semantic
+  rows proposes 24 reversible archives and retains 34 candidates for evidence;
+  no rewrite hold or mutation-ready row remains.
+- Phase 9 records explicit `no_cutover`. V1/V2 and all projections are 1005,
+  but active/injectable V2 rows and eligible promotions are 0, verification
+  debt remains, 24 archive proposals are unapplied, current content differs in
+  47 mapped rows, and runtime implements only disabled/read-only shadow modes.
+  V1 fallback remains enabled; ContextEngine, prompt mutation, lifecycle
+  promotion, and final recall remain disabled.
 
 ## Naming matrix
 

@@ -849,10 +849,10 @@ overlap below 0.8.
       all 131 unsafe rows query-only as 99 soft-archive proposals plus 32
       bounded-rewrite holds. No disposition or runtime mutation was performed;
       full 236/236 and release pack 504 pass.
-- [ ] Phase 8F-B: under independent exact controls, verify/apply any selected
+- [x] Phase 8F-B: under independent exact controls, verify/apply any selected
       99-row soft archive and develop bounded rewrites for the 32 held rows.
-- [ ] Phase 8G: adjudicate the 2 safe duplicates and 56 semantic-review rows.
-- [ ] Phase 9: make an explicit lifecycle/final-recall cutover or no-cutover
+- [x] Phase 8G: adjudicate the 2 safe duplicates and 56 semantic-review rows.
+- [x] Phase 9: make an explicit lifecycle/final-recall cutover or no-cutover
       decision. ContextEngine, prompt mutation, and final recall remain off.
 
 ## Phase 8D — Exact companion soft archive
@@ -918,7 +918,7 @@ overlap below 0.8.
       blocker; active/injectable V2 recall remains 0.
 - [x] Pass focused 10/10, full 236/236, typecheck/build/module/vector/golden/
       release gates; closing package scan 504 files.
-- [ ] Phase 8F-B must create separate exact archive and rewrite controls. This
+- [x] Phase 8F-B created separate exact archive and rewrite controls. The
       read-only adjudication authorizes no archive, rewrite, verification,
       lifecycle, ContextEngine, prompt mutation, hard delete, or final recall.
 
@@ -953,7 +953,7 @@ overlap below 0.8.
       remaining archive proposals / 32 rewrite holds.
 - [x] Pass focused 6/6, full 242/242, typecheck/build/vector/golden/release
       gates; closing package scan 521 files.
-- [ ] Phase 8F-B3 must create payload-bearing proposals and a separate exact
+- [x] Phase 8F-B3 created payload-bearing proposals and a separate exact
       rewrite transaction for only the remaining 32 holds. Phase 8F-B2 grants
       no rewrite, verification, promotion, ContextEngine, prompt mutation, hard
       delete, or final recall authority.
@@ -975,10 +975,51 @@ overlap below 0.8.
       remain non-authorizing and require a fresh snapshot plus separate apply.
 - [x] Pass focused 18/18, new B3A 5/5, full 247/247, typecheck/build, module
       boundaries, vector repair, golden recall, and release gate; pack 529.
-- [ ] Phase 8F-B3B: converge the new exact two-row V1-only append from live
+- [x] Phase 8F-B3B: converge the new exact two-row V1-only append from live
       1005/1003 under a fresh encrypted snapshot, rebuild all controls, then
       create the private payload and design/apply a separate exact rewrite
       transaction. No live private memory content was read or changed in B3A.
+
+## Phase 8F-B3B — Exact unsafe-trace rewrite live apply
+
+- [x] Take a fresh restore-verified encrypted snapshot and converge only the
+      exact r12 two-row append. Restore V1/V2 and all four projections to 1005,
+      candidate 569, active 0, archived 436, pending 0.
+- [x] Rebuild every candidate/content/unsafe control from post-r12 live truth,
+      then create and independently accept an owner-only 32-row payload.
+- [x] Materialize exactly one bounded safe synthesis per target. Create 32 new
+      revisions/sources/supersedes relations/events and update 32 current-FTS
+      rows while changing lifecycle, verification, address, ACL, V1, other
+      projections, outbox, non-target rows, and runtime gates by zero.
+- [x] Independently postcheck 32 rewrite receipts and all protected bindings
+      with zero mismatches, integrity ok, and FK 0.
+
+## Phase 8G — Post-rewrite safe-lane adjudication
+
+- [x] Add a receipt-aware boundary that closes the 32 rewritten rows from the
+      generic manual-semantic queue only after validating the complete proposal/
+      apply/postcheck chain and current safe content digests.
+- [x] Review the exact remaining 2 safe duplicates plus 56 semantic rows under
+      private operator authority without emitting memory text or raw ids.
+- [x] Produce 24 reversible soft-archive proposals and retain 34 durable rows
+      for verification; bounded rewrite holds and mutation-ready rows are 0.
+- [x] Keep the Phase 8G result query-only. Any future selection of the 24
+      proposals requires a separate snapshot-bound exact apply and postcheck.
+
+## Phase 9 — Explicit no-cutover decision
+
+- [x] Bind the current candidate baseline, Phase 8G plan, rewrite postcheck,
+      live configuration, database counts, integrity, and V1/V2 divergence.
+- [x] Record `no_cutover`: active/injectable rows 0, eligible promotions 0,
+      verification debt present, 24 unapplied archive proposals, 47 current
+      content differences, and no implemented runtime cutover mode.
+- [x] Preserve V1 fallback and read-only shadow; keep lifecycle promotion,
+      ContextEngine, prompt mutation, and final recall disabled.
+- [x] Pass focused 6/6, full 255/255, typecheck/build/module/runtime/vector/
+      golden/release gates; closing package scan 547 files.
+
+Run report:
+`docs/clawlore-v2/eval/phase8f-b3b-phase8g-phase9-completion-run-2026-07-14.md`.
 
 ## Phase 0 verification
 

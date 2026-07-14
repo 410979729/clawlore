@@ -1,53 +1,54 @@
 # ClawLore 2.0 project handoff
 
-Current through Phase 8F-B3A on 2026-07-14.
+Current through Phase 9 on 2026-07-14.
 
 ## Live position
 
-- OpenClaw runtime: shadow registration, hooks=1, writes=false,
-  promptMutation=false, contextEngine=false, blocks=none.
-- Gateway: active/running, PID 328735, NRestarts 1; healthz live.
-- Live truth has advanced to V1 1005 while V2/current FTS/vector/relation remain
-  1003; candidate 567, active 0, archived 436, pending outbox 0. Integrity is ok
+- OpenClaw runtime remains read-only shadow: hooks=1, writes=false,
+  promptMutation=false, ContextEngine=false, final recall=false.
+- Live V1/V2/compatibility FTS/current FTS/vector/relation are 1005 each;
+  candidate 569, active 0, archived 436, pending outbox 0. Integrity is `ok`
   and foreign-key violations are 0.
-- The last rebuilt policy/content controls remain valid only for the 1003/1003
-  Phase 8F-B2 postcheck. They are navigation evidence, not current write
-  authority, until the exact two-row append is converged and controls rebuilt.
+- Current candidate policy is 0 eligible / 411 hold / 156 quarantine. Phase 8G
+  closes the exact 2 safe duplicates + 56 semantic rows as 24 reversible
+  archive proposals and 34 retained-for-verification candidates.
+- Phase 9 decision is `no_cutover`; V1 fallback and shadow remain authoritative.
 
 ## Latest completed phase
 
-Phase 8F-B3A added a non-mutating payload proposal and independent acceptance
-layer for the exact 32 rewrite holds. The owner-only payload may carry proposed
-prose; the public plan contains only hashes, lengths, evidence digests, counts,
-and review metadata. The control fixes the lane at 7 oversized rows with one to
-four outputs and 25 semantic rows with exactly one output. Capture-unsafe,
-colliding, duplicate, incomplete, stale, or content-leaking proposals fail
-closed, and every plan remains mutation-ready 0.
+Phase 8F-B3B first converged the exact two-row r12 append under a fresh encrypted
+snapshot. A second snapshot then bound the accepted owner-only payload to an
+exact 32-row rewrite transaction. The apply created 32 revisions, sources,
+supersedes relations, events, and current-FTS updates while preserving V1,
+lifecycle, verification, address, ACL, other projections, outbox, non-target
+rows, and runtime gates. Independent postcheck found zero mismatches.
 
-Read-only live inspection found a new two-row V1-only append: V1 1005 versus V2
-and all four V2 projections at 1003. The new planner correctly refuses this
-unconverged source. No private rewrite payload was created, no live memory body
-was read or changed, and no snapshot or transaction was opened.
+Phase 8G introduced receipt-aware closure so the 32 rewritten rows are not
+reintroduced into the generic semantic queue. Authenticated private review
+covered all remaining 58 rows without emitting their prose or raw ids. It
+proposes 24 exact soft archives and retains 34 durable candidates pending
+verification; rewrite holds are 0. The result is query-only.
 
-- full tests: 247/247 PASS;
-- focused B1/B2/durable/B3A: 18/18 PASS;
-- release package scan: 529 files;
-- code commit: `365a7c0`;
+Phase 9 binds live configuration and database truth into an explicit
+`no_cutover` receipt. Active/injectable rows and eligible promotions are 0,
+candidate verification debt remains, 24 archive proposals are unapplied, 47
+current V1/V2 content differences exist, and runtime cutover is not implemented.
+
+- full tests: 255/255 PASS;
+- focused Phase 8G/9: 6/6 PASS;
+- typecheck/build/module/runtime/vector/golden/release: PASS;
+- release package scan: 547 files;
+- code commit: `96d9bfe`;
 - run report:
-  `eval/phase8f-b3a-unsafe-trace-rewrite-proposal-controls-run-2026-07-14.md`.
+  `eval/phase8f-b3b-phase8g-phase9-completion-run-2026-07-14.md`.
 
-## Remaining controlled route
+## Closed boundary and future work
 
-1. Phase 8F-B3B: converge only the two new V1 rows under a fresh encrypted
-   snapshot, rebuild controls, then create/accept the owner-only payload and
-   separately design/apply exact materialization for the 32 holds. Do not reuse
-   archive authority.
-2. Phase 8G: adjudicate 2 safe duplicates and 56 semantic-review rows.
-3. Phase 9: make an explicit lifecycle/final-recall cutover or no-cutover
-   decision.
+The planned ClawLore v2 route is complete through Phase 9. `no_cutover` is the
+completed decision, not an implied approval to enable V2 injection.
 
-No completed phase authorizes automatic rejection, content rewrite, further
-archive, verification, lifecycle promotion, ContextEngine, prompt mutation, or
-final recall outside its exact target set. Re-read live state, take a fresh
-encrypted snapshot before any mutation, and regenerate stale candidate/quality
-plans after every append or lifecycle change.
+Future work is a new scope: either execute selected Phase 8G archive proposals
+under a fresh exact transaction, acquire promotion-grade evidence for retained
+candidates, or implement and separately authorize a real runtime cutover mode.
+Any such work must re-read live truth and create new controls; none may reuse
+the Phase 8F/8G query-only authority as write permission.
