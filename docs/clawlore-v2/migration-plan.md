@@ -285,6 +285,18 @@
   semantic review. The unsafe archive lane is now empty; Phase 8F-B3 requires
   separate payload-bearing authority for the 32 rewrite holds. Phase 8G and
   Phase 9 remain independent.
+- Phase 8F-B3A adds that payload-bearing proposal boundary without creating a
+  live payload or write authority. Exact coverage is fixed at 7 oversized holds
+  with one-to-four bounded outputs and 25 semantic holds with exactly one. The
+  owner-only payload carries proposed prose; the redacted plan carries only
+  hashes, lengths, evidence digests, and counts, and independent acceptance
+  recomputes capture safety, corpus dedupe, source lineage, target revision, and
+  the B1/B2 control chain. Live inspection found V1/V2 1005/1003, so the planner
+  correctly refuses the stale baseline. Phase 8F-B3B must first converge the
+  exact two-row append under a fresh encrypted snapshot, rebuild every control,
+  and only then create the private payload and a separate exact rewrite
+  transaction. No content, lifecycle, verification, projection, runtime, or
+  cutover mutation occurred in B3A.
 
 ## Naming matrix
 

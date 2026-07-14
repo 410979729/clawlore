@@ -958,6 +958,28 @@ overlap below 0.8.
       no rewrite, verification, promotion, ContextEngine, prompt mutation, hard
       delete, or final recall authority.
 
+## Phase 8F-B3A — Unsafe trace rewrite proposal controls
+
+- [x] Add an exact 32-row payload planner for 7 oversized segmentation holds
+      and 25 semantic durable-result extraction holds. Oversized rows accept
+      one to four bounded outputs; semantic rows accept exactly one.
+- [x] Keep proposed prose only in a 0600 payload and emit a redacted plan with
+      hashes, lengths, evidence digests, counts, and review metadata only.
+- [x] Bind the payload and plan to the Phase 8F-B1 disposition digest/SHA plus
+      the Phase 8F-B2 apply and postcheck SHA chain.
+- [x] Require capture-safety PASS, zero corpus collision, mutually distinct
+      outputs, unchanged protected revisions/lineage/category, and a fully
+      converged append-only live source extension.
+- [x] Add independent acceptance that recomputes the complete proposal and
+      rejects proposed-content or raw trace leakage. Proposal and acceptance
+      remain non-authorizing and require a fresh snapshot plus separate apply.
+- [x] Pass focused 18/18, new B3A 5/5, full 247/247, typecheck/build, module
+      boundaries, vector repair, golden recall, and release gate; pack 529.
+- [ ] Phase 8F-B3B: converge the new exact two-row V1-only append from live
+      1005/1003 under a fresh encrypted snapshot, rebuild all controls, then
+      create the private payload and design/apply a separate exact rewrite
+      transaction. No live private memory content was read or changed in B3A.
+
 ## Phase 0 verification
 
 - Focused Memory Address V2 tests: 8/8 PASS.
