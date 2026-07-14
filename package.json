@@ -46,6 +46,8 @@
     "audit:clawlore-shadow-observation": "node scripts/clawlore-shadow-observation-audit.mjs",
     "preflight:clawlore-live-migration": "node scripts/clawlore-legacy-live-preflight.mjs",
     "snapshot:clawlore-encrypted-live": "node scripts/clawlore-encrypted-live-snapshot.mjs",
+    "truth:clawlore-schema-preview": "node scripts/clawlore-truth-schema-hardening.mjs preview",
+    "truth:clawlore-schema-apply": "node scripts/clawlore-truth-schema-hardening.mjs apply",
     "rollout:clawlore-live-v2-write": "node scripts/clawlore-live-v2-write-rollout.mjs",
     "eval:clawlore-live-recall-parity": "node scripts/clawlore-live-recall-parity.mjs",
     "smoke:clawlore-ranking-promotion": "node scripts/clawlore-ranking-promotion-smoke.mjs",

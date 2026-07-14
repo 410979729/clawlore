@@ -44,7 +44,7 @@ cutover can be considered.
 - Propagate `AbortSignal` and enforce bounded global/per-session concurrency and
   deduplication so timed-out retrieval cannot continue without limit.
 
-## H4 — Reproducible release identity — completed in source (`pending commit`)
+## H4 — Reproducible release identity — completed (`9754d55`)
 
 - Make a missing or unresolvable live extension fail the release gate unless a
   named, auditable source-only mode is explicitly requested.
