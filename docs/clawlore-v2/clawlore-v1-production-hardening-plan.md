@@ -1,6 +1,6 @@
 # ClawLore v1 production hardening plan
 
-Status: active from 2026-07-14 after the independent post-Phase-9 audit.
+Status: H1-H5 completed on 2026-07-14; final decision `no_cutover`.
 
 ## Naming and boundary
 
@@ -60,7 +60,7 @@ CycloneDX SBOM with 42 components, and removed its temporary source tree. The
 source-only release gate separately passed with an explicit no-live-claim
 receipt. A nonexistent live target failed closed before any test or smoke.
 
-## H5 — Recovery, soak, deployment, and fresh decision — live validation in progress
+## H5 — Recovery, soak, deployment, and fresh decision — completed (`71e1659` + final acceptance)
 
 - Restore a fresh encrypted live snapshot to an isolated path and verify digest,
   SQLite integrity, constrained foreign keys, and cleanup.
@@ -73,8 +73,28 @@ receipt. A nonexistent live target failed closed before any test or smoke.
 - Cutover is not implied by passing earlier stages; a fresh receipt must name
   the exact deployed artifact and current live truth.
 
-## Current acceptance posture
+Acceptance evidence: a fresh encrypted snapshot restored with matching
+logical/schema digests and no plaintext residue; schema 2→3 migrated 1005
+identities with enforceable foreign keys and zero violations; candidate and
+deployed runtime digests both equal
+`c4e43382dbbf09379e51ba1334a8574fcf1369a496f7bb1246cdeb0c455d2251`.
+After restart the app-local OpenClaw 2026.7.1-beta.5 surface loaded the exact
+extension, the default live release gate passed 267/267 tests and recursive
+identity, doctor/schema/privacy checks passed, direct/group shadow fixtures
+and all 17 resource-bound regressions passed, and a 50-second 12/12 live soak
+added no errors. The fresh decision remains `no_cutover`: active/eligible are
+zero, 493 candidate rows remain unverified, 24 archive proposals remain
+unapplied, 47 current-content differences remain, and no cutover runtime mode
+exists. See
+`docs/clawlore-v2/eval/clawlore-v1-h5-production-deployment-run-2026-07-14.md`.
 
-- Existing live Scope Recall 1.1.0: keep serving.
-- ClawLore native write/ContextEngine/final recall: `NO-GO` until H1-H5 close.
-- Current read-only shadow: allowed while its trace remains redacted and 0600.
+## Final acceptance posture
+
+- Existing compatible Scope Recall 1.1.0 surface: keep serving V1 fallback.
+- Hardened ClawLore v1 read-only native shadow: deployed and accepted for
+  continued observation while its trace remains redacted and 0600.
+- ClawLore native write, lifecycle promotion, ContextEngine, prompt mutation,
+  and final recall: `NO-GO` under the fresh H5 receipt.
+- A future cutover requires new principal/verification evidence, positive
+  native retrieval samples, an implemented cutover mode, and a separately
+  authorized decision; H5 completion does not grant that authority.
