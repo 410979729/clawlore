@@ -60,6 +60,8 @@
     "rollout:clawlore-unsafe-trace-archive": "node scripts/clawlore-live-candidate-unsafe-trace-archive.mjs",
     "postcheck:clawlore-unsafe-trace-archive": "node scripts/clawlore-candidate-unsafe-trace-archive-postcheck.mjs",
     "preview:clawlore-post-unsafe-trace-archive-candidates": "node scripts/clawlore-post-unsafe-trace-archive-candidate-plan.mjs",
+    "preview:clawlore-unsafe-trace-rewrite": "node scripts/clawlore-candidate-unsafe-trace-rewrite-proposal.mjs",
+    "accept:clawlore-unsafe-trace-rewrite": "node scripts/clawlore-candidate-unsafe-trace-rewrite-acceptance.mjs",
     "preview:clawlore-duplicate-trace-adjudication": "node scripts/clawlore-candidate-duplicate-trace-adjudication.mjs",
     "preview:clawlore-durable-rewrite": "node scripts/clawlore-candidate-durable-rewrite-proposal.mjs",
     "accept:clawlore-durable-rewrite": "node scripts/clawlore-candidate-durable-rewrite-acceptance.mjs",
