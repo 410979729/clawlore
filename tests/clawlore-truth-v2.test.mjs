@@ -123,6 +123,46 @@ test("Truth V2 rolls back partial writes and requires approval for purge", async
   }
 });
 
+test("Truth V2 correction preserves candidate lifecycle and cannot restore archived memory", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clawlore-truth-lifecycle-"));
+  const store = new SqliteTruthStoreV2(join(root, "truth.sqlite"), clock());
+  try {
+    store.open();
+    store.remember({
+      itemId: "candidate-memory",
+      content: "candidate content",
+      category: "fact",
+      address: address(),
+      lifecycle: "candidate",
+      verification: "unverified",
+      source: { sourceType: "extractor", observedAt: "2026-07-11T10:00:00Z" },
+      actor: "agent:main",
+      reason: "fixture",
+    });
+    store.correct({
+      itemId: "candidate-memory",
+      content: "corrected candidate content",
+      source: { sourceType: "user_message", observedAt: "2026-07-11T10:00:00Z" },
+      actor: "principal:user-1",
+      reason: "bounded correction",
+    });
+    assert.equal(store.get("candidate-memory").lifecycle, "candidate");
+
+    store.forget({ itemId: "candidate-memory", actor: "principal:user-1", reason: "archive" });
+    assert.throws(() => store.correct({
+      itemId: "candidate-memory",
+      content: "must not restore",
+      source: { sourceType: "user_message", observedAt: "2026-07-11T10:00:00Z" },
+      actor: "principal:user-1",
+      reason: "correction without restore authority",
+    }), /explicit restore/);
+    assert.equal(store.get("candidate-memory").lifecycle, "archived");
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("legacy migration preview is read-only and preserves verification debt", async () => {
   const root = await mkdtemp(join(tmpdir(), "clawlore-legacy-preview-"));
   const path = join(root, "legacy.sqlite");

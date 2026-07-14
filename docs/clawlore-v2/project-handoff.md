@@ -1,6 +1,21 @@
 # ClawLore 2.0 project handoff
 
-Current through Phase 9 on 2026-07-14.
+Current through Phase 9 and active ClawLore v1 production hardening H1 on
+2026-07-14.
+
+## Independent audit reopening
+
+The original route remains correctly closed at Phase 9 `no_cutover`, but an
+independent read-only audit found five P1 production blockers plus release,
+diagnostic, resource-bound, and maintainability debt. ClawLore v1 is therefore
+a candidate/shadow architecture, not a completed production cutover.
+
+The new bounded route is recorded in
+`clawlore-v1-production-hardening-plan.md`. H1 now routes correct/forget through
+the unified address policy, preserves non-active lifecycle during correction,
+rejects correction-as-restore, and redacts digest diagnostics. Focused
+adversarial tests are 8/8 PASS and typecheck passes. Full bundle gates remain
+open; live extension/config/database/service are unchanged.
 
 ## Live position
 

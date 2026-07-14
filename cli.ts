@@ -23,6 +23,10 @@ import {
   recoverDigestChunks,
   runDigestPipeline,
 } from "./src/digest-pipeline.js";
+import {
+  redactDigestReportForDiagnostics,
+  redactDigestRunForDiagnostics,
+} from "./src/diagnostics-redaction.js";
 import { applyCleanup, rollbackCleanupBatch } from "./src/governance-cleanup.js";
 import { graphHygieneReport, repairGraphHygiene } from "./src/graph-hygiene.js";
 import { recoveryReport, scheduleReplay } from "./src/journal-recovery.js";
@@ -512,7 +516,7 @@ function collectNightlyDigestHealth(db: DatabaseSync | null): Record<string, unk
   if (!db) {
     return { enabled: false, status: "unavailable" };
   }
-  const nativeDigest = digestReport(db, { sampleLimit: 3 });
+  const nativeDigest = redactDigestReportForDiagnostics(digestReport(db, { sampleLimit: 0 }));
   const tables = tableNames(db);
   if (!tables.has("nightly_digest_runs")) {
     return {
@@ -537,7 +541,7 @@ function collectNightlyDigestHealth(db: DatabaseSync | null): Record<string, unk
       total,
       byStatus: groupedCounts(db, "SELECT status AS key, COUNT(*) AS count FROM nightly_digest_runs GROUP BY status"),
     },
-    lastRun: lastRun || {},
+    lastRun: redactDigestRunForDiagnostics(lastRun),
     native: nativeDigest,
   };
 }

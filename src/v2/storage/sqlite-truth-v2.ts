@@ -191,6 +191,10 @@ export class SqliteTruthStoreV2 implements TruthStoreV2Port, MemoryCenterReadPor
     const db = this.requireDb();
     const current = this.get(input.itemId);
     if (!current) throw new Error("memory item not found");
+    if (["archived", "superseded", "purged"].includes(current.lifecycle)) {
+      throw new Error(`memory correction requires an explicit restore from lifecycle ${current.lifecycle}`);
+    }
+    const nextLifecycle = current.lifecycle;
     const now = this.clock.now().toISOString();
     const revisionId = this.clock.id();
     const eventId = this.clock.id();
@@ -201,12 +205,12 @@ export class SqliteTruthStoreV2 implements TruthStoreV2Port, MemoryCenterReadPor
       db.prepare(`INSERT INTO memory_revisions
         (revision_id,item_id,revision_no,content,lifecycle,verification,valid_until,created_at)
         VALUES (?,?,?,?,?,?,?,?)`).run(
-        revisionId, current.itemId, current.revision + 1, input.content.trim(), "active",
+        revisionId, current.itemId, current.revision + 1, input.content.trim(), nextLifecycle,
         input.verification ?? current.verification, input.validUntil ?? current.validUntil ?? null, now,
       );
-      db.prepare(`UPDATE memory_items SET current_revision_id=?,revision_no=?,content=?,lifecycle='active',
+      db.prepare(`UPDATE memory_items SET current_revision_id=?,revision_no=?,content=?,lifecycle=?,
         verification=?,valid_until=?,updated_at=? WHERE item_id=?`).run(
-        revisionId, current.revision + 1, input.content.trim(), input.verification ?? current.verification,
+        revisionId, current.revision + 1, input.content.trim(), nextLifecycle, input.verification ?? current.verification,
         input.validUntil ?? current.validUntil ?? null, now, current.itemId,
       );
       this.insertSource(revisionId, input.source);

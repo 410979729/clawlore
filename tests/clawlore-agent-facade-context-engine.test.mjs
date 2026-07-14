@@ -144,6 +144,71 @@ test("Agent facade exposes four core actions and filters before returning memory
   }
 });
 
+test("Agent facade mutations enforce conversation, thread, and project boundaries", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clawlore-agent-facade-boundary-"));
+  const store = new SqliteTruthStoreV2(join(root, "truth.sqlite"), clock());
+  try {
+    store.open();
+    const facade = new AgentMemoryFacadeV2(store);
+    const conversationOwner = address({ visibility: "conversation", principalId: "user-1" });
+    const projectOwner = address({ visibility: "project", principalId: "user-1" });
+    store.remember({
+      itemId: "conversation-memory",
+      content: "conversation A fact",
+      category: "fact",
+      address: conversationOwner,
+      source: { sourceType: "user_message", observedAt: "2026-07-11T12:00:00Z" },
+      actor: "principal:user-1",
+      reason: "fixture",
+    });
+    store.remember({
+      itemId: "project-memory",
+      content: "project A fact",
+      category: "fact",
+      address: projectOwner,
+      source: { sourceType: "user_message", observedAt: "2026-07-11T12:00:00Z" },
+      actor: "principal:user-1",
+      reason: "fixture",
+    });
+
+    for (const actor of [
+      address({ visibility: "conversation", conversationId: "chat-2" }),
+      address({ visibility: "conversation", threadId: "thread-2" }),
+    ]) {
+      assert.throws(() => facade.correct({
+        actor,
+        itemId: "conversation-memory",
+        content: "cross-boundary correction",
+        observedAt: "2026-07-11T12:00:00Z",
+      }), /not accessible/);
+      assert.throws(() => facade.forget({
+        actor,
+        itemId: "conversation-memory",
+        reason: "cross-boundary forget",
+      }), /not accessible/);
+    }
+
+    const otherProject = address({ visibility: "project", projectId: "project-2" });
+    assert.throws(() => facade.correct({
+      actor: otherProject,
+      itemId: "project-memory",
+      content: "cross-project correction",
+      observedAt: "2026-07-11T12:00:00Z",
+    }), /not accessible/);
+    assert.throws(() => facade.forget({
+      actor: otherProject,
+      itemId: "project-memory",
+      reason: "cross-project forget",
+    }), /not accessible/);
+
+    assert.equal(store.get("conversation-memory").content, "conversation A fact");
+    assert.equal(store.get("project-memory").content, "project A fact");
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("ContextEngine remains compatibility-first and fails closed on missing host capabilities", () => {
   const compatibility = negotiateContextEngineV2({ requested: "compatibility", host: completeHost() });
   assert.equal(compatibility.selected, "compatibility");

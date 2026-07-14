@@ -1,3 +1,4 @@
+import { decideMemoryAccess } from "./policy-decision.js";
 export const CLAWLORE_AGENT_ACTIONS = [
     "memory_query",
     "memory_remember",
@@ -8,6 +9,20 @@ export class AgentMemoryFacadeV2 {
     truth;
     constructor(truth) {
         this.truth = truth;
+    }
+    requireAccessible(actor, itemId, operation) {
+        const current = this.truth.get(itemId);
+        if (!current)
+            throw new Error("memory item is not accessible to actor");
+        const decision = decideMemoryAccess({
+            actor,
+            target: current.address,
+            operation,
+            mode: "explicit",
+        });
+        if (!decision.allowed)
+            throw new Error("memory item is not accessible to actor");
+        return current;
     }
     query(actor, query, limit) {
         return this.truth.queryAccessible(actor, query, limit);
@@ -25,12 +40,7 @@ export class AgentMemoryFacadeV2 {
         });
     }
     correct(input) {
-        const current = this.truth.get(input.itemId);
-        if (!current || current.address.tenantId !== input.actor.tenantId
-            || current.address.agentId !== input.actor.agentId
-            || current.address.principalId !== input.actor.principalId) {
-            throw new Error("memory item is not accessible to actor");
-        }
+        this.requireAccessible(input.actor, input.itemId, "correct");
         return this.truth.correct({
             itemId: input.itemId,
             content: input.content,
@@ -41,12 +51,7 @@ export class AgentMemoryFacadeV2 {
         });
     }
     forget(input) {
-        const current = this.truth.get(input.itemId);
-        if (!current || current.address.tenantId !== input.actor.tenantId
-            || current.address.agentId !== input.actor.agentId
-            || current.address.principalId !== input.actor.principalId) {
-            throw new Error("memory item is not accessible to actor");
-        }
+        this.requireAccessible(input.actor, input.itemId, "forget");
         return this.truth.forget({
             itemId: input.itemId,
             actor: `principal:${input.actor.principalId}`,

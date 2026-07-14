@@ -1,5 +1,6 @@
 import type { MemoryAddressV2 } from "../domain/memory-address.js";
 import type { MemoryMutationReceiptV2, MemoryRecordV2 } from "../domain/memory-record.js";
+import { decideMemoryAccess, type MemoryOperation } from "./policy-decision.js";
 import type { TruthStoreV2Port } from "./ports/truth-store.js";
 
 export const CLAWLORE_AGENT_ACTIONS = [
@@ -11,6 +12,23 @@ export const CLAWLORE_AGENT_ACTIONS = [
 
 export class AgentMemoryFacadeV2 {
   constructor(private readonly truth: TruthStoreV2Port) {}
+
+  private requireAccessible(
+    actor: MemoryAddressV2,
+    itemId: string,
+    operation: Extract<MemoryOperation, "correct" | "forget">,
+  ): MemoryRecordV2 {
+    const current = this.truth.get(itemId);
+    if (!current) throw new Error("memory item is not accessible to actor");
+    const decision = decideMemoryAccess({
+      actor,
+      target: current.address,
+      operation,
+      mode: "explicit",
+    });
+    if (!decision.allowed) throw new Error("memory item is not accessible to actor");
+    return current;
+  }
 
   query(actor: MemoryAddressV2, query: string, limit?: number): MemoryRecordV2[] {
     return this.truth.queryAccessible(actor, query, limit);
@@ -42,12 +60,7 @@ export class AgentMemoryFacadeV2 {
     sourceId?: string;
     observedAt: string;
   }): MemoryMutationReceiptV2 {
-    const current = this.truth.get(input.itemId);
-    if (!current || current.address.tenantId !== input.actor.tenantId
-      || current.address.agentId !== input.actor.agentId
-      || current.address.principalId !== input.actor.principalId) {
-      throw new Error("memory item is not accessible to actor");
-    }
+    this.requireAccessible(input.actor, input.itemId, "correct");
     return this.truth.correct({
       itemId: input.itemId,
       content: input.content,
@@ -59,12 +72,7 @@ export class AgentMemoryFacadeV2 {
   }
 
   forget(input: { actor: MemoryAddressV2; itemId: string; reason: string }): MemoryMutationReceiptV2 {
-    const current = this.truth.get(input.itemId);
-    if (!current || current.address.tenantId !== input.actor.tenantId
-      || current.address.agentId !== input.actor.agentId
-      || current.address.principalId !== input.actor.principalId) {
-      throw new Error("memory item is not accessible to actor");
-    }
+    this.requireAccessible(input.actor, input.itemId, "forget");
     return this.truth.forget({
       itemId: input.itemId,
       actor: `principal:${input.actor.principalId}`,

@@ -2,6 +2,50 @@
 
 Updated: 2026-07-14
 
+## ClawLore v1 production hardening — active after Phase 9
+
+The original migration roadmap closed with `no_cutover`. Independent audit
+found production blockers, now tracked in
+`docs/clawlore-v2/clawlore-v1-production-hardening-plan.md`.
+
+### H1 — Mutation authorization and diagnostic privacy
+
+- [x] Route Agent facade correct/forget through unified address policy.
+- [x] Deny cross-conversation, cross-thread, and cross-project mutations.
+- [x] Preserve candidate/observed lifecycle during correction.
+- [x] Deny correction of archived/superseded/purged memory without restore authority.
+- [x] Redact default digest health output to status/count/timestamp fields.
+- [x] Add focused adversarial regressions; 8/8 and typecheck pass.
+- [ ] Pass full regression/build/release gates after the complete hardening bundle.
+
+### H2 — Enforceable SQL integrity
+
+- [ ] Define persistent item identity/tombstone semantics for purge audit/outbox.
+- [ ] Add real foreign keys and explicit delete behavior.
+- [ ] Add existing-database preview/apply/postcheck migration controls.
+- [ ] Prove orphan inserts fail and constrained foreign-key checks are meaningful.
+
+### H3 — Native retrieval shadow and resource bounds
+
+- [ ] Implement a real V2 truth/FTS/vector shadow retriever.
+- [ ] Dual-run V1 and V2 without prompt mutation or writes.
+- [ ] Propagate cancellation and enforce concurrency/deduplication limits.
+- [ ] Add divergence/latency/scope regressions and redacted trace evidence.
+
+### H4 — Reproducible release identity
+
+- [ ] Make missing live extension fail closed outside explicit source-only mode.
+- [ ] Compare recursive runtime artifacts by manifest and SHA-256.
+- [ ] Add build/commit identity independent of SemVer.
+- [ ] Commit lockfile and prove clean `npm ci`/pack/SBOM reproducibility.
+
+### H5 — Recovery, soak, deployment, and fresh decision
+
+- [ ] Run encrypted snapshot restore and constrained integrity verification.
+- [ ] Deploy with external rollback backup and exact artifact identity.
+- [ ] Run real-channel shadow probes and bounded soak.
+- [ ] Issue a fresh cutover-or-no-cutover receipt from current live evidence.
+
 ## Phase 0
 
 - [x] Import Tianji live 1.1.0 into an isolated local Git baseline.
