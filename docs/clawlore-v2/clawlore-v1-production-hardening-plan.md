@@ -14,7 +14,7 @@ prove production readiness. This plan closes the independent audit blockers
 before any V2 write, native ContextEngine, prompt mutation, or final-recall
 cutover can be considered.
 
-## H1 — Mutation authorization and diagnostic privacy
+## H1 — Mutation authorization and diagnostic privacy — completed (`3a278fd`)
 
 - Route explicit correct/forget through the same address policy used for read
   boundaries, including conversation, thread, and project checks.
@@ -25,7 +25,7 @@ cutover can be considered.
   actor ids from default doctor JSON.
 - Require adversarial regression tests and the complete plugin gate.
 
-## H2 — Enforceable SQL integrity
+## H2 — Enforceable SQL integrity — completed (`6341ac4`)
 
 - Define durable item identity/tombstone semantics so purge audit events and
   projection outbox rows can remain without dangling references.
@@ -35,7 +35,7 @@ cutover can be considered.
   migration tooling for existing V2 databases.
 - Prove orphan inserts fail and a constrained `foreign_key_check` is meaningful.
 
-## H3 — Native retrieval shadow and resource bounds
+## H3 — Native retrieval shadow and resource bounds — completed (`90b2c70`)
 
 - Run a real V2 truth/FTS/vector candidate lane alongside the V1 lane.
 - Keep both lanes read-only and prevent either from mutating prompt context.
@@ -44,7 +44,7 @@ cutover can be considered.
 - Propagate `AbortSignal` and enforce bounded global/per-session concurrency and
   deduplication so timed-out retrieval cannot continue without limit.
 
-## H4 — Reproducible release identity
+## H4 — Reproducible release identity — completed in source (`pending commit`)
 
 - Make a missing or unresolvable live extension fail the release gate unless a
   named, auditable source-only mode is explicitly requested.
@@ -53,6 +53,12 @@ cutover can be considered.
 - Embed and inspect a candidate build/commit identity independent of SemVer.
 - Commit a lockfile, require clean `npm ci`, generate an SBOM/pack manifest, and
   prove a clean-clone build.
+
+Acceptance evidence: the isolated reproducibility gate installed from the
+committed lockfile, ran 267/267 tests, typecheck and build, generated a
+CycloneDX SBOM with 42 components, and removed its temporary source tree. The
+source-only release gate separately passed with an explicit no-live-claim
+receipt. A nonexistent live target failed closed before any test or smoke.
 
 ## H5 — Recovery, soak, deployment, and fresh decision
 

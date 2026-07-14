@@ -97,7 +97,9 @@
     "smoke:clawlore-encrypted-legacy-snapshot": "node --test tests/clawlore-encrypted-legacy-snapshot.test.mjs",
     "smoke:clawlore-migration-drill": "node --test tests/clawlore-legacy-migration-drill.test.mjs",
     "smoke:vector-repair": "node scripts/smoke-vector-repair.mjs",
-    "release:gate": "SCOPE_RECALL_ALLOW_NESTED_GIT_ROOT=1 node scripts/release-gate.mjs"
+    "release:gate": "SCOPE_RECALL_ALLOW_NESTED_GIT_ROOT=1 node scripts/release-gate.mjs",
+    "release:gate:source": "SCOPE_RECALL_ALLOW_NESTED_GIT_ROOT=1 SCOPE_RECALL_SOURCE_ONLY=1 node scripts/release-gate.mjs",
+    "release:reproducibility": "node scripts/reproducible-install-gate.mjs"
   },
   "keywords": [
     "openclaw",

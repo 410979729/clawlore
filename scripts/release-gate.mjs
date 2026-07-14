@@ -3,6 +3,10 @@ import { constants } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { relative, resolve } from "node:path";
+import {
+  compareRuntimeArtifactIdentity,
+  runtimeArtifactIdentity,
+} from "./release-artifact-identity.mjs";
 
 async function exists(path) {
   try {
@@ -47,17 +51,6 @@ function parseJsonWithPreamble(raw, label) {
   }
 }
 
-async function hashFile(path) {
-  return createHash("sha256").update(await readFile(path)).digest("hex");
-}
-
-async function assertFileHashesMatch(leftPath, rightPath) {
-  const [leftHash, rightHash] = await Promise.all([hashFile(leftPath), hashFile(rightPath)]);
-  if (leftHash !== rightHash) {
-    throw new Error(`release gate failed: workspace/extension drift for ${leftPath}`);
-  }
-}
-
 function changelogSection(changelog, version) {
   const marker = `## ${version}`;
   const start = changelog.indexOf(marker);
@@ -72,6 +65,7 @@ const changelog = await readFile("CHANGELOG.md", "utf8");
 const sourceRoot = await realpath(process.cwd());
 const gitRoot = (await realpath(runCapture("git", ["rev-parse", "--show-toplevel"]).trim()));
 const allowNestedGitRoot = process.env.SCOPE_RECALL_ALLOW_NESTED_GIT_ROOT === "1";
+const sourceOnly = process.env.SCOPE_RECALL_SOURCE_ONLY === "1";
 const sourceInsideGitRoot = sourceRoot === gitRoot || sourceRoot.startsWith(`${gitRoot}/`);
 
 if (gitRoot !== sourceRoot && !(allowNestedGitRoot && sourceInsideGitRoot)) {
@@ -112,6 +106,7 @@ const requiredFiles = [
   "docs/release-readiness-template.md",
   "docs/tianji-independent-roadmap-2026-07-01.md",
   "openclaw.plugin.json",
+  "package-lock.json",
   "tsconfig.json",
   "index.ts",
   "src/runtime-scope-metadata.ts",
@@ -139,6 +134,11 @@ for (const file of requiredFiles) {
   if (!(await exists(file))) {
     throw new Error(`release gate failed: missing required file ${file}`);
   }
+}
+
+const packageLock = JSON.parse(await readFile("package-lock.json", "utf8"));
+if (packageLock.lockfileVersion < 3 || packageLock.packages?.[""]?.version !== packageJson.version) {
+  throw new Error("release gate failed: package-lock.json is stale or not lockfileVersion 3+");
 }
 
 const testFiles = (await exists("tests"))
@@ -358,6 +358,12 @@ for (const marker of ["openclaw-scope-v1", "scope_filter_mode", "memory_store", 
   }
 }
 
+const stateDir = resolve(process.env.OPENCLAW_STATE_DIR || process.env.OPENCLAW_HOME || resolve(sourceRoot, "../../.."));
+const extensionDir = resolve(process.env.SCOPE_RECALL_EXTENSION_DIR || resolve(stateDir, "extensions/scope-recall-openclaw"));
+if (!sourceOnly && !(await exists(extensionDir))) {
+  throw new Error(`release gate failed: live extension target is missing: ${extensionDir}`);
+}
+
 const diffPathspec = gitRoot === sourceRoot ? "." : relative(gitRoot, sourceRoot);
 run("git", ["diff", "--check", "--", diffPathspec || "."]);
 run("npm", ["test"]);
@@ -366,90 +372,31 @@ run("npm", ["run", "smoke:vector-repair"]);
 run("npm", ["run", "build"]);
 run("node", ["scripts/golden-benchmark.mjs"]);
 
-const extensionDir = process.env.SCOPE_RECALL_EXTENSION_DIR || resolve(process.cwd(), "../../extensions/scope-recall-openclaw");
-if (await exists(extensionDir)) {
-  const extensionRoot = await realpath(extensionDir);
+const candidateIdentity = await runtimeArtifactIdentity(sourceRoot);
+const gitCommit = runCapture("git", ["rev-parse", "HEAD"]).trim();
+const gitDirty = Boolean(runCapture("git", ["status", "--porcelain", "--", diffPathspec || "."]).trim());
+let extensionRoot;
+if (sourceOnly) {
+  console.log("release gate: explicit source-only mode; live extension and runtime smoke are not claimed");
+} else {
+  extensionRoot = await realpath(extensionDir);
   if (extensionRoot === sourceRoot) {
-    if (!allowNestedGitRoot) {
-      throw new Error("release gate failed: extension dir resolves to source root; refusing self-drift comparison");
-    }
-    console.log("release gate: extension dir resolves to source root; skipping self-drift comparison for nested live extension");
-  } else {
-    const driftFiles = [
-      "CHANGELOG.md",
-      "README.md",
-      "package.json",
-      "openclaw.plugin.json",
-      "benchmarks/golden-recall-cases.json",
-      "benchmarks/experience-replay-cases.json",
-      "index.ts",
-      "cli.ts",
-      "scripts/golden-benchmark.mjs",
-      "scripts/release-gate.mjs",
-      "docs/openclaw-contract-matrix.md",
-      "docs/response-contracts.md",
-      "docs/runtime-identity-scope-rules.md",
-      "docs/phase-1-contract-audit-2026-06-30.md",
-      "docs/phase-2-scope-identity-admission-audit-2026-06-30.md",
-      "docs/phase-3-commercial-retrieval-audit-2026-06-30.md",
-      "docs/phase-4-freshness-relation-audit-2026-06-30.md",
-      "docs/phase-5-digest-audit-2026-06-30.md",
-      "docs/phase-6-experience-productization-audit-2026-06-30.md",
-      "docs/phase-7-release-hardening-audit-2026-06-30.md",
-      "docs/operator-runbook.md",
-      "docs/release-readiness-template.md",
-      "docs/tianji-independent-roadmap-2026-07-01.md",
-      "src/auto-recall-query.ts",
-      "src/capture-safety.ts",
-      "src/digest-pipeline.ts",
-      "src/experience-governance.ts",
-      "src/experience-store.ts",
-      "src/experience-replay.ts",
-      "src/runtime-scope-metadata.ts",
-      "src/retriever.ts",
-      "src/smart-metadata.ts",
-      "src/smart-extractor.ts",
-      "src/tools.ts",
-      "src/candidate-promotion.ts",
-      "src/forgetting.ts",
-      "src/graph-hygiene.ts",
-      "src/governance-cleanup.ts",
-      "src/journal-recovery.ts",
-      "src/operator-dashboard.ts",
-      "src/task-experience.ts",
-      "dist/cli.js",
-      "dist/index.js",
-      "dist/src/auto-recall-query.js",
-      "dist/src/capture-safety.js",
-      "dist/src/digest-pipeline.js",
-      "dist/src/experience-governance.js",
-      "dist/src/experience-store.js",
-      "dist/src/experience-replay.js",
-      "dist/src/runtime-scope-metadata.js",
-      "dist/src/retriever.js",
-      "dist/src/smart-metadata.js",
-      "dist/src/smart-extractor.js",
-      "dist/src/tools.js",
-      "dist/src/candidate-promotion.js",
-      "dist/src/forgetting.js",
-      "dist/src/graph-hygiene.js",
-      "dist/src/governance-cleanup.js",
-      "dist/src/journal-recovery.js",
-      "dist/src/operator-dashboard.js",
-      "dist/src/task-experience.js",
-    ];
-    for (const file of driftFiles) {
-      const extensionFile = resolve(extensionDir, file);
-      if (!(await exists(extensionFile))) {
-        throw new Error(`release gate failed: extension missing ${file}`);
-      }
-      await assertFileHashesMatch(file, extensionFile);
-    }
+    throw new Error("release gate failed: extension dir resolves to source root; refusing self-drift comparison");
+  }
+  if (gitDirty) {
+    throw new Error("release gate failed: live artifact verification requires a clean candidate worktree");
+  }
+  const deployedIdentity = await runtimeArtifactIdentity(extensionRoot);
+  const comparison = compareRuntimeArtifactIdentity(candidateIdentity, deployedIdentity);
+  if (!comparison.matches) {
+    throw new Error(`release gate failed: recursive runtime artifact drift `
+      + `(missing=${comparison.missing.length},extra=${comparison.extra.length},different=${comparison.different.length},`
+      + `candidate=${comparison.candidateDigest},deployed=${comparison.deployedDigest})`);
   }
 }
+console.log(`release gate build identity: commit=${gitCommit} runtime=${candidateIdentity.digest} dirty=${gitDirty}`);
 
-if (process.env.SCOPE_RECALL_SKIP_RUNTIME_SMOKE !== "1") {
-  const stateDir = resolve(process.env.OPENCLAW_STATE_DIR || process.env.OPENCLAW_HOME || resolve(sourceRoot, "../.."));
+if (!sourceOnly && process.env.SCOPE_RECALL_SKIP_RUNTIME_SMOKE !== "1") {
   const configPath = resolve(process.env.OPENCLAW_CONFIG_PATH || resolve(stateDir, "openclaw.json"));
   const inferredCli = resolve(stateDir, "../../app/node_modules/.bin/openclaw");
   const configuredCli = String(process.env.OPENCLAW_CLI || "").trim();
@@ -482,6 +429,9 @@ if (process.env.SCOPE_RECALL_SKIP_RUNTIME_SMOKE !== "1") {
     !inspect.commands.includes("scope-recall")
   ) {
     throw new Error("release gate failed: OpenClaw runtime did not load scope-recall-openclaw with expected command surface");
+  }
+  if (!inspect.plugin?.rootDir || await realpath(inspect.plugin.rootDir) !== extensionRoot) {
+    throw new Error("release gate failed: OpenClaw inspect rootDir does not match the verified live extension");
   }
   const doctor = parseJsonWithPreamble(
     runCapture(openclawCli, ["scope-recall", "doctor", "--json", "--quiet"], { env: runtimeEnv }),
@@ -519,4 +469,11 @@ for (const file of packFiles) {
     throw new Error(`release gate failed: forbidden runtime/sensitive artifact in npm pack: ${file}`);
   }
 }
+const sbomRaw = runCapture("npm", ["sbom", "--package-lock-only", "--sbom-format", "cyclonedx"]);
+const sbom = JSON.parse(sbomRaw);
+if (sbom.bomFormat !== "CycloneDX" || !Array.isArray(sbom.components) || sbom.components.length === 0) {
+  throw new Error("release gate failed: package-lock SBOM is empty or invalid");
+}
+const sbomDigest = createHash("sha256").update(sbomRaw).digest("hex");
+console.log(`release gate SBOM ok: ${sbom.components.length} components sha256=${sbomDigest}`);
 console.log(`release gate pack scan ok: ${packFiles.length} files`);

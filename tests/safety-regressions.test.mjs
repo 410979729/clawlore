@@ -452,8 +452,16 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const indexSource = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
   assert.match(packageJson.scripts["release:gate"], /SCOPE_RECALL_ALLOW_NESTED_GIT_ROOT=1/);
+  assert.match(packageJson.scripts["release:gate:source"], /SCOPE_RECALL_SOURCE_ONLY=1/);
+  assert.match(packageJson.scripts["release:reproducibility"], /reproducible-install-gate/);
   assert.match(gate, /"rev-parse",\s*"--show-toplevel"/);
   assert.match(gate, /SCOPE_RECALL_ALLOW_NESTED_GIT_ROOT/);
+  assert.match(gate, /SCOPE_RECALL_SOURCE_ONLY/);
+  assert.match(gate, /live extension target is missing/);
+  assert.match(gate, /runtimeArtifactIdentity/);
+  assert.match(gate, /recursive runtime artifact drift/);
+  assert.match(gate, /inspect\.plugin\?\.rootDir/);
+  assert.match(gate, /package-lock SBOM/);
   assert.match(gate, /"diff",\s*"--check",\s*"--"/);
   assert.match(gate, /refusing self-drift comparison/);
   assert.match(gate, /OPENCLAW_STATE_DIR/);
