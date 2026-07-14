@@ -35,6 +35,7 @@ async function fixture() {
     CREATE VIRTUAL TABLE memory_fts USING fts5(id UNINDEXED,text,metadata_text);
     ${TRUTH_V2_SCHEMA_SQL}
     CREATE VIRTUAL TABLE memory_fts_v2 USING fts5(item_id UNINDEXED,content,category);`);
+  db.exec("BEGIN IMMEDIATE");
   const now = "2026-07-12T12:00:00.000Z";
   const rows = [
     { id: "manual", text: "private fixture", classification: "explicit_manual", verification: "user_confirmed",
@@ -65,6 +66,7 @@ async function fixture() {
       .run(`source:${row.id}`, revisionId, "legacy", row.id, now, JSON.stringify({ classification: row.classification }));
     db.prepare("INSERT INTO memory_fts_v2 VALUES (?,?,?)").run(itemId, row.text, "other");
   }
+  db.exec("COMMIT");
   db.close();
   await chmod(source, 0o600);
   await createAndVerifyLegacyLiveEncryptedSnapshotV2({

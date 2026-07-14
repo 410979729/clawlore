@@ -1,6 +1,6 @@
 # ClawLore 2.0 project handoff
 
-Current through Phase 9 and active ClawLore v1 production hardening H1 on
+Current through Phase 9 and active ClawLore v1 production hardening H3 on
 2026-07-14.
 
 ## Independent audit reopening
@@ -14,8 +14,12 @@ The new bounded route is recorded in
 `clawlore-v1-production-hardening-plan.md`. H1 now routes correct/forget through
 the unified address policy, preserves non-active lifecycle during correction,
 rejects correction-as-restore, and redacts digest diagnostics. Focused
-adversarial tests are 8/8 PASS and typecheck passes. Full bundle gates remain
-open; live extension/config/database/service are unchanged.
+adversarial tests are 8/8 PASS. H2 now defines durable item identities for
+purge audit/outbox history, adds enforceable foreign keys and delete behavior,
+and provides a digest-bound existing-database preview/apply/postcheck migration.
+The live read-only preview found no orphan blockers. Full tests are 260/260 and
+typecheck/build/diff check pass. The live migration has not been applied;
+extension/config/database/service are unchanged.
 
 ## Live position
 

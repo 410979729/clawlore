@@ -49,6 +49,7 @@ async function fixture() {
       readiness_sha256 TEXT NOT NULL,legacy_logical_digest TEXT NOT NULL,rows_applied INTEGER NOT NULL,
       applied_at TEXT NOT NULL,v1_fallback_reads INTEGER NOT NULL,context_engine_enabled INTEGER NOT NULL,
       final_recall_cutover_enabled INTEGER NOT NULL);`);
+  db.exec("BEGIN IMMEDIATE");
   const now = "2026-07-12T15:00:00.000Z";
   db.prepare("INSERT INTO memory_truth VALUES (?,?,?,?,?,?,?)").run(
     "existing", "Existing truth", "fact", "agent:main", 1,
@@ -97,6 +98,7 @@ async function fixture() {
     db.prepare("INSERT INTO projection_outbox VALUES (?,?,?,?,?,0,?,?,?,NULL)")
       .run(`outbox:${projection}`, "legacy:existing", "revision:existing", "upsert", projection, now, now, now);
   }
+  db.exec("COMMIT");
   db.close();
   await chmod(source, 0o600);
   await privateJson(baseline, {

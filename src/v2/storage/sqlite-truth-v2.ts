@@ -30,6 +30,9 @@ const PROJECTIONS = ["fts", "vector", "relations"] as const;
 
 export const TRUTH_V2_SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS clawlore_schema (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS memory_item_identities (
+    item_id TEXT PRIMARY KEY,created_at TEXT NOT NULL,purged_at TEXT
+  );
   CREATE TABLE IF NOT EXISTS memory_items (
     item_id TEXT PRIMARY KEY,current_revision_id TEXT NOT NULL,revision_no INTEGER NOT NULL,
     content TEXT NOT NULL,category TEXT NOT NULL,address_json TEXT NOT NULL,
@@ -37,34 +40,53 @@ export const TRUTH_V2_SCHEMA_SQL = `
     visibility TEXT NOT NULL,retention TEXT NOT NULL,workspace_id TEXT,project_id TEXT,
     conversation_id TEXT,thread_id TEXT,customer_id TEXT,task_id TEXT,
     lifecycle TEXT NOT NULL,verification TEXT NOT NULL,valid_until TEXT,
-    created_at TEXT NOT NULL,updated_at TEXT NOT NULL
+    created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+    FOREIGN KEY(item_id) REFERENCES memory_item_identities(item_id) ON DELETE RESTRICT,
+    FOREIGN KEY(item_id,current_revision_id) REFERENCES memory_revisions(item_id,revision_id)
+      DEFERRABLE INITIALLY DEFERRED
   );
   CREATE TABLE IF NOT EXISTS memory_revisions (
     revision_id TEXT PRIMARY KEY,item_id TEXT NOT NULL,revision_no INTEGER NOT NULL,
     content TEXT NOT NULL,lifecycle TEXT NOT NULL,verification TEXT NOT NULL,valid_until TEXT,
-    created_at TEXT NOT NULL,UNIQUE(item_id,revision_no)
+    created_at TEXT NOT NULL,UNIQUE(item_id,revision_no),UNIQUE(item_id,revision_id),
+    FOREIGN KEY(item_id) REFERENCES memory_items(item_id) ON DELETE CASCADE
+      DEFERRABLE INITIALLY DEFERRED
   );
   CREATE TABLE IF NOT EXISTS memory_sources (
     source_id TEXT PRIMARY KEY,revision_id TEXT NOT NULL,source_type TEXT NOT NULL,
-    external_id TEXT,observed_at TEXT NOT NULL,evidence_json TEXT NOT NULL
+    external_id TEXT,observed_at TEXT NOT NULL,evidence_json TEXT NOT NULL,
+    FOREIGN KEY(revision_id) REFERENCES memory_revisions(revision_id) ON DELETE CASCADE
   );
   CREATE TABLE IF NOT EXISTS memory_acl (
     acl_id TEXT PRIMARY KEY,item_id TEXT NOT NULL,owner_principal_id TEXT NOT NULL,
-    visibility TEXT NOT NULL,policy_json TEXT NOT NULL,created_at TEXT NOT NULL
+    visibility TEXT NOT NULL,policy_json TEXT NOT NULL,created_at TEXT NOT NULL,
+    FOREIGN KEY(item_id) REFERENCES memory_items(item_id) ON DELETE CASCADE
   );
   CREATE TABLE IF NOT EXISTS memory_relations (
     relation_id TEXT PRIMARY KEY,from_revision_id TEXT NOT NULL,to_revision_id TEXT NOT NULL,
-    relation_type TEXT NOT NULL,created_at TEXT NOT NULL
+    relation_type TEXT NOT NULL,created_at TEXT NOT NULL,
+    FOREIGN KEY(from_revision_id) REFERENCES memory_revisions(revision_id) ON DELETE CASCADE,
+    FOREIGN KEY(to_revision_id) REFERENCES memory_revisions(revision_id) ON DELETE CASCADE
   );
   CREATE TABLE IF NOT EXISTS memory_events (
     event_id TEXT PRIMARY KEY,item_id TEXT NOT NULL,revision_id TEXT,event_type TEXT NOT NULL,
-    actor TEXT NOT NULL,reason TEXT NOT NULL,created_at TEXT NOT NULL
+    actor TEXT NOT NULL,reason TEXT NOT NULL,created_at TEXT NOT NULL,
+    FOREIGN KEY(item_id) REFERENCES memory_item_identities(item_id) ON DELETE RESTRICT,
+    FOREIGN KEY(revision_id) REFERENCES memory_revisions(revision_id) ON DELETE SET NULL
   );
   CREATE TABLE IF NOT EXISTS projection_outbox (
     outbox_id TEXT PRIMARY KEY,item_id TEXT NOT NULL,revision_id TEXT,operation TEXT NOT NULL,
     projection TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,available_at TEXT NOT NULL,
-    created_at TEXT NOT NULL,processed_at TEXT,last_error TEXT
+    created_at TEXT NOT NULL,processed_at TEXT,last_error TEXT,
+    FOREIGN KEY(item_id) REFERENCES memory_item_identities(item_id) ON DELETE RESTRICT,
+    FOREIGN KEY(revision_id) REFERENCES memory_revisions(revision_id) ON DELETE SET NULL
   );
+  CREATE TRIGGER IF NOT EXISTS memory_items_identity_before_insert
+  BEFORE INSERT ON memory_items
+  BEGIN
+    INSERT OR IGNORE INTO memory_item_identities(item_id,created_at,purged_at)
+    VALUES (NEW.item_id,NEW.created_at,NULL);
+  END;
   CREATE INDEX IF NOT EXISTS idx_memory_access ON memory_items
     (tenant_id,principal_id,agent_id,visibility,lifecycle,verification);
   CREATE INDEX IF NOT EXISTS idx_memory_conversation ON memory_items
@@ -73,7 +95,7 @@ export const TRUTH_V2_SCHEMA_SQL = `
     (tenant_id,project_id,customer_id,lifecycle);
   CREATE INDEX IF NOT EXISTS idx_outbox_pending ON projection_outbox
     (processed_at,available_at,projection);
-  INSERT OR IGNORE INTO clawlore_schema(version,applied_at) VALUES (2,datetime('now'));
+  INSERT OR IGNORE INTO clawlore_schema(version,applied_at) VALUES (3,datetime('now'));
 `;
 
 export type {
@@ -246,6 +268,7 @@ export class SqliteTruthStoreV2 implements TruthStoreV2Port, MemoryCenterReadPor
         db.prepare("DELETE FROM memory_acl WHERE item_id=?").run(current.itemId);
         db.prepare("DELETE FROM memory_revisions WHERE item_id=?").run(current.itemId);
         db.prepare("DELETE FROM memory_items WHERE item_id=?").run(current.itemId);
+        db.prepare("UPDATE memory_item_identities SET purged_at=? WHERE item_id=?").run(now, current.itemId);
       } else {
         revisionId = this.clock.id();
         db.prepare("UPDATE memory_revisions SET lifecycle='superseded' WHERE revision_id=?").run(current.revisionId);
@@ -409,7 +432,7 @@ export class SqliteTruthStoreV2 implements TruthStoreV2Port, MemoryCenterReadPor
   }
 
   count(table: string): number {
-    const allowed = new Set(["memory_items","memory_revisions","memory_sources","memory_acl","memory_relations","memory_events","projection_outbox"]);
+    const allowed = new Set(["memory_item_identities","memory_items","memory_revisions","memory_sources","memory_acl","memory_relations","memory_events","projection_outbox"]);
     if (!allowed.has(table)) throw new Error("unsupported table");
     return Number(this.requireDb().prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count);
   }
@@ -487,7 +510,23 @@ export class SqliteTruthStoreV2 implements TruthStoreV2Port, MemoryCenterReadPor
   }
 
   private ensureSchema(): void {
-    this.requireDb().exec(TRUTH_V2_SCHEMA_SQL);
+    const db = this.requireDb();
+    const existing = Number(db.prepare(
+      "SELECT COUNT(*) AS count FROM sqlite_master WHERE type='table' AND name='memory_items'",
+    ).get().count) > 0;
+    if (existing) {
+      const version = Number(db.prepare(
+        "SELECT COALESCE(MAX(version),0) AS version FROM clawlore_schema",
+      ).get().version);
+      const identities = Number(db.prepare(
+        "SELECT COUNT(*) AS count FROM sqlite_master WHERE type='table' AND name='memory_item_identities'",
+      ).get().count);
+      const revisionForeignKeys = (db.prepare("PRAGMA foreign_key_list(memory_revisions)").all() as unknown[]).length;
+      if (version < 3 || identities !== 1 || revisionForeignKeys === 0) {
+        throw new Error("Truth V2 database requires the controlled schema-integrity migration");
+      }
+    }
+    db.exec(TRUTH_V2_SCHEMA_SQL);
   }
 
   private requireDb(): DatabaseSync {

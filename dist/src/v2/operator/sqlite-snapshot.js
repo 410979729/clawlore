@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import { dirname } from "node:path";
 const require = createRequire(import.meta.url);
 const TRUTH_TABLES = [
+    "memory_item_identities",
     "memory_items",
     "memory_revisions",
     "memory_sources",

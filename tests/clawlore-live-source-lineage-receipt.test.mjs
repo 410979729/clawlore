@@ -50,6 +50,7 @@ async function fixture() {
     CREATE TABLE memory_fts_v2(item_id TEXT PRIMARY KEY);
     CREATE TABLE memory_vector_projection_v2(item_id TEXT PRIMARY KEY);
     CREATE TABLE memory_relation_projection_v2(item_id TEXT PRIMARY KEY);`);
+  db.exec("BEGIN IMMEDIATE");
   const now = "2026-07-13T14:00:00.000Z";
   for (const row of rows) {
     const itemId = `legacy:${row.id}`;
@@ -85,6 +86,7 @@ async function fixture() {
       "memory_fts_compat_v2", "memory_fts_v2", "memory_vector_projection_v2", "memory_relation_projection_v2",
     ]) db.prepare(`INSERT INTO ${table} VALUES (?)`).run(itemId);
   }
+  db.exec("COMMIT");
   db.close();
   await chmod(source, 0o600);
 

@@ -20,10 +20,15 @@ found production blockers, now tracked in
 
 ### H2 — Enforceable SQL integrity
 
-- [ ] Define persistent item identity/tombstone semantics for purge audit/outbox.
-- [ ] Add real foreign keys and explicit delete behavior.
-- [ ] Add existing-database preview/apply/postcheck migration controls.
-- [ ] Prove orphan inserts fail and constrained foreign-key checks are meaningful.
+- [x] Define persistent item identity/tombstone semantics for purge audit/outbox.
+- [x] Add real foreign keys and explicit delete behavior.
+- [x] Add existing-database preview/apply/postcheck migration controls.
+- [x] Prove orphan inserts fail and constrained foreign-key checks are meaningful.
+
+H2 verification: live read-only preview found no migration blockers across
+1005 items and the current revision/source/ACL/relation/event/outbox corpus;
+full tests 260/260, typecheck, build, and diff check pass. Live apply remains an
+H5 deployment action and has not been authorized by this code-phase result.
 
 ### H3 — Native retrieval shadow and resource bounds
 

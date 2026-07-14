@@ -13,6 +13,7 @@ const CONTROL_MAX_BYTES = 128 * 1024;
 const ROLLOUT_TABLES = [
   "clawlore_schema",
   "clawlore_rollouts_v2",
+  "memory_item_identities",
   "memory_items",
   "memory_revisions",
   "memory_sources",

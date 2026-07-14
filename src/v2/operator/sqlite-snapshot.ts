@@ -8,6 +8,7 @@ const require = createRequire(import.meta.url);
 type DatabaseSync = any;
 
 const TRUTH_TABLES = [
+  "memory_item_identities",
   "memory_items",
   "memory_revisions",
   "memory_sources",

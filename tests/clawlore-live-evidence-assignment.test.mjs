@@ -54,6 +54,7 @@ async function fixture() {
     CREATE VIRTUAL TABLE memory_fts USING fts5(id UNINDEXED,text,metadata_text);
     ${TRUTH_V2_SCHEMA_SQL}
     CREATE TABLE memory_fts_compat_v2(item_id TEXT PRIMARY KEY);`);
+  db.exec("BEGIN IMMEDIATE");
   const now = "2026-07-12T14:00:00.000Z";
   for (const [id, metadata, classification, verification] of rows) {
     const itemId = `legacy:${id}`;
@@ -82,6 +83,7 @@ async function fixture() {
       .run(`source:${id}`, revisionId, "legacy", id, now, JSON.stringify({ classification, original: true }));
     db.prepare("INSERT INTO memory_fts_compat_v2 VALUES (?)").run(itemId);
   }
+  db.exec("COMMIT");
   db.close();
   await chmod(source, 0o600);
   const registryValue = {

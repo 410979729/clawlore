@@ -57,7 +57,8 @@ test("online snapshot remains consistent while the source store stays open and r
     });
     assert.equal(manifest.integrity, "ok");
     assert.equal(manifest.foreignKeyViolations, 0);
-    assert.equal(manifest.truthSchemaVersion, 2);
+    assert.equal(manifest.truthSchemaVersion, 3);
+    assert.equal(manifest.tableCounts.memory_item_identities, 1);
     assert.equal(manifest.tableCounts.memory_items, 1);
     assert.equal(manifest.tableCounts.projection_outbox, 3);
 

@@ -40,6 +40,7 @@ async function fixture() {
     CREATE VIRTUAL TABLE memory_fts_v2 USING fts5(item_id UNINDEXED,content,category);
     CREATE TABLE memory_vector_projection_v2(item_id TEXT PRIMARY KEY,legacy_id TEXT,backend TEXT,state TEXT,verified_at TEXT);
     CREATE TABLE memory_relation_projection_v2(item_id TEXT PRIMARY KEY,state TEXT,verified_at TEXT);`);
+  db.exec("BEGIN IMMEDIATE");
   const now = "2026-07-12T12:00:00.000Z";
   const rows = [
     { id: "one", text: "alpha memory", metadataText: "searchable synopsis", metadata: { l0_abstract: "stale raw value", sender_id: "private-id" } },
@@ -70,6 +71,7 @@ async function fixture() {
     db.prepare("INSERT INTO memory_relation_projection_v2 VALUES (?,?,?)")
       .run(itemId, "fixture", now);
   }
+  db.exec("COMMIT");
   db.close();
   await chmod(source, 0o600);
   await createAndVerifyLegacyLiveEncryptedSnapshotV2({
