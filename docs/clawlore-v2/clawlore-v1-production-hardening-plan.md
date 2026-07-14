@@ -60,7 +60,7 @@ CycloneDX SBOM with 42 components, and removed its temporary source tree. The
 source-only release gate separately passed with an explicit no-live-claim
 receipt. A nonexistent live target failed closed before any test or smoke.
 
-## H5 — Recovery, soak, deployment, and fresh decision
+## H5 — Recovery, soak, deployment, and fresh decision — live validation in progress
 
 - Restore a fresh encrypted live snapshot to an isolated path and verify digest,
   SQLite integrity, constrained foreign keys, and cleanup.
