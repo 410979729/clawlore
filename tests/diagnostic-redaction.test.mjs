@@ -44,3 +44,26 @@ test("runtime logging paths do not reintroduce raw response or user previews", (
     assert.equal(toolsSource.includes(forbidden), false, `tools.ts contains raw error interpolation ${forbidden}`);
   }
 });
+
+test("operator and model-visible production modules route failures through diagnostic summaries", () => {
+  const boundaryModules = [
+    "../src/migrate.ts",
+    "../src/smart-extractor.ts",
+    "../src/memory-compactor.ts",
+    "../src/memory-upgrader.ts",
+    "../src/task-experience.ts",
+    "../src/digest-pipeline.ts",
+    "../src/forgetting.ts",
+  ];
+  for (const modulePath of boundaryModules) {
+    const source = readFileSync(new URL(modulePath, import.meta.url), "utf8");
+    assert.match(source, /diagnosticErrorSummary/, `${modulePath} must use diagnosticErrorSummary`);
+    for (const forbidden of [
+      /\$\{String\((?:err|error)\)\}/,
+      /\$\{(?:err|error)\.message\}/,
+      /\$\{(?:err|error)\}/,
+    ]) {
+      assert.doesNotMatch(source, forbidden, `${modulePath} contains a raw error boundary`);
+    }
+  }
+});

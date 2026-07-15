@@ -3,6 +3,7 @@ import { evaluateCaptureSafety, sanitizeCaptureText } from "./capture-safety.js"
 import { isNoise } from "./noise-filter.js";
 import type { LlmClient } from "./llm-client.js";
 import type { MemoryEntry, MemoryStore } from "./store.js";
+import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
 
 type DatabaseSync = any;
 
@@ -605,7 +606,7 @@ export async function runDigestPipeline(
         chunkCandidates = await llmCandidates(chunk, options.llmClient);
       } catch (err) {
         llmParseErrors += 1;
-        errors.push(`llm_parse_error:${err instanceof Error ? err.message : String(err)}`);
+        errors.push(`llm_parse_error:${diagnosticErrorSummary(err)}`);
       }
     }
 

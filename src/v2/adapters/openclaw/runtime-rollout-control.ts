@@ -1,7 +1,14 @@
 import { readFileSync, statSync } from "node:fs";
 import type { ReleaseArtifactBindingV1, ReleaseReadinessReceiptV1 } from "../../domain/release.js";
+import { diagnosticErrorSummary } from "../../../diagnostic-redaction.js";
 
 const MAX_CONTROL_FILE_BYTES = 128 * 1024;
+
+function stableRolloutError(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  if (/^(?:release_|rollout_control_)[a-z0-9_:-]+$/i.test(message)) return message;
+  return `release_readiness_load_failed:${diagnosticErrorSummary(error)}`;
+}
 
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -81,7 +88,7 @@ export function loadRuntimeRolloutControlsV1(input: {
         input.now?.() ?? new Date(),
       );
     }
-    catch (error) { errors.push(error instanceof Error ? error.message : "release_readiness_load_failed"); }
+    catch (error) { errors.push(stableRolloutError(error)); }
   }
   return { readiness: releaseReadiness, errors: [...new Set(errors)].sort() };
 }

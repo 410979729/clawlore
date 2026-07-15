@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
-import { chmodSync, existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { enforcePrivatePath } from "./file-privacy.js";
 const require = createRequire(import.meta.url);
 function runSql(db, statement) {
     db["exec"](statement);
@@ -110,6 +111,9 @@ export class SqliteBruteForceVectorStore {
             .all();
         return rows.map((row) => row.id).filter(Boolean);
     }
+    hasRows() {
+        return Boolean(this.requireDb().prepare("SELECT 1 AS present FROM vector_records LIMIT 1").get()?.present);
+    }
     listEntriesWithVectors() {
         const rows = this.requireDb()
             .prepare("SELECT * FROM vector_records ORDER BY timestamp DESC")
@@ -208,7 +212,7 @@ export class SqliteBruteForceVectorStore {
     enforcePrivateFiles() {
         for (const path of [this.sqlitePath, `${this.sqlitePath}-wal`, `${this.sqlitePath}-shm`]) {
             if (existsSync(path))
-                chmodSync(path, 0o600);
+                enforcePrivatePath(path, { kind: "file" });
         }
     }
 }

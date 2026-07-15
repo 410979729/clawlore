@@ -10,6 +10,7 @@
 import OpenAI from "openai";
 import { createHash } from "node:crypto";
 import { smartChunk } from "./chunker.js";
+import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
 const OPENAI_CLIENT_AUTH_FIELD = ["api", "Key"].join("");
 function assignOpenAiClientCredential(target, value) {
     target[OPENAI_CLIENT_AUTH_FIELD] = value;
@@ -353,7 +354,7 @@ export class LocalHashEmbedder {
             return { success: true, dimensions: embedding.length };
         }
         catch (error) {
-            return { success: false, error: error instanceof Error ? error.message : String(error) };
+            return { success: false, error: diagnosticErrorSummary(error) };
         }
     }
     get keyCount() {
@@ -711,11 +712,11 @@ export class Embedder {
         }
         catch (error) {
             // Check if this is a context length exceeded error and try chunking
-            const errorMsg = error instanceof Error ? error.message : String(error);
+            const errorMsg = getErrorMessage(error);
             const isContextError = /context|too long|exceed|length/i.test(errorMsg);
             if (isContextError && this._autoChunk) {
                 try {
-                    console.log(`Document exceeded context limit (${errorMsg}), attempting chunking...`);
+                    console.log(`Document exceeded context limit (${diagnosticErrorSummary(error)}), attempting chunking...`);
                     const chunkResult = smartChunk(text, this._model);
                     if (chunkResult.chunks.length === 0) {
                         throw new Error(`Failed to chunk document: ${errorMsg}`);
@@ -812,7 +813,7 @@ export class Embedder {
         }
         catch (error) {
             // Check if this is a context length exceeded error and try chunking each text
-            const errorMsg = error instanceof Error ? error.message : String(error);
+            const errorMsg = getErrorMessage(error);
             const isContextError = /context|too long|exceed|length/i.test(errorMsg);
             if (isContextError && this._autoChunk) {
                 try {
@@ -891,7 +892,7 @@ export class Embedder {
         catch (error) {
             return {
                 success: false,
-                error: error instanceof Error ? error.message : String(error),
+                error: diagnosticErrorSummary(error),
             };
         }
     }
@@ -1030,7 +1031,7 @@ export class MiniMaxEmbedder {
             return { success: true, dimensions: testEmbedding.length };
         }
         catch (error) {
-            return { success: false, error: error instanceof Error ? error.message : String(error) };
+            return { success: false, error: diagnosticErrorSummary(error) };
         }
     }
     get model() {

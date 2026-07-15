@@ -1,5 +1,12 @@
 import { readFileSync, statSync } from "node:fs";
+import { diagnosticErrorSummary } from "../../../diagnostic-redaction.js";
 const MAX_CONTROL_FILE_BYTES = 128 * 1024;
+function stableRolloutError(error) {
+    const message = error instanceof Error ? error.message : "";
+    if (/^(?:release_|rollout_control_)[a-z0-9_:-]+$/i.test(message))
+        return message;
+    return `release_readiness_load_failed:${diagnosticErrorSummary(error)}`;
+}
 function record(value) {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
         throw new Error("rollout_control_not_object");
@@ -65,7 +72,7 @@ export function loadRuntimeRolloutControlsV1(input) {
             releaseReadiness = readiness(readPrivateJson(input.readinessFile), input.expectedBinding, input.now?.() ?? new Date());
         }
         catch (error) {
-            errors.push(error instanceof Error ? error.message : "release_readiness_load_failed");
+            errors.push(stableRolloutError(error));
         }
     }
     return { readiness: releaseReadiness, errors: [...new Set(errors)].sort() };

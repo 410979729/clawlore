@@ -1,4 +1,5 @@
 import { evaluateCaptureSafety } from "./capture-safety.js";
+import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
 import { buildSmartMetadata, parseSmartMetadata, stringifySmartMetadata, } from "./smart-metadata.js";
 export const DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG = {
     enabled: false,
@@ -473,7 +474,7 @@ export async function captureTaskExperience(params) {
         existing = await params.store.vectorSearch(vector, 3, 0.1, [params.scope], { excludeInactive: true });
     }
     catch (err) {
-        params.logger?.warn?.(`task-experience: duplicate pre-check failed, continue store: ${String(err)}`);
+        params.logger?.warn?.(`task-experience: duplicate pre-check failed, continue store: ${diagnosticErrorSummary(err)}`);
     }
     const duplicate = existing.find((result) => result.score >= params.config.dedupeThreshold &&
         hasReusableTaskExperienceMetadata(result));

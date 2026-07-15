@@ -13,6 +13,7 @@
  *   4. Write enriched metadata back via store.update() without rewriting the primary text
  */
 import { buildSmartMetadata, stringifySmartMetadata } from "./smart-metadata.js";
+import { diagnosticErrorSummary, diagnosticIdentifier } from "./diagnostic-redaction.js";
 // ============================================================================
 // Reverse Category Mapping
 // ============================================================================
@@ -183,7 +184,7 @@ export class MemoryUpgrader {
                     result.upgraded++;
                 }
                 catch (err) {
-                    const errMsg = `Failed to upgrade ${entry.id}: ${String(err)}`;
+                    const errMsg = `UPGRADE_FAILED(${diagnosticIdentifier(entry.id)}): ${diagnosticErrorSummary(err)}`;
                     result.errors.push(errMsg);
                     this.log(`memory-upgrader: ERROR — ${errMsg}`);
                 }
@@ -226,7 +227,7 @@ export class MemoryUpgrader {
                 }
             }
             catch (err) {
-                this.log(`memory-upgrader: LLM enrichment failed for ${entry.id}, falling back to simple — ${String(err)}`);
+                this.log(`memory-upgrader: LLM enrichment failed for ${diagnosticIdentifier(entry.id)}, falling back to simple — ${diagnosticErrorSummary(err)}`);
                 enriched = simpleEnrich(entry.text, newCategory);
             }
         }

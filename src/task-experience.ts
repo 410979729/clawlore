@@ -2,6 +2,7 @@ import type { LlmClient } from "./llm-client.js";
 import type { MemoryEntry, MemorySearchResult, MemoryStore } from "./store.js";
 import type { TextEmbedder } from "./embedder.js";
 import { evaluateCaptureSafety } from "./capture-safety.js";
+import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
 import {
   buildSmartMetadata,
   parseSmartMetadata,
@@ -566,7 +567,7 @@ export async function captureTaskExperience(params: {
   try {
     existing = await params.store.vectorSearch(vector, 3, 0.1, [params.scope], { excludeInactive: true });
   } catch (err) {
-    params.logger?.warn?.(`task-experience: duplicate pre-check failed, continue store: ${String(err)}`);
+    params.logger?.warn?.(`task-experience: duplicate pre-check failed, continue store: ${diagnosticErrorSummary(err)}`);
   }
 
   const duplicate = existing.find((result) =>

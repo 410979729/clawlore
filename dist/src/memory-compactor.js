@@ -19,6 +19,7 @@
  *        - metadata:   marked { compacted: true, sourceCount: N }
  *   4. Delete source entries, store merged entry.
  */
+import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
 // ============================================================================
 // Math helpers
 // ============================================================================
@@ -211,7 +212,7 @@ export async function runCompaction(store, embedder, config, scopes, logger) {
             }
         }
         catch (err) {
-            logger?.warn(`memory-compactor: failed to merge cluster of ${members.length}: ${String(err)}`);
+            logger?.warn(`memory-compactor: failed to merge cluster of ${members.length}: ${diagnosticErrorSummary(err)}`);
         }
     }
     logger?.info(`memory-compactor: scanned=${valid.length} clusters=${plans.length} ` +

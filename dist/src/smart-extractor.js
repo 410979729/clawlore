@@ -15,6 +15,7 @@ import { isUserMdExclusiveMemory, } from "./workspace-boundary.js";
 import { inferAtomicBrandItemPreferenceSlot } from "./preference-slots.js";
 import { batchDedup } from "./batch-dedup.js";
 import { recordConflictReviewRelations } from "./conflict-governance.js";
+import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
 // ============================================================================
 // Envelope Metadata Stripping
 // ============================================================================
@@ -135,7 +136,7 @@ export class SmartExtractor {
             }
         }
         catch (err) {
-            this.log(`clawlore: smart-extractor: batchDedup failed, proceeding without batch dedup: ${String(err)}`);
+            this.log(`clawlore: smart-extractor: batchDedup failed, proceeding without batch dedup: ${diagnosticErrorSummary(err)}`);
         }
         // Step 2: Process each surviving candidate through dedup pipeline
         for (const candidate of survivingCandidates) {
@@ -153,7 +154,7 @@ export class SmartExtractor {
                 await this.processCandidate(candidate, conversationText, sessionKey, stats, targetScope, scopeFilter, runtimeMetadata);
             }
             catch (err) {
-                this.log(`clawlore: smart-extractor: failed to process candidate [${candidate.category}]: ${String(err)}`);
+                this.log(`clawlore: smart-extractor: failed to process candidate [${candidate.category}]: ${diagnosticErrorSummary(err)}`);
             }
         }
         return stats;
@@ -492,8 +493,8 @@ export class SmartExtractor {
             };
         }
         catch (err) {
-            this.log(`clawlore: smart-extractor: dedup LLM failed: ${String(err)}`);
-            return { decision: "create", reason: `LLM failed: ${String(err)}` };
+            this.log(`clawlore: smart-extractor: dedup LLM failed: ${diagnosticErrorSummary(err)}`);
+            return { decision: "create", reason: "LLM failed" };
         }
     }
     // --------------------------------------------------------------------------
@@ -766,7 +767,7 @@ export class SmartExtractor {
             metadata,
         });
         await recordConflictReviewRelations(this.store, created, scopeFilter ?? [targetScope]).catch((err) => {
-            this.log(`clawlore: smart-extractor: conflict-review marking failed: ${String(err)}`);
+            this.log(`clawlore: smart-extractor: conflict-review marking failed: ${diagnosticErrorSummary(err)}`);
         });
         this.log(`clawlore: smart-extractor: contradict [${contextLabel || "general"}] on ${matchId.slice(0, 8)}, new entry created`);
     }
@@ -888,7 +889,7 @@ export class SmartExtractor {
             });
         }
         catch (err) {
-            this.log(`clawlore: smart-extractor: rejected admission audit write failed: ${String(err)}`);
+            this.log(`clawlore: smart-extractor: rejected admission audit write failed: ${diagnosticErrorSummary(err)}`);
         }
     }
 }

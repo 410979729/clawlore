@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { evaluateCaptureSafety, sanitizeCaptureText } from "./capture-safety.js";
 import { isNoise } from "./noise-filter.js";
+import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
 function nowIso() {
     return new Date().toISOString();
 }
@@ -423,7 +424,7 @@ export async function runDigestPipeline(db, options = {}) {
             }
             catch (err) {
                 llmParseErrors += 1;
-                errors.push(`llm_parse_error:${err instanceof Error ? err.message : String(err)}`);
+                errors.push(`llm_parse_error:${diagnosticErrorSummary(err)}`);
             }
         }
         if (chunkCandidates.length === 0 && options.llmFallback !== false) {

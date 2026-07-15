@@ -11,6 +11,7 @@
 import OpenAI from "openai";
 import { createHash } from "node:crypto";
 import { smartChunk } from "./chunker.js";
+import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
 
 const OPENAI_CLIENT_AUTH_FIELD = ["api", "Key"].join("");
 
@@ -468,7 +469,7 @@ export class LocalHashEmbedder {
       const embedding = await this.embedPassage("test");
       return { success: true, dimensions: embedding.length };
     } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) };
+      return { success: false, error: diagnosticErrorSummary(error) };
     }
   }
 
@@ -894,12 +895,12 @@ export class Embedder {
       return embedding;
     } catch (error) {
       // Check if this is a context length exceeded error and try chunking
-      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorMsg = getErrorMessage(error);
       const isContextError = /context|too long|exceed|length/i.test(errorMsg);
 
       if (isContextError && this._autoChunk) {
         try {
-          console.log(`Document exceeded context limit (${errorMsg}), attempting chunking...`);
+          console.log(`Document exceeded context limit (${diagnosticErrorSummary(error)}), attempting chunking...`);
           const chunkResult = smartChunk(text, this._model);
 
           if (chunkResult.chunks.length === 0) {
@@ -1025,7 +1026,7 @@ export class Embedder {
       return results;
     } catch (error) {
       // Check if this is a context length exceeded error and try chunking each text
-      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorMsg = getErrorMessage(error);
       const isContextError = /context|too long|exceed|length/i.test(errorMsg);
 
       if (isContextError && this._autoChunk) {
@@ -1122,7 +1123,7 @@ export class Embedder {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: diagnosticErrorSummary(error),
       };
     }
   }
@@ -1272,7 +1273,7 @@ export class MiniMaxEmbedder {
       const testEmbedding = await this.embedPassage("test");
       return { success: true, dimensions: testEmbedding.length };
     } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) };
+      return { success: false, error: diagnosticErrorSummary(error) };
     }
   }
 

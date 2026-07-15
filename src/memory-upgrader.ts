@@ -18,6 +18,7 @@ import type { LlmClient } from "./llm-client.js";
 import type { MemoryCategory } from "./memory-categories.js";
 import type { MemoryTier } from "./memory-categories.js";
 import { buildSmartMetadata, stringifySmartMetadata } from "./smart-metadata.js";
+import { diagnosticErrorSummary, diagnosticIdentifier } from "./diagnostic-redaction.js";
 
 // ============================================================================
 // Types
@@ -276,7 +277,7 @@ export class MemoryUpgrader {
           await this.upgradeEntry(entry, noLlm, rewriteText);
           result.upgraded++;
         } catch (err) {
-          const errMsg = `Failed to upgrade ${entry.id}: ${String(err)}`;
+          const errMsg = `UPGRADE_FAILED(${diagnosticIdentifier(entry.id)}): ${diagnosticErrorSummary(err)}`;
           result.errors.push(errMsg);
           this.log(`memory-upgrader: ERROR — ${errMsg}`);
         }
@@ -340,7 +341,7 @@ export class MemoryUpgrader {
         }
       } catch (err) {
         this.log(
-          `memory-upgrader: LLM enrichment failed for ${entry.id}, falling back to simple — ${String(err)}`,
+          `memory-upgrader: LLM enrichment failed for ${diagnosticIdentifier(entry.id)}, falling back to simple — ${diagnosticErrorSummary(err)}`,
         );
         enriched = simpleEnrich(entry.text, newCategory);
       }

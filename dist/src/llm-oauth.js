@@ -1,8 +1,10 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { lstat, mkdir, open, rename, rm } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { readOAuthSessionFile } from "./oauth-session-storage.js";
+import { diagnosticErrorSummary, diagnosticIdentifier } from "./diagnostic-redaction.js";
+import { enforcePrivatePath } from "./file-privacy.js";
 const EXPIRY_SKEW_MS = 60_000;
 const DEFAULT_OAUTH_PROVIDER_ID = "openai-codex";
 const OAUTH_PROVIDER_ALIASES = {
@@ -132,6 +134,21 @@ function buildAuthorizationUrl(state, verifier, providerId) {
     }
     return url.toString();
 }
+const OAUTH_HTML_HEADERS = {
+    "Content-Type": "text/html; charset=utf-8",
+    "Cache-Control": "no-store",
+    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
+    "X-Content-Type-Options": "nosniff",
+};
+function escapeHtml(value) {
+    return value.replace(/[&<>"']/g, (character) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+    })[character] || character);
+}
 function buildSuccessHtml() {
     return [
         "<!doctype html>",
@@ -141,14 +158,31 @@ function buildSuccessHtml() {
         "</body></html>",
     ].join("");
 }
-function buildErrorHtml(message) {
+export function buildOAuthErrorHtml(message) {
     return [
         "<!doctype html>",
         "<html><body>",
         "<h1>ClawLore OAuth failed</h1>",
-        `<p>${message}</p>`,
+        `<p>${escapeHtml(message)}</p>`,
         "</body></html>",
     ].join("");
+}
+function oauthStateMatches(expected, returned) {
+    if (!returned)
+        return false;
+    const expectedBytes = Buffer.from(expected, "utf8");
+    const returnedBytes = Buffer.from(returned, "utf8");
+    return expectedBytes.length === returnedBytes.length && timingSafeEqual(expectedBytes, returnedBytes);
+}
+export function evaluateOAuthCallback(url, expectedState) {
+    if (!oauthStateMatches(expectedState, url.searchParams.get("state"))) {
+        return { kind: "invalid" };
+    }
+    if (url.searchParams.has("error")) {
+        return { kind: "provider_error" };
+    }
+    const code = url.searchParams.get("code");
+    return code ? { kind: "success", code } : { kind: "invalid" };
 }
 function decodeJwtPayload(token) {
     try {
@@ -243,19 +277,17 @@ export async function loadOAuthSession(authPath) {
         raw = await readOAuthSessionFile(authPath);
     }
     catch (err) {
-        const reason = err instanceof Error ? err.message : String(err);
-        throw new Error(`LLM OAuth requires a project OAuth file. Expected ${authPath}. Read failed: ${reason}`);
+        throw new Error(`CLAWLORE_OAUTH_SESSION_READ_FAILED: auth=${diagnosticIdentifier(authPath)} ${diagnosticErrorSummary(err)}`);
     }
     let parsed;
     try {
         parsed = JSON.parse(raw);
     }
     catch (err) {
-        const reason = err instanceof Error ? err.message : String(err);
-        throw new Error(`Invalid project OAuth JSON at ${authPath}: ${reason}`);
+        throw new Error(`CLAWLORE_OAUTH_SESSION_JSON_INVALID: auth=${diagnosticIdentifier(authPath)} ${diagnosticErrorSummary(err)}`);
     }
     if (!parsed || typeof parsed !== "object") {
-        throw new Error(`Invalid project OAuth file at ${authPath}: expected a JSON object`);
+        throw new Error(`CLAWLORE_OAUTH_SESSION_INVALID: auth=${diagnosticIdentifier(authPath)} expected_json_object`);
     }
     const session = extractSessionFromObject(parsed, authPath);
     if (!session) {
@@ -360,8 +392,35 @@ async function exchangeAuthorizationCode(code, verifier, providerId) {
         authPath: "",
     });
 }
-export async function saveOAuthSession(authPath, session) {
-    await mkdir(dirname(authPath), { recursive: true });
+async function assertOAuthTargetIsNotSymlink(authPath) {
+    try {
+        const status = await lstat(authPath);
+        if (status.isSymbolicLink()) {
+            throw new Error("CLAWLORE_OAUTH_UNSAFE_AUTH_PATH: refusing to replace a symbolic link");
+        }
+    }
+    catch (error) {
+        if (error?.code === "ENOENT")
+            return;
+        throw error;
+    }
+}
+async function syncOAuthParentDirectory(directory) {
+    if (process.platform === "win32")
+        return;
+    const handle = await open(directory, "r");
+    try {
+        await handle.sync();
+    }
+    finally {
+        await handle.close();
+    }
+}
+export async function saveOAuthSession(authPath, session, hooks = {}) {
+    const directory = dirname(authPath);
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    enforcePrivatePath(directory, { kind: "directory" });
+    await assertOAuthTargetIsNotSymlink(authPath);
     const payload = {
         provider: session.providerId,
         type: "oauth",
@@ -373,10 +432,36 @@ export async function saveOAuthSession(authPath, session) {
     if (session.refreshToken) {
         payload[OAUTH_WIRE_REFRESH_FIELD] = session.refreshToken;
     }
-    await writeFile(authPath, JSON.stringify(payload, null, 2) + "\n", {
-        encoding: "utf8",
-        mode: 0o600,
-    });
+    const serialized = JSON.stringify(payload, null, 2) + "\n";
+    const temporaryPath = join(directory, `.${basename(authPath)}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`);
+    let renamed = false;
+    try {
+        const handle = await open(temporaryPath, "wx", 0o600);
+        try {
+            await handle.writeFile(serialized, { encoding: "utf8" });
+            if (process.platform !== "win32") {
+                await handle.chmod(0o600);
+            }
+            await handle.sync();
+        }
+        finally {
+            await handle.close();
+        }
+        enforcePrivatePath(temporaryPath, { kind: "file" });
+        await hooks.beforeRename?.();
+        await assertOAuthTargetIsNotSymlink(authPath);
+        await rename(temporaryPath, authPath);
+        renamed = true;
+        await hooks.afterRename?.();
+        enforcePrivatePath(authPath, { kind: "file" });
+        await hooks.beforeDirectorySync?.();
+        await syncOAuthParentDirectory(directory);
+    }
+    finally {
+        if (!renamed) {
+            await rm(temporaryPath, { force: true }).catch(() => undefined);
+        }
+    }
 }
 async function waitForAuthorizationCode(state, timeoutMs, providerId) {
     const redirectUri = new URL(resolveOauthRedirectUri(providerId));
@@ -390,40 +475,35 @@ async function waitForAuthorizationCode(state, timeoutMs, providerId) {
         }, timeoutMs);
         const server = createServer((req, res) => {
             if (!req.url) {
-                res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
-                res.end(buildErrorHtml("Missing callback URL."));
+                res.writeHead(400, OAUTH_HTML_HEADERS);
+                res.end(buildOAuthErrorHtml("Missing callback URL."));
                 return;
             }
             const url = new URL(req.url, redirectUri.origin);
             if (url.pathname !== callbackPath) {
-                res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
-                res.end(buildErrorHtml("Unknown callback path."));
+                res.writeHead(404, OAUTH_HTML_HEADERS);
+                res.end(buildOAuthErrorHtml("Unknown callback path."));
                 return;
             }
-            const returnedState = url.searchParams.get("state");
-            const code = url.searchParams.get("code");
-            const error = url.searchParams.get("error");
-            if (error) {
-                clearTimeout(timer);
-                server.close();
-                res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
-                res.end(buildErrorHtml(`Authorization failed: ${error}`));
-                reject(new Error(`OAuth authorization failed: ${error}`));
+            const decision = evaluateOAuthCallback(url, state);
+            if (decision.kind === "invalid") {
+                res.writeHead(400, OAUTH_HTML_HEADERS);
+                res.end(buildOAuthErrorHtml("Invalid authorization callback."));
                 return;
             }
-            if (!code || returnedState !== state) {
+            if (decision.kind === "provider_error") {
                 clearTimeout(timer);
                 server.close();
-                res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
-                res.end(buildErrorHtml("Invalid authorization callback."));
-                reject(new Error("OAuth callback did not include a valid code/state pair"));
+                res.writeHead(400, OAUTH_HTML_HEADERS);
+                res.end(buildOAuthErrorHtml("Authorization was denied by the provider."));
+                reject(new Error("CLAWLORE_OAUTH_PROVIDER_DENIED: authorization was not granted"));
                 return;
             }
             clearTimeout(timer);
             server.close();
-            res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+            res.writeHead(200, OAUTH_HTML_HEADERS);
             res.end(buildSuccessHtml());
-            resolve(code);
+            resolve(decision.code);
         });
         server.on("error", (err) => {
             clearTimeout(timer);

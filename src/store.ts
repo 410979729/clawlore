@@ -161,7 +161,7 @@ export const loadLanceDB = async (): Promise<
     return await lancedbImportPromise;
   } catch (err) {
     throw new Error(
-      `clawlore: failed to load LanceDB. ${String(err)}`,
+      `CLAWLORE_LANCEDB_LOAD_FAILED: ${diagnosticErrorSummary(err)}`,
       { cause: err },
     );
   }
@@ -224,9 +224,7 @@ export function validateStoragePath(dbPath: string): string {
         resolvedPath = realpathSync(dbPath);
       } catch (err: any) {
         throw new Error(
-          `dbPath "${dbPath}" is a symlink whose target does not exist.\n` +
-          `  Fix: Create the target directory, or update the symlink to point to a valid path.\n` +
-          `  Details: ${err.code || ""} ${err.message}`,
+          `CLAWLORE_STORAGE_PATH_INVALID: path=${diagnosticIdentifier(dbPath)} dangling_symlink ${diagnosticErrorSummary(err)}`,
         );
       }
     }
@@ -250,10 +248,7 @@ export function validateStoragePath(dbPath: string): string {
       mkdirSync(resolvedPath, { recursive: true });
     } catch (err: any) {
       throw new Error(
-        `Failed to create dbPath directory "${resolvedPath}".\n` +
-        `  Fix: Ensure the parent directory "${dirname(resolvedPath)}" exists and is writable,\n` +
-        `       or create it manually: mkdir -p "${resolvedPath}"\n` +
-        `  Details: ${err.code || ""} ${err.message}`,
+        `CLAWLORE_STORAGE_CREATE_FAILED: path=${diagnosticIdentifier(resolvedPath)} parent=${diagnosticIdentifier(dirname(resolvedPath))} ${diagnosticErrorSummary(err)}`,
       );
     }
   }
@@ -263,10 +258,7 @@ export function validateStoragePath(dbPath: string): string {
     accessSync(resolvedPath, constants.W_OK);
   } catch (err: any) {
     throw new Error(
-      `dbPath directory "${resolvedPath}" is not writable.\n` +
-      `  Fix: Check permissions with: ls -la "${dirname(resolvedPath)}"\n` +
-      `       Or grant write access: chmod u+w "${resolvedPath}"\n` +
-      `  Details: ${err.code || ""} ${err.message}`,
+      `CLAWLORE_STORAGE_NOT_WRITABLE: path=${diagnosticIdentifier(resolvedPath)} ${diagnosticErrorSummary(err)}`,
     );
   }
 
@@ -369,7 +361,7 @@ export class MemoryStore {
       const sqliteVectorStore = new SqliteBruteForceVectorStore(this.config.dbPath, this.config.vectorDim);
       sqliteVectorStore.open();
       this.sqliteVectorStore = sqliteVectorStore;
-      await this.initializeSqlTruthStore(sqliteVectorStore.listIds().length > 0);
+      await this.initializeSqlTruthStore(sqliteVectorStore.hasRows());
       this.vectorCompanionError = null;
       this.initialized = true;
       return;
@@ -380,12 +372,9 @@ export class MemoryStore {
     let db: LanceDB.Connection;
     try {
       db = await lancedb.connect(this.config.dbPath);
-    } catch (err: any) {
-      const code = err.code || "";
-      const message = err.message || String(err);
+    } catch (err) {
       throw new Error(
-        `Failed to open LanceDB at "${this.config.dbPath}": ${code} ${message}\n` +
-        `  Fix: Verify the path exists and is writable. Check parent directory permissions.`,
+        `CLAWLORE_LANCEDB_OPEN_FAILED: path=${diagnosticIdentifier(this.config.dbPath)} ${diagnosticErrorSummary(err)}`,
       );
     }
 
@@ -512,17 +501,26 @@ export class MemoryStore {
     // A companion with rows but no SQL authority is an outage or an explicit
     // legacy-migration situation. Ordinary startup must never recreate truth
     // from vectors because stale deleted/superseded rows can be resurrected.
-    if (!existsSync(truthPath) && hasCompanionRows) {
+    const truthExists = existsSync(truthPath);
+    if (!truthExists && hasCompanionRows) {
       this.sqlTruthStore = null;
       this.sqlTruthErrorCode = "SQL_TRUTH_MIGRATION_REQUIRED";
       this.sqlTruthError = "SQL truth is missing while vector companion data exists";
       throw new Error(
-        "CLAWLORE_SQL_TRUTH_MIGRATION_REQUIRED: restore memory.sqlite3 from backup or run the explicit backup-backed legacy migration; vector-to-truth startup import is forbidden",
+        "CLAWLORE_SQL_TRUTH_MIGRATION_REQUIRED: restore memory.sqlite3 from a verified backup; companion-to-truth recovery is unsupported and vector startup import is forbidden",
       );
     }
     try {
       truth = new SqlTruthStore(truthPath);
-      truth.open();
+      const inspection = SqlTruthStore.inspectAuthority(truthPath);
+      if (inspection.status === "untrusted") {
+        this.sqlTruthErrorCode = "SQL_TRUTH_MIGRATION_REQUIRED";
+        throw new Error(`CLAWLORE_SQL_TRUTH_AUTHORITY_REQUIRED: ${inspection.reason}`);
+      }
+      truth.open({
+        allowCreate: !truthExists && !hasCompanionRows,
+        allowLegacyUpgrade: inspection.status === "legacy",
+      });
       this.sqlTruthStore = truth;
       this.sqlTruthErrorCode = null;
       this.sqlTruthError = null;
@@ -539,6 +537,12 @@ export class MemoryStore {
       console.error(
         `clawlore: SQL truth initialization failed; memory operations are fail-closed: ${this.sqlTruthError}`,
       );
+      if (this.sqlTruthErrorCode === "SQL_TRUTH_MIGRATION_REQUIRED") {
+        throw new Error(
+          "CLAWLORE_SQL_TRUTH_MIGRATION_REQUIRED: restore the verified SQL truth authority before retrying; companion import is unsupported",
+          { cause: err },
+        );
+      }
       throw new Error(
         `CLAWLORE_SQL_TRUTH_UNAVAILABLE: SQL truth initialization failed; run doctor and restore the truth database before retrying`,
         { cause: err },
@@ -785,7 +789,7 @@ export class MemoryStore {
       });
     } catch (batchError) {
       const rebuilt: MemoryEntry[] = [];
-      errors.push(`batch embedding failed, falling back to single-row repair: ${batchError instanceof Error ? batchError.message : String(batchError)}`);
+      errors.push(`batch embedding failed, falling back to single-row repair: ${diagnosticErrorSummary(batchError)}`);
       for (const entry of batch) {
         try {
           const vector = await embedder.embedPassage(entry.text);
@@ -797,7 +801,7 @@ export class MemoryStore {
           }
           rebuilt.push({ ...entry, vector });
         } catch (err) {
-          errors.push(`${entry.id}: ${err instanceof Error ? err.message : String(err)}`);
+          errors.push(`${diagnosticIdentifier(entry.id)}: ${diagnosticErrorSummary(err)}`);
         }
       }
       return rebuilt;
@@ -821,7 +825,7 @@ export class MemoryStore {
       }
     } catch (err) {
       throw new Error(
-        `FTS index creation failed: ${err instanceof Error ? err.message : String(err)}`,
+        `CLAWLORE_FTS_INDEX_CREATE_FAILED: ${diagnosticErrorSummary(err)}`,
       );
     }
   }
@@ -847,11 +851,9 @@ export class MemoryStore {
       try {
         await this.table!.add([fullEntry as any]);
         this.syncSqlTruthUpsert(fullEntry);
-      } catch (err: any) {
-        const code = err.code || "";
-        const message = err.message || String(err);
+      } catch (err) {
         throw new Error(
-          `Failed to store memory in "${this.config.dbPath}": ${code} ${message}`,
+          `CLAWLORE_MEMORY_STORE_FAILED: path=${diagnosticIdentifier(this.config.dbPath)} ${diagnosticErrorSummary(err)}`,
         );
       }
       return fullEntry;
@@ -1580,8 +1582,8 @@ export class MemoryStore {
         const current = await this.getById(original.id).catch(() => null);
         if (current) {
           throw new Error(
-            `Failed to update memory ${id}: write failed after delete, but an existing record was preserved. ` +
-            `Write error: ${addError instanceof Error ? addError.message : String(addError)}`,
+            `CLAWLORE_MEMORY_UPDATE_FAILED_PRESERVED: id=${diagnosticIdentifier(id)} ${diagnosticErrorSummary(addError)}`,
+            { cause: addError },
           );
         }
 
@@ -1590,15 +1592,14 @@ export class MemoryStore {
           this.syncSqlTruthUpsert(rollbackCandidate);
         } catch (rollbackError) {
           throw new Error(
-            `Failed to update memory ${id}: write failed after delete, and rollback also failed. ` +
-            `Write error: ${addError instanceof Error ? addError.message : String(addError)}. ` +
-            `Rollback error: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+            `CLAWLORE_MEMORY_UPDATE_ROLLBACK_FAILED: id=${diagnosticIdentifier(id)} write=${diagnosticErrorSummary(addError)} rollback=${diagnosticErrorSummary(rollbackError)}`,
+            { cause: rollbackError },
           );
         }
 
         throw new Error(
-          `Failed to update memory ${id}: write failed after delete, latest available record restored. ` +
-          `Write error: ${addError instanceof Error ? addError.message : String(addError)}`,
+          `CLAWLORE_MEMORY_UPDATE_FAILED_RESTORED: id=${diagnosticIdentifier(id)} ${diagnosticErrorSummary(addError)}`,
+          { cause: addError },
         );
       }
 
@@ -2025,7 +2026,7 @@ export class MemoryStore {
       this._lastFtsError = null;
       return { success: true };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = diagnosticErrorSummary(err);
       this._lastFtsError = msg;
       this.ftsIndexCreated = false;
       return { success: false, error: msg };

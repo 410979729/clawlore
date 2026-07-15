@@ -21,6 +21,7 @@
  */
 
 import type { MemoryEntry } from "./store.js";
+import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
 
 // ============================================================================
 // Types
@@ -350,7 +351,7 @@ export async function runCompaction(
       }
     } catch (err) {
       logger?.warn(
-        `memory-compactor: failed to merge cluster of ${members.length}: ${String(err)}`,
+        `memory-compactor: failed to merge cluster of ${members.length}: ${diagnosticErrorSummary(err)}`,
       );
     }
   }

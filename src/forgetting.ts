@@ -1,4 +1,5 @@
 import { evaluateCaptureSafety, sanitizeCaptureText } from "./capture-safety.js";
+import { diagnosticErrorSummary, diagnosticIdentifier } from "./diagnostic-redaction.js";
 
 type DatabaseSync = any;
 
@@ -330,7 +331,7 @@ export async function runForgettingWithVectorSync(
             vectorDeleteErrors.push(id);
           }
         } catch (err) {
-          vectorDeleteErrors.push(`${id}: ${err instanceof Error ? err.message : String(err)}`);
+          vectorDeleteErrors.push(`${diagnosticIdentifier(id)}: ${diagnosticErrorSummary(err)}`);
         }
       }
 
@@ -375,7 +376,7 @@ export async function runForgettingWithVectorSync(
         vectorDeleteErrors.push(id);
       }
     } catch (err) {
-      vectorDeleteErrors.push(`${id}: ${err instanceof Error ? err.message : String(err)}`);
+      vectorDeleteErrors.push(`${diagnosticIdentifier(id)}: ${diagnosticErrorSummary(err)}`);
     }
   }
 

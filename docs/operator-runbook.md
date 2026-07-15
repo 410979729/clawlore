@@ -32,11 +32,22 @@ writes with `CLAWLORE_SQL_TRUTH_UNAVAILABLE`. Do not enable vector-only recall.
 Restore or repair the SQLite authority from a verified backup, run doctor and
 the vector-repair dry run, then repeat the clean source/live gate.
 
-If `memory.sqlite3` is missing while the vector companion still contains rows,
-startup stops with `CLAWLORE_SQL_TRUTH_MIGRATION_REQUIRED`. Ordinary startup
-never imports companion rows into truth. Restore the authority from a verified
-backup or use a separately reviewed, backup-backed explicit migration; never
-rename or delete the truth file to force vector recovery.
+If `memory.sqlite3` is missing, zero-length, schema-less, marker-less at zero
+rows, or otherwise lacks an established authority while the vector companion
+still contains rows, startup stops with
+`CLAWLORE_SQL_TRUTH_MIGRATION_REQUIRED`. Ordinary startup never imports
+companion rows into truth. The supported recovery is restoration of a verified
+SQLite authority backup, followed by `doctor` and vector-repair dry-run. This
+release does not ship or support companion-to-truth recovery. In particular,
+`scripts/migrate-legacy-hygiene.mjs` only repairs metadata hygiene inside an
+already valid SQL authority; it is not a vector recovery command. Never rename,
+truncate, recreate, or delete the truth file to force vector recovery.
+
+New stores may create an authority only when both the SQL truth and companion
+are absent/empty. The created database contains a versioned
+`clawlore_sql_truth_authority` marker. A structurally complete, non-empty legacy
+truth database may receive that marker during the controlled 1.1→1.2 schema
+upgrade; an empty or partial unmarked database is never upgraded implicitly.
 
 Doctor/dashboard diagnostics expose `scanBudgetExhaustions` and
 `lastScanBudgetExhaustedAt`. A new exhaustion means stale companion rows

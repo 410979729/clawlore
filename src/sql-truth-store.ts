@@ -1,8 +1,9 @@
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import { chmodSync, existsSync, mkdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import type { MemoryEntry, MemorySearchResult } from "./store.js";
 import { parseSmartMetadata, isMemoryActiveAt } from "./smart-metadata.js";
+import { enforcePrivatePath } from "./file-privacy.js";
 
 const require = createRequire(import.meta.url);
 
@@ -59,6 +60,35 @@ export interface VectorRepairDebtEntry {
   createdAt: number;
   updatedAt: number;
 }
+
+export type SqlTruthAuthorityStatus = "missing" | "valid" | "legacy" | "untrusted" | "unreadable";
+
+export interface SqlTruthAuthorityInspection {
+  status: SqlTruthAuthorityStatus;
+  schemaVersion: number | null;
+  truthRows: number | null;
+  reason: string;
+}
+
+export interface SqlTruthOpenOptions {
+  allowCreate?: boolean;
+  allowLegacyUpgrade?: boolean;
+}
+
+const SQL_TRUTH_AUTHORITY_TABLE = "clawlore_sql_truth_authority";
+const SQL_TRUTH_AUTHORITY_ID = "clawlore-sql-truth";
+const SQL_TRUTH_AUTHORITY_SCHEMA_VERSION = 1;
+const REQUIRED_TRUTH_COLUMNS = [
+  "id",
+  "text",
+  "category",
+  "scope",
+  "importance",
+  "timestamp",
+  "metadata",
+  "metadata_text",
+  "updated_at",
+] as const;
 
 const WORD_RE = /[a-zA-Z0-9]{2,}|[\u4e00-\u9fff]{2,}/g;
 const MAX_LIST_LIMIT = 10_000;
@@ -170,9 +200,111 @@ export class SqlTruthStore {
     return this.sqlitePath;
   }
 
-  open(): void {
+  static inspectAuthority(sqlitePath: string): SqlTruthAuthorityInspection {
+    if (!existsSync(sqlitePath)) {
+      return {
+        status: "missing",
+        schemaVersion: null,
+        truthRows: null,
+        reason: "sql_truth_file_missing",
+      };
+    }
+
+    let db: DatabaseSync | null = null;
+    try {
+      const { DatabaseSync } = require("node:sqlite") as {
+        DatabaseSync: new (path: string, options?: Record<string, unknown>) => DatabaseSync;
+      };
+      db = new DatabaseSync(sqlitePath, { readOnly: true });
+      const tableRows = db.prepare(
+        "SELECT name, type FROM sqlite_master WHERE name IN (?, ?, ?)",
+      ).all(SQL_TRUTH_AUTHORITY_TABLE, "memory_truth", "memory_truth_fts") as Array<{
+        name: string;
+        type: string;
+      }>;
+      const objects = new Map(tableRows.map((row) => [row.name, row.type]));
+      const hasTruth = objects.get("memory_truth") === "table";
+      const hasFts = objects.has("memory_truth_fts");
+      if (!hasTruth || !hasFts) {
+        return {
+          status: "untrusted",
+          schemaVersion: null,
+          truthRows: null,
+          reason: "authority_core_schema_missing",
+        };
+      }
+
+      const columns = new Set(
+        (db.prepare("PRAGMA table_info(memory_truth)").all() as Array<{ name: string }>).map((row) => row.name),
+      );
+      const missingColumns = REQUIRED_TRUTH_COLUMNS.filter((column) => !columns.has(column));
+      if (missingColumns.length > 0) {
+        return {
+          status: "untrusted",
+          schemaVersion: null,
+          truthRows: null,
+          reason: "authority_truth_schema_incompatible",
+        };
+      }
+
+      const truthRows = Number(db.prepare("SELECT COUNT(*) AS count FROM memory_truth").get()?.count || 0);
+      if (!objects.has(SQL_TRUTH_AUTHORITY_TABLE)) {
+        return {
+          status: truthRows > 0 ? "legacy" : "untrusted",
+          schemaVersion: null,
+          truthRows,
+          reason: truthRows > 0
+            ? "legacy_authority_requires_marker_upgrade"
+            : "authority_marker_missing",
+        };
+      }
+
+      const marker = db.prepare(
+        `SELECT authority_id, schema_version FROM ${SQL_TRUTH_AUTHORITY_TABLE} WHERE singleton = 1`,
+      ).get() as { authority_id?: string; schema_version?: number } | undefined;
+      const schemaVersion = Number(marker?.schema_version || 0);
+      if (marker?.authority_id !== SQL_TRUTH_AUTHORITY_ID || schemaVersion !== SQL_TRUTH_AUTHORITY_SCHEMA_VERSION) {
+        return {
+          status: "untrusted",
+          schemaVersion: Number.isFinite(schemaVersion) ? schemaVersion : null,
+          truthRows,
+          reason: "authority_marker_invalid",
+        };
+      }
+      return {
+        status: "valid",
+        schemaVersion,
+        truthRows,
+        reason: "authority_marker_valid",
+      };
+    } catch {
+      return {
+        status: "unreadable",
+        schemaVersion: null,
+        truthRows: null,
+        reason: "authority_readonly_probe_failed",
+      };
+    } finally {
+      try { db?.close?.(); } catch {}
+    }
+  }
+
+  open(options: SqlTruthOpenOptions = {}): void {
     if (this.db) return;
     const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: new (path: string) => DatabaseSync };
+    const inspection = SqlTruthStore.inspectAuthority(this.sqlitePath);
+    if (inspection.status === "missing" && options.allowCreate === false) {
+      throw new Error("CLAWLORE_SQL_TRUTH_AUTHORITY_REQUIRED: SQL truth authority is missing");
+    }
+    if (inspection.status === "unreadable") {
+      throw new Error("CLAWLORE_SQL_TRUTH_UNAVAILABLE: SQL truth authority cannot be opened read-only");
+    }
+    if (inspection.status === "untrusted") {
+      throw new Error(`CLAWLORE_SQL_TRUTH_AUTHORITY_REQUIRED: ${inspection.reason}`);
+    }
+    if (inspection.status === "legacy" && options.allowLegacyUpgrade !== true) {
+      throw new Error("CLAWLORE_SQL_TRUTH_AUTHORITY_REQUIRED: legacy SQL truth requires an explicit marker upgrade");
+    }
     mkdirSync(dirname(this.sqlitePath), { recursive: true });
     this.db = new DatabaseSync(this.sqlitePath);
     this.enforcePrivateFiles();
@@ -681,6 +813,13 @@ export class SqlTruthStore {
       );
       CREATE INDEX IF NOT EXISTS idx_vector_companion_repair_updated_at
         ON vector_companion_repair_outbox(updated_at ASC);
+      CREATE TABLE IF NOT EXISTS ${SQL_TRUTH_AUTHORITY_TABLE} (
+        singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+        authority_id TEXT NOT NULL,
+        schema_version INTEGER NOT NULL,
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL
+      );
       CREATE TRIGGER IF NOT EXISTS memory_truth_single_active_fact_insert
       BEFORE INSERT ON memory_truth
       WHEN json_extract(NEW.metadata, '$.fact_key') IS NOT NULL
@@ -715,6 +854,18 @@ export class SqlTruthStore {
       END;
       `,
     );
+    const now = Date.now();
+    db.prepare(
+      `
+      INSERT INTO ${SQL_TRUTH_AUTHORITY_TABLE} (
+        singleton, authority_id, schema_version, created_at, updated_at
+      ) VALUES (1, ?, ?, ?, ?)
+      ON CONFLICT(singleton) DO UPDATE SET
+        authority_id = excluded.authority_id,
+        schema_version = excluded.schema_version,
+        updated_at = excluded.updated_at
+      `,
+    ).run(SQL_TRUTH_AUTHORITY_ID, SQL_TRUTH_AUTHORITY_SCHEMA_VERSION, now, now);
     this.reconcileFts();
   }
 
@@ -808,19 +959,11 @@ export class SqlTruthStore {
   }
 
   private enforcePrivateFiles(): void {
-    // Windows does not expose POSIX owner/group/other mode semantics. The
-    // containing OpenClaw state ACL is the authority there; never report a
-    // post-commit Unix-mode failure on that platform.
-    if (process.platform === "win32") return;
     this.injectFault("permissions_before_enforce");
     for (const path of [this.sqlitePath, `${this.sqlitePath}-wal`, `${this.sqlitePath}-shm`]) {
       try {
         if (!existsSync(path)) continue;
-        chmodSync(path, 0o600);
-        const mode = statSync(path).mode & 0o777;
-        if (mode !== 0o600) {
-          throw new Error(`unexpected mode ${mode.toString(8)}`);
-        }
+        enforcePrivatePath(path, { kind: "file" });
       } catch (err) {
         const name = path === this.sqlitePath
           ? "database"

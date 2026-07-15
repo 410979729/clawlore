@@ -8,6 +8,7 @@ import { join } from "node:path";
 import fs from "node:fs/promises";
 import type { MemoryStore, MemoryEntry } from "./store.js";
 import { loadLanceDB } from "./store.js";
+import { diagnosticErrorSummary, diagnosticIdentifier } from "./diagnostic-redaction.js";
 
 // ============================================================================
 // Types
@@ -121,7 +122,7 @@ export class MemoryMigrator {
         `${result.migratedCount} migrated, ${result.skippedCount} skipped`;
 
     } catch (error) {
-      result.errors.push(`Migration failed: ${error instanceof Error ? error.message : String(error)}`);
+      result.errors.push(`MIGRATION_FAILED: ${diagnosticErrorSummary(error)}`);
       result.summary = "Migration failed due to unexpected error";
     }
 
@@ -175,7 +176,7 @@ export class MemoryMigrator {
         scope: row.scope as string | undefined,
       }));
     } catch (error) {
-      console.warn(`Failed to load legacy data: ${error}`);
+      console.warn(`clawlore: legacy migration source read failed: ${diagnosticErrorSummary(error)}`);
       return [];
     }
   }
@@ -232,7 +233,7 @@ export class MemoryMigrator {
         }
 
       } catch (error) {
-        errors.push(`Failed to migrate entry ${legacy.id}: ${error}`);
+        errors.push(`MIGRATION_ENTRY_FAILED(${diagnosticIdentifier(legacy.id)}): ${diagnosticErrorSummary(error)}`);
         skipped++;
       }
     }
@@ -313,7 +314,7 @@ export class MemoryMigrator {
         valid: false,
         sourceCount: 0,
         targetCount: 0,
-        issues: [`Verification failed: ${error}`],
+        issues: [`MIGRATION_VERIFICATION_FAILED: ${diagnosticErrorSummary(error)}`],
       };
     }
   }

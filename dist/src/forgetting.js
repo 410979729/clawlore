@@ -1,4 +1,5 @@
 import { evaluateCaptureSafety, sanitizeCaptureText } from "./capture-safety.js";
+import { diagnosticErrorSummary, diagnosticIdentifier } from "./diagnostic-redaction.js";
 function safeJsonObject(raw) {
     if (!raw)
         return {};
@@ -245,7 +246,7 @@ export async function runForgettingWithVectorSync(db, options = {}) {
                     }
                 }
                 catch (err) {
-                    vectorDeleteErrors.push(`${id}: ${err instanceof Error ? err.message : String(err)}`);
+                    vectorDeleteErrors.push(`${diagnosticIdentifier(id)}: ${diagnosticErrorSummary(err)}`);
                 }
             }
             if (vectorDeleteErrors.length > 0) {
@@ -288,7 +289,7 @@ export async function runForgettingWithVectorSync(db, options = {}) {
             }
         }
         catch (err) {
-            vectorDeleteErrors.push(`${id}: ${err instanceof Error ? err.message : String(err)}`);
+            vectorDeleteErrors.push(`${diagnosticIdentifier(id)}: ${diagnosticErrorSummary(err)}`);
         }
     }
     result.vector_deleted = vectorDeleted;
