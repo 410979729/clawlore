@@ -1,7 +1,7 @@
 # ClawLore v1 project handoff
 
 Current through Phase 9, H1-H5 production hardening, the R1 canonical identity
-transition, and five independent-audit remediation rounds on 2026-07-15.
+transition, and six independent-audit remediation rounds through 2026-07-16.
 
 ## Canonical identity candidate
 
@@ -83,13 +83,47 @@ The final documentation-only descendant repeated the same clean source gate;
 the delivered commit is the repository HEAD named in the handoff message, and
 the recursive runtime digest remains unchanged.
 
+The sixth remediation round closes the fifth audit's migration, ACL, OAuth
+read, listener, packaging, and evidence gaps. SQL-authority inspection now
+checks exact table kinds and columns, including an actual FTS5 virtual table;
+ordinary startup never upgrades a legacy authority. The explicit migration
+requires a verified backup and receipt, performs schema/FTS/marker work inside
+one savepoint, and writes the marker last. Windows privacy is default-deny:
+the current service SID must own the file and be the sole protected allow ACE.
+OAuth reads now verify a private parent and file, reject symlinks, use
+`O_NOFOLLOW`, and compare opened-file identity; the callback listener is ready
+before the authorize URL is exposed. SQLite parent privacy is established
+before open and expensive Windows ACL commands no longer run under the write
+lock. OAuth diagnostics expose stable identifiers rather than absolute paths.
+
+The release contract now distinguishes source-only scripts from the one packed
+runtime smoke. The source gate builds the final tarball, installs it into an
+empty production directory, then installs that same tarball through an
+isolated real OpenClaw CLI and exercises extension activation, `clawlore`, both
+legacy aliases, authority inspection, Experience initialization, and doctor.
+Generated evidence binds the exact commit, runtime digest, pack count, SBOM
+count/hash, registry, and both packed smokes. The exact clean code commit
+`9aa7d2e29661f66bca6988db091b59770da7561f` passed 349/349 tests,
+typecheck, build, vector repair, 124/124 deterministic recall, the 200,000-row
+SQLite FTS baseline, official-registry production audit with zero known
+vulnerabilities, a 42-component SBOM, and a 185-file pack scan. Build left the
+tree clean. The recursive runtime digest is
+`da95777445aeca89e5ef497ee3c270aeb859e05bee0e7b21e79cf70694db0cc4`.
+See
+`eval/clawlore-v1-sixth-independent-audit-remediation-run-2026-07-16.md`.
+
+This Linux acceptance run exercises the Windows policy through deterministic
+command/ACL fixtures; it does not claim a real second-account Windows ACL or
+concurrent-write benchmark. That remains an independent platform-validation
+item and does not authorize weakening the default-deny policy.
+
 The live Gateway port source was separately aligned from stale config `19421`
 to the service/listener truth `19021` under a controlled backup. That config
 restart did not deploy the candidate or alter the memory data plane.
 
-This candidate does not authorize a live rename, V2 writes, lifecycle
+This candidate still does not authorize a live rename, V2 writes, lifecycle
 promotion, ContextEngine, prompt mutation, or final-recall cutover. Tianxuan's
-re-audit of the exact clean remediation commit is the next gate; repository
+re-audit of the exact delivered clean HEAD is the next gate; repository
 creation/rename and push follow only after that audit is accepted.
 
 ## Current live boundary

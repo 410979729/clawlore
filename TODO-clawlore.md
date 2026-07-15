@@ -1,6 +1,6 @@
 # ClawLore v1 TODO
 
-Updated: 2026-07-15
+Updated: 2026-07-16
 
 ## R1 — Canonical ClawLore identity candidate
 
@@ -40,6 +40,36 @@ Updated: 2026-07-15
       and isolated OpenClaw inspect/doctor/three-command smoke.
 - [ ] Obtain Tianxuan's acceptance of the exact fifth-remediation candidate
       before repository publication or any live identity rollout.
+
+### Sixth independent-audit remediation
+
+- [x] Make SQL-authority inspection validate object type and exact columns,
+      keep legacy upgrade out of ordinary startup, and write the authority
+      marker only after an atomic, backup-bound explicit migration succeeds.
+- [x] Make Windows privacy default-deny: require the current service SID as
+      owner, a protected DACL, and exactly one allow ACE for that SID; reject
+      unknown owners, groups, inherited entries, and unfamiliar ACE types.
+- [x] Apply the same privacy boundary to OAuth reads as writes: private parent,
+      owner/mode or ACL verification, symlink refusal, `O_NOFOLLOW`, and opened
+      file identity checks.
+- [x] Start and await the OAuth callback listener before exposing the authorize
+      URL; redact OAuth path/provider diagnostics.
+- [x] Remove automatic legacy authority mutation from startup and provide an
+      explicit dry-run/apply migration with verified backup and durable receipt.
+- [x] Move expensive Windows ACL enforcement out of SQLite write transactions,
+      private the database parent before open, and retain POSIX rollback checks.
+- [x] Install the final packed tarball into an empty production directory and
+      then through an isolated real OpenClaw CLI; smoke the canonical command,
+      both aliases, extension activation, authority inspection, Experience
+      initialization, and doctor.
+- [x] Bind generated release evidence to the exact commit, runtime digest,
+      pack file count, SBOM count/hash, official registry, and both packed
+      runtime smokes; align package script policy and changelog.
+- [x] Pass 349/349 tests and the exact clean-install source gate with
+      typecheck/build, vector repair, 124-case recall, 200k FTS, official audit
+      0, 42-component SBOM, 185-file pack scan, and build `dirty=false`.
+- [ ] Obtain Tianxuan's sixth independent acceptance of the exact delivered
+      candidate before repository publication, deployment, or V2 cutover.
 
 ## ClawLore v1 production hardening — active after Phase 9
 
