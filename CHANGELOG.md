@@ -27,6 +27,17 @@
   whose transport or endpoint failures are release failures.
 - Added authority-outage, transaction-fault, stale-companion pagination,
   dependency-preflight, supply-chain, and tool-error regression coverage.
+- Made SQL authority creation and legacy migration marker-backed and structurally
+  verified. Legacy upgrades now require an explicit backup/receipt command and
+  commit schema, FTS rebuild, receipt, and the final marker atomically.
+- Hardened OAuth session reads and writes against broad modes, wrong owners,
+  symlinks, file swaps, partial replacement, and callback-listener races; OAuth
+  diagnostics no longer expose absolute credential paths.
+- Enforced an exact owner-only Windows ACL policy for private state files and
+  directories, with unknown owners and Allow ACEs rejected by default.
+- Added a final packed-tarball installation/runtime smoke, a machine-readable
+  source-only script policy, and generated release evidence covering the exact
+  commit, runtime digest, SBOM component count, and package file count.
 
 ## Unreleased
 

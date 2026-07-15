@@ -34,30 +34,79 @@ test("Windows private path adapter removes broad grants and verifies protected D
     const fakeExec = (command, args) => {
       calls.push([command, args]);
       if (command === "whoami.exe") return '"HOST\\joy","S-1-5-21-1000"\r\n';
-      if (command === "powershell.exe") return "O:S-1-5-21-1000D:P(A;;FA;;;S-1-5-21-1000)";
-      return "processed 1 files";
+      if (command === "powershell.exe") return JSON.stringify({
+        ownerSid: "S-1-5-21-1000",
+        protected: true,
+        access: [{
+          sid: "S-1-5-21-1000",
+          type: "Allow",
+          rights: "FullControl",
+          inherited: false,
+          inheritanceFlags: "None",
+          propagationFlags: "None",
+        }],
+      });
+      throw new Error(`unexpected command ${command}`);
     };
     enforcePrivatePath(file, { platform: "win32", execFile: fakeExec });
-    const aclCall = calls.find(([command]) => command === "icacls.exe");
+    const aclCall = calls.find(([command]) => command === "powershell.exe");
     assert.ok(aclCall);
-    assert.ok(aclCall[1].includes("/inheritance:r"));
-    assert.ok(aclCall[1].includes("*S-1-1-0"));
-    assert.ok(aclCall[1].includes("*S-1-5-11"));
-    assert.ok(aclCall[1].includes("*S-1-5-32-545"));
+    assert.match(aclCall[1][3], /SetOwner/);
+    assert.match(aclCall[1][3], /SetAccessRuleProtection/);
+    assert.match(aclCall[1][3], /RemoveAccessRuleSpecific/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("Windows private path adapter fails when broad allow ACE remains", () => {
+for (const scenario of [
+  {
+    name: "owner is unknown",
+    report: {
+      ownerSid: "S-1-5-21-9999",
+      protected: true,
+      access: [{ sid: "S-1-5-21-1000", type: "Allow", rights: "FullControl", inherited: false }],
+    },
+  },
+  {
+    name: "an unknown SID keeps read access",
+    report: {
+      ownerSid: "S-1-5-21-1000",
+      protected: true,
+      access: [
+        { sid: "S-1-5-21-1000", type: "Allow", rights: "FullControl", inherited: false },
+        { sid: "S-1-5-21-9999", type: "Allow", rights: "ReadAndExecute", inherited: false },
+      ],
+    },
+  },
+  {
+    name: "an inherited group ACE remains",
+    report: {
+      ownerSid: "S-1-5-21-1000",
+      protected: true,
+      access: [
+        { sid: "S-1-5-21-1000", type: "Allow", rights: "FullControl", inherited: false },
+        { sid: "S-1-5-32-544", type: "Allow", rights: "FullControl", inherited: true },
+      ],
+    },
+  },
+  {
+    name: "DACL is not protected",
+    report: {
+      ownerSid: "S-1-5-21-1000",
+      protected: false,
+      access: [{ sid: "S-1-5-21-1000", type: "Allow", rights: "FullControl", inherited: false }],
+    },
+  },
+]) test(`Windows private path adapter fails when ${scenario.name}`, () => {
   const dir = mkdtempSync(join(tmpdir(), "clawlore-private-windows-fail-"));
   const file = join(dir, "secret.json");
   try {
     writeFileSync(file, "fixture\n");
     const fakeExec = (command) => {
       if (command === "whoami.exe") return '"HOST\\joy","S-1-5-21-1000"\r\n';
-      if (command === "powershell.exe") return "O:S-1-5-21-1000D:P(A;;FA;;;WD)";
-      return "processed 1 files";
+      if (command === "powershell.exe") return JSON.stringify(scenario.report);
+      throw new Error(`unexpected command ${command}`);
     };
     assert.throws(
       () => enforcePrivatePath(file, { platform: "win32", execFile: fakeExec }),

@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readdir, readFile, realpath, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -20,8 +20,13 @@ async function exists(path) {
   }
 }
 
-function run(command, args) {
-  const result = spawnSync(command, args, { stdio: "inherit", shell: false });
+function run(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    stdio: "inherit",
+    shell: false,
+    cwd: options.cwd,
+    env: options.env || process.env,
+  });
   if (result.status !== 0) {
     process.exit(result.status ?? 1);
   }
@@ -31,6 +36,7 @@ function runCapture(command, args, options = {}) {
   const result = spawnSync(command, args, {
     encoding: "utf8",
     shell: false,
+    cwd: options.cwd,
     env: options.env || process.env,
   });
   if (result.status !== 0) {
@@ -85,12 +91,37 @@ if (packageJson.version !== manifest.version) {
   );
 }
 
+const releaseScriptContract = packageJson.clawloreRelease;
+if (
+  releaseScriptContract?.scriptPolicy !== "all-except-published-runtime-scripts-are-source-checkout-only" ||
+  !Array.isArray(releaseScriptContract?.publishedRuntimeScripts) ||
+  releaseScriptContract.publishedRuntimeScripts.length === 0
+) {
+  throw new Error("release gate failed: package script publication contract is missing or invalid");
+}
+for (const scriptName of releaseScriptContract.publishedRuntimeScripts) {
+  if (typeof packageJson.scripts?.[scriptName] !== "string") {
+    throw new Error(`release gate failed: published runtime script is undefined: ${scriptName}`);
+  }
+}
+
 const currentChangelog = changelogSection(changelog, packageJson.version);
 if (!currentChangelog) {
   throw new Error(`release gate failed: CHANGELOG.md missing section for ${packageJson.version}`);
 }
 
-for (const marker of ["governance", "journal", "operator dashboard", "golden", "hard-delete", "release gate"]) {
+for (const marker of [
+  "governance",
+  "journal",
+  "operator dashboard",
+  "golden",
+  "hard-delete",
+  "release gate",
+  "SQL authority",
+  "OAuth session",
+  "Windows ACL",
+  "packed-tarball",
+]) {
   if (!currentChangelog.includes(marker)) {
     throw new Error(`release gate failed: CHANGELOG ${packageJson.version} missing ${marker}`);
   }
@@ -132,10 +163,14 @@ const requiredFiles = [
   "src/governance-cleanup.ts",
   "src/journal-recovery.ts",
   "src/operator-dashboard.ts",
+  "src/file-privacy.ts",
+  "src/oauth-session-storage.ts",
+  "src/sql-authority-migration.ts",
   "src/types/openclaw-plugin-sdk.d.ts",
   "benchmarks/golden-recall-cases.json",
   "benchmarks/experience-replay-cases.json",
   "scripts/golden-benchmark.mjs",
+  "scripts/packed-runtime-smoke.mjs",
   "scripts/smoke-vector-repair.mjs",
 ];
 
@@ -480,6 +515,7 @@ const packInfo = JSON.parse(packJson)[0];
 const packFiles = (packInfo.files || []).map((file) => file.path);
 for (const required of [
   "dist/index.js",
+  "scripts/packed-runtime-smoke.mjs",
   "docs/operator-runbook.md",
   "docs/release-readiness-template.md",
   "benchmarks/experience-replay-cases.json",
@@ -518,6 +554,50 @@ try {
       .join(", ");
     throw new Error(`release gate failed: sensitive content found in npm pack: ${summary}`);
   }
+
+  const installRoot = resolve(packScanRoot, "install");
+  await mkdir(installRoot, { recursive: true });
+  run("npm", [
+    "install",
+    "--ignore-scripts",
+    "--omit=dev",
+    "--no-audit",
+    "--no-fund",
+    tarball,
+  ], {
+    cwd: installRoot,
+    env: {
+      ...process.env,
+      npm_config_registry: "https://registry.npmjs.org",
+    },
+  });
+
+  const installedRoot = resolve(installRoot, "node_modules", packageJson.name);
+  const installedPackage = JSON.parse(await readFile(resolve(installedRoot, "package.json"), "utf8"));
+  if (installedPackage.name !== packageJson.name || installedPackage.version !== packageJson.version) {
+    throw new Error("release gate failed: installed tarball identity differs from candidate package");
+  }
+  if (
+    installedPackage.clawloreRelease?.scriptPolicy !== releaseScriptContract.scriptPolicy ||
+    JSON.stringify(installedPackage.clawloreRelease?.publishedRuntimeScripts) !==
+      JSON.stringify(releaseScriptContract.publishedRuntimeScripts)
+  ) {
+    throw new Error("release gate failed: installed tarball lost the package script publication contract");
+  }
+
+  const configuredOpenClawPackage = String(process.env.OPENCLAW_PACKAGE_DIR || "").trim();
+  const openClawPackage = resolve(
+    configuredOpenClawPackage || resolve(stateDir, "../../app/node_modules/openclaw"),
+  );
+  if (!(await exists(openClawPackage))) {
+    throw new Error(`release gate failed: OpenClaw package missing for packed runtime smoke: ${openClawPackage}`);
+  }
+  const installedOpenClaw = resolve(installRoot, "node_modules", "openclaw");
+  await rm(installedOpenClaw, { recursive: true, force: true });
+  await symlink(await realpath(openClawPackage), installedOpenClaw, "dir");
+  run("node", [resolve(installedRoot, "scripts/packed-runtime-smoke.mjs")], {
+    cwd: installedRoot,
+  });
 } finally {
   await rm(packScanRoot, { recursive: true, force: true });
 }
@@ -530,3 +610,22 @@ const sbomDigest = createHash("sha256").update(sbomRaw).digest("hex");
 console.log(`release gate SBOM ok: ${sbom.components.length} components sha256=${sbomDigest}`);
 run("node", ["scripts/supply-chain-audit.mjs"]);
 console.log(`release gate pack filename/content scan ok: ${packFiles.length} files`);
+const releaseEvidence = {
+  schema: "clawlore.release-evidence.v1",
+  package: `${packageJson.name}@${packageJson.version}`,
+  commit: gitCommit,
+  runtimeDigest: candidateIdentity.digest,
+  sourceOnly,
+  dirty: gitDirty,
+  packFileCount: packFiles.length,
+  sbomComponentCount: sbom.components.length,
+  sbomSha256: sbomDigest,
+  supplyChainRegistry: "https://registry.npmjs.org",
+  packedRuntimeSmoke: true,
+};
+const evidenceJson = `${JSON.stringify(releaseEvidence, null, 2)}\n`;
+const evidencePath = String(process.env.CLAWLORE_RELEASE_EVIDENCE_PATH || "").trim();
+if (evidencePath) {
+  await writeFile(resolve(evidencePath), evidenceJson, { encoding: "utf8", mode: 0o600 });
+}
+console.log(`release gate evidence: ${JSON.stringify(releaseEvidence)}`);

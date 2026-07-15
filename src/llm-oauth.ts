@@ -381,7 +381,7 @@ export async function loadOAuthSession(authPath: string): Promise<OAuthSession> 
   const session = extractSessionFromObject(parsed as Record<string, unknown>, authPath);
   if (!session) {
     throw new Error(
-      `Project OAuth file at ${authPath} does not contain an OAuth access token and ChatGPT account id.`,
+      `CLAWLORE_OAUTH_SESSION_INVALID: auth=${diagnosticIdentifier(authPath)} missing_oauth_identity`,
     );
   }
 
@@ -406,7 +406,7 @@ function createTimeoutSignal(timeoutMs?: number): { signal: AbortSignal; dispose
 export async function refreshOAuthSession(session: OAuthSession, timeoutMs?: number): Promise<OAuthSession> {
   if (!session.refreshToken) {
     throw new Error(
-      `OAuth session from ${session.authPath} is expired and has no refresh token. Re-run \`codex login\`.`,
+      `CLAWLORE_OAUTH_REFRESH_UNAVAILABLE: auth=${diagnosticIdentifier(session.authPath)} missing_refresh_credential`,
     );
   }
 
@@ -429,7 +429,9 @@ export async function refreshOAuthSession(session: OAuthSession, timeoutMs?: num
 
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
-      throw new Error(`OAuth refresh failed (${response.status}): ${detail.slice(0, 500)}`);
+      throw new Error(
+        `CLAWLORE_OAUTH_REFRESH_FAILED: status=${response.status} ${diagnosticErrorSummary(new Error(detail))}`,
+      );
     }
 
     const payload = await response.json() as TokenRefreshResponse;
@@ -479,7 +481,9 @@ async function exchangeAuthorizationCode(code: string, verifier: string, provide
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    throw new Error(`OAuth token exchange failed (${response.status}): ${detail.slice(0, 500)}`);
+    throw new Error(
+      `CLAWLORE_OAUTH_EXCHANGE_FAILED: status=${response.status} ${diagnosticErrorSummary(new Error(detail))}`,
+    );
   }
 
   const payload = await response.json() as TokenRefreshResponse;
@@ -579,17 +583,37 @@ export async function saveOAuthSession(
   }
 }
 
-async function waitForAuthorizationCode(state: string, timeoutMs: number, providerId?: string): Promise<string> {
+async function waitForAuthorizationCode(
+  state: string,
+  timeoutMs: number,
+  providerId?: string,
+  onListening?: () => void | Promise<void>,
+): Promise<string> {
   const redirectUri = new URL(resolveOauthRedirectUri(providerId));
   const listenPort = Number(redirectUri.port || 80);
   const callbackPath = redirectUri.pathname || "/";
   const listenHost = resolveOAuthCallbackListenHost(redirectUri);
 
   return await new Promise<string>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      server.close();
-      reject(new Error(`Timed out waiting for OAuth callback on ${redirectUri.origin}${callbackPath}`));
-    }, timeoutMs);
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const closeServer = () => {
+      try { server.close(); } catch {}
+    };
+    const fail = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      closeServer();
+      reject(error instanceof Error ? error : new Error(String(error)));
+    };
+    const succeed = (code: string) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      closeServer();
+      resolve(code);
+    };
 
     const server = createServer((req, res) => {
       if (!req.url) {
@@ -613,27 +637,29 @@ async function waitForAuthorizationCode(state: string, timeoutMs: number, provid
       }
 
       if (decision.kind === "provider_error") {
-        clearTimeout(timer);
-        server.close();
         res.writeHead(400, OAUTH_HTML_HEADERS);
         res.end(buildOAuthErrorHtml("Authorization was denied by the provider."));
-        reject(new Error("CLAWLORE_OAUTH_PROVIDER_DENIED: authorization was not granted"));
+        fail(new Error("CLAWLORE_OAUTH_PROVIDER_DENIED: authorization was not granted"));
         return;
       }
 
-      clearTimeout(timer);
-      server.close();
       res.writeHead(200, OAUTH_HTML_HEADERS);
       res.end(buildSuccessHtml());
-      resolve(decision.code);
+      succeed(decision.code);
     });
 
     server.on("error", (err) => {
-      clearTimeout(timer);
-      reject(err);
+      fail(err);
     });
 
-    server.listen(listenPort, listenHost);
+    server.listen(listenPort, listenHost, () => {
+      timer = setTimeout(() => {
+        fail(new Error(`CLAWLORE_OAUTH_CALLBACK_TIMEOUT: provider=${getOAuthProvider(providerId).id}`));
+      }, timeoutMs);
+      Promise.resolve(onListening?.()).catch((error) => {
+        fail(new Error("CLAWLORE_OAUTH_BROWSER_OPEN_FAILED", { cause: error }));
+      });
+    });
   });
 }
 
@@ -650,14 +676,17 @@ export async function performOAuthLogin(options: OAuthLoginOptions): Promise<{ s
   const state = createState();
   const authorizeUrl = buildAuthorizationUrl(state, verifier, provider.id);
 
-  await options.onAuthorizeUrl?.(authorizeUrl);
-  if (!options.noBrowser) {
-    if (options.onOpenUrl) {
-      await options.onOpenUrl(authorizeUrl);
-    }
-  }
-
-  const code = await waitForAuthorizationCode(state, options.timeoutMs ?? 120_000, provider.id);
+  const code = await waitForAuthorizationCode(
+    state,
+    options.timeoutMs ?? 120_000,
+    provider.id,
+    async () => {
+      await options.onAuthorizeUrl?.(authorizeUrl);
+      if (!options.noBrowser) {
+        await options.onOpenUrl?.(authorizeUrl);
+      }
+    },
+  );
   const session = await exchangeAuthorizationCode(code, verifier, provider.id);
   session.authPath = options.authPath;
   await saveOAuthSession(options.authPath, session);

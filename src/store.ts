@@ -513,13 +513,12 @@ export class MemoryStore {
     try {
       truth = new SqlTruthStore(truthPath);
       const inspection = SqlTruthStore.inspectAuthority(truthPath);
-      if (inspection.status === "untrusted") {
+      if (inspection.status === "untrusted" || inspection.status === "legacy") {
         this.sqlTruthErrorCode = "SQL_TRUTH_MIGRATION_REQUIRED";
         throw new Error(`CLAWLORE_SQL_TRUTH_AUTHORITY_REQUIRED: ${inspection.reason}`);
       }
       truth.open({
         allowCreate: !truthExists && !hasCompanionRows,
-        allowLegacyUpgrade: inspection.status === "legacy",
       });
       this.sqlTruthStore = truth;
       this.sqlTruthErrorCode = null;
@@ -1779,6 +1778,14 @@ export class MemoryStore {
       available: this.ftsIndexCreated || this.sqlTruthStore !== null,
       lastError: this._lastFtsError,
     };
+  }
+
+  async verifyFilePrivacy(): Promise<void> {
+    await this.ensureInitialized();
+    if (!this.sqlTruthStore) {
+      throw new Error("CLAWLORE_SQL_TRUTH_UNAVAILABLE: cannot verify file privacy");
+    }
+    this.sqlTruthStore.verifyFilePrivacy();
   }
 
   getDiagnostics(): MemoryStoreDiagnostics {

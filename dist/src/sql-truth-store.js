@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { parseSmartMetadata, isMemoryActiveAt } from "./smart-metadata.js";
 import { enforcePrivatePath } from "./file-privacy.js";
 const require = createRequire(import.meta.url);
@@ -8,8 +8,9 @@ function runSql(db, statement) {
     db["exec"](statement);
 }
 const SQL_TRUTH_AUTHORITY_TABLE = "clawlore_sql_truth_authority";
+const SQL_TRUTH_MIGRATION_TABLE = "clawlore_sql_truth_migrations";
 const SQL_TRUTH_AUTHORITY_ID = "clawlore-sql-truth";
-const SQL_TRUTH_AUTHORITY_SCHEMA_VERSION = 1;
+const SQL_TRUTH_AUTHORITY_SCHEMA_VERSION = 2;
 const REQUIRED_TRUTH_COLUMNS = [
     "id",
     "text",
@@ -20,6 +21,23 @@ const REQUIRED_TRUTH_COLUMNS = [
     "metadata",
     "metadata_text",
     "updated_at",
+];
+const REQUIRED_FTS_COLUMNS = ["memory_id", "text", "metadata_text"];
+const REQUIRED_AUTHORITY_COLUMNS = [
+    "singleton",
+    "authority_id",
+    "schema_version",
+    "origin",
+    "migration_id",
+    "backup_sha256",
+    "created_at",
+    "updated_at",
+];
+const REQUIRED_MIGRATION_COLUMNS = [
+    "migration_id",
+    "source_truth_rows",
+    "backup_sha256",
+    "completed_at",
 ];
 const WORD_RE = /[a-zA-Z0-9]{2,}|[\u4e00-\u9fff]{2,}/g;
 const MAX_LIST_LIMIT = 10_000;
@@ -120,6 +138,7 @@ export class SqlTruthStore {
     faultInjector;
     db = null;
     savepointSequence = 0;
+    privacyEstablished = false;
     constructor(sqlitePath, faultInjector) {
         this.sqlitePath = sqlitePath;
         this.faultInjector = faultInjector;
@@ -140,10 +159,13 @@ export class SqlTruthStore {
         try {
             const { DatabaseSync } = require("node:sqlite");
             db = new DatabaseSync(sqlitePath, { readOnly: true });
-            const tableRows = db.prepare("SELECT name, type FROM sqlite_master WHERE name IN (?, ?, ?)").all(SQL_TRUTH_AUTHORITY_TABLE, "memory_truth", "memory_truth_fts");
-            const objects = new Map(tableRows.map((row) => [row.name, row.type]));
-            const hasTruth = objects.get("memory_truth") === "table";
-            const hasFts = objects.has("memory_truth_fts");
+            const tableRows = db.prepare("SELECT name, type, sql FROM sqlite_master WHERE name IN (?, ?, ?, ?)").all(SQL_TRUTH_AUTHORITY_TABLE, SQL_TRUTH_MIGRATION_TABLE, "memory_truth", "memory_truth_fts");
+            const objects = new Map(tableRows.map((row) => [row.name, row]));
+            const truthObject = objects.get("memory_truth");
+            const ftsObject = objects.get("memory_truth_fts");
+            const hasTruth = truthObject?.type === "table";
+            const hasFts = ftsObject?.type === "table" &&
+                /^CREATE\s+VIRTUAL\s+TABLE\b[\s\S]*\bUSING\s+fts5\s*\(/i.test(String(ftsObject.sql || ""));
             if (!hasTruth || !hasFts) {
                 return {
                     status: "untrusted",
@@ -162,8 +184,20 @@ export class SqlTruthStore {
                     reason: "authority_truth_schema_incompatible",
                 };
             }
+            const ftsColumns = db.prepare("PRAGMA table_info(memory_truth_fts)").all()
+                .map((row) => row.name);
+            if (ftsColumns.length !== REQUIRED_FTS_COLUMNS.length ||
+                REQUIRED_FTS_COLUMNS.some((column, index) => ftsColumns[index] !== column)) {
+                return {
+                    status: "untrusted",
+                    schemaVersion: null,
+                    truthRows: null,
+                    reason: "authority_fts_schema_incompatible",
+                };
+            }
             const truthRows = Number(db.prepare("SELECT COUNT(*) AS count FROM memory_truth").get()?.count || 0);
-            if (!objects.has(SQL_TRUTH_AUTHORITY_TABLE)) {
+            const authorityObject = objects.get(SQL_TRUTH_AUTHORITY_TABLE);
+            if (!authorityObject) {
                 return {
                     status: truthRows > 0 ? "legacy" : "untrusted",
                     schemaVersion: null,
@@ -173,7 +207,45 @@ export class SqlTruthStore {
                         : "authority_marker_missing",
                 };
             }
-            const marker = db.prepare(`SELECT authority_id, schema_version FROM ${SQL_TRUTH_AUTHORITY_TABLE} WHERE singleton = 1`).get();
+            if (authorityObject.type !== "table") {
+                return {
+                    status: "untrusted",
+                    schemaVersion: null,
+                    truthRows,
+                    reason: "authority_marker_schema_incompatible",
+                };
+            }
+            const authorityColumns = new Set(db.prepare(`PRAGMA table_info(${SQL_TRUTH_AUTHORITY_TABLE})`).all()
+                .map((row) => row.name));
+            if (REQUIRED_AUTHORITY_COLUMNS.some((column) => !authorityColumns.has(column))) {
+                return {
+                    status: "untrusted",
+                    schemaVersion: null,
+                    truthRows,
+                    reason: "authority_marker_schema_incompatible",
+                };
+            }
+            const migrationObject = objects.get(SQL_TRUTH_MIGRATION_TABLE);
+            if (migrationObject?.type !== "table") {
+                return {
+                    status: "untrusted",
+                    schemaVersion: null,
+                    truthRows,
+                    reason: "authority_migration_receipt_schema_missing",
+                };
+            }
+            const migrationColumns = new Set(db.prepare(`PRAGMA table_info(${SQL_TRUTH_MIGRATION_TABLE})`).all()
+                .map((row) => row.name));
+            if (REQUIRED_MIGRATION_COLUMNS.some((column) => !migrationColumns.has(column))) {
+                return {
+                    status: "untrusted",
+                    schemaVersion: null,
+                    truthRows,
+                    reason: "authority_migration_receipt_schema_incompatible",
+                };
+            }
+            const marker = db.prepare(`SELECT authority_id, schema_version, origin, migration_id, backup_sha256
+         FROM ${SQL_TRUTH_AUTHORITY_TABLE} WHERE singleton = 1`).get();
             const schemaVersion = Number(marker?.schema_version || 0);
             if (marker?.authority_id !== SQL_TRUTH_AUTHORITY_ID || schemaVersion !== SQL_TRUTH_AUTHORITY_SCHEMA_VERSION) {
                 return {
@@ -181,6 +253,41 @@ export class SqlTruthStore {
                     schemaVersion: Number.isFinite(schemaVersion) ? schemaVersion : null,
                     truthRows,
                     reason: "authority_marker_invalid",
+                };
+            }
+            if (marker.origin !== "fresh" && marker.origin !== "legacy-upgrade") {
+                return {
+                    status: "untrusted",
+                    schemaVersion,
+                    truthRows,
+                    reason: "authority_marker_origin_invalid",
+                };
+            }
+            if (marker.origin === "legacy-upgrade") {
+                if (!marker.migration_id || !/^[a-f0-9-]{16,}$/i.test(marker.migration_id) || !/^[a-f0-9]{64}$/i.test(marker.backup_sha256 || "")) {
+                    return {
+                        status: "untrusted",
+                        schemaVersion,
+                        truthRows,
+                        reason: "authority_migration_receipt_invalid",
+                    };
+                }
+                const receipt = db.prepare(`SELECT backup_sha256 FROM ${SQL_TRUTH_MIGRATION_TABLE} WHERE migration_id = ?`).get(marker.migration_id);
+                if (receipt?.backup_sha256 !== marker.backup_sha256) {
+                    return {
+                        status: "untrusted",
+                        schemaVersion,
+                        truthRows,
+                        reason: "authority_migration_receipt_mismatch",
+                    };
+                }
+            }
+            else if (marker.migration_id || marker.backup_sha256) {
+                return {
+                    status: "untrusted",
+                    schemaVersion,
+                    truthRows,
+                    reason: "authority_fresh_marker_has_migration_data",
                 };
             }
             return {
@@ -219,17 +326,75 @@ export class SqlTruthStore {
         if (inspection.status === "untrusted") {
             throw new Error(`CLAWLORE_SQL_TRUTH_AUTHORITY_REQUIRED: ${inspection.reason}`);
         }
-        if (inspection.status === "legacy" && options.allowLegacyUpgrade !== true) {
-            throw new Error("CLAWLORE_SQL_TRUTH_AUTHORITY_REQUIRED: legacy SQL truth requires an explicit marker upgrade");
+        if (inspection.status === "legacy") {
+            throw new Error("CLAWLORE_SQL_TRUTH_MIGRATION_REQUIRED: legacy SQL truth requires a backup-backed authority migration receipt");
         }
-        mkdirSync(dirname(this.sqlitePath), { recursive: true });
-        this.db = new DatabaseSync(this.sqlitePath);
-        this.enforcePrivateFiles();
-        runSql(this.db, "PRAGMA busy_timeout = 10000");
-        runSql(this.db, "PRAGMA journal_mode = WAL");
-        runSql(this.db, "PRAGMA synchronous = NORMAL");
-        this.ensureSchema();
-        this.enforcePrivateFiles();
+        const creating = inspection.status === "missing";
+        const directory = dirname(this.sqlitePath);
+        mkdirSync(directory, { recursive: true, mode: 0o700 });
+        enforcePrivatePath(directory, { kind: "directory" });
+        if (!creating)
+            enforcePrivatePath(this.sqlitePath, { kind: "file" });
+        try {
+            this.db = new DatabaseSync(this.sqlitePath);
+            this.enforcePrivateFiles();
+            runSql(this.db, "PRAGMA busy_timeout = 10000");
+            runSql(this.db, "PRAGMA journal_mode = WAL");
+            runSql(this.db, "PRAGMA synchronous = NORMAL");
+            this.privacyEstablished = true;
+            this.ensureSchema(creating ? { origin: "fresh" } : undefined);
+            this.enforcePrivateFiles();
+        }
+        catch (error) {
+            try {
+                this.db?.close?.();
+            }
+            catch { }
+            this.db = null;
+            this.privacyEstablished = false;
+            if (creating) {
+                for (const path of [this.sqlitePath, `${this.sqlitePath}-wal`, `${this.sqlitePath}-shm`]) {
+                    try {
+                        rmSync(path, { force: true });
+                    }
+                    catch { }
+                }
+            }
+            throw error;
+        }
+    }
+    static upgradeLegacyAuthority(sqlitePath, evidence, faultInjector) {
+        const inspection = SqlTruthStore.inspectAuthority(sqlitePath);
+        if (inspection.status !== "legacy" || inspection.truthRows !== evidence.sourceTruthRows) {
+            throw new Error("CLAWLORE_SQL_TRUTH_LEGACY_UPGRADE_REFUSED: source is not the inspected legacy authority");
+        }
+        if (!/^[a-f0-9-]{16,}$/i.test(evidence.migrationId) || !/^[a-f0-9]{64}$/i.test(evidence.backupSha256)) {
+            throw new Error("CLAWLORE_SQL_TRUTH_LEGACY_UPGRADE_REFUSED: backup evidence is invalid");
+        }
+        const { DatabaseSync } = require("node:sqlite");
+        const store = new SqlTruthStore(sqlitePath, faultInjector);
+        const directory = dirname(sqlitePath);
+        mkdirSync(directory, { recursive: true, mode: 0o700 });
+        enforcePrivatePath(directory, { kind: "directory" });
+        enforcePrivatePath(sqlitePath, { kind: "file" });
+        try {
+            store.db = new DatabaseSync(sqlitePath);
+            store.enforcePrivateFiles();
+            runSql(store.db, "PRAGMA busy_timeout = 10000");
+            runSql(store.db, "PRAGMA journal_mode = WAL");
+            runSql(store.db, "PRAGMA synchronous = FULL");
+            store.privacyEstablished = true;
+            store.ensureSchema({ origin: "legacy-upgrade", evidence });
+            store.enforcePrivateFiles();
+        }
+        finally {
+            store.close();
+        }
+        const upgraded = SqlTruthStore.inspectAuthority(sqlitePath);
+        if (upgraded.status !== "valid" || upgraded.truthRows !== evidence.sourceTruthRows) {
+            throw new Error("CLAWLORE_SQL_TRUTH_LEGACY_UPGRADE_FAILED: post-upgrade authority validation failed");
+        }
+        return upgraded;
     }
     close() {
         try {
@@ -237,6 +402,7 @@ export class SqlTruthStore {
         }
         finally {
             this.db = null;
+            this.privacyEstablished = false;
         }
     }
     upsert(entry) {
@@ -594,9 +760,10 @@ export class SqlTruthStore {
     count() {
         return Number(this.requireDb().prepare("SELECT COUNT(*) AS count FROM memory_truth").get()?.count || 0);
     }
-    ensureSchema() {
+    ensureSchema(marker) {
         const db = this.requireDb();
-        runSql(db, `
+        this.withTransaction(() => {
+            runSql(db, `
       CREATE TABLE IF NOT EXISTS memory_truth (
         id TEXT PRIMARY KEY,
         text TEXT NOT NULL,
@@ -632,8 +799,17 @@ export class SqlTruthStore {
         singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
         authority_id TEXT NOT NULL,
         schema_version INTEGER NOT NULL,
+        origin TEXT NOT NULL CHECK(origin IN ('fresh', 'legacy-upgrade')),
+        migration_id TEXT,
+        backup_sha256 TEXT,
         created_at REAL NOT NULL,
         updated_at REAL NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS ${SQL_TRUTH_MIGRATION_TABLE} (
+        migration_id TEXT PRIMARY KEY,
+        source_truth_rows INTEGER NOT NULL,
+        backup_sha256 TEXT NOT NULL,
+        completed_at REAL NOT NULL
       );
       CREATE TRIGGER IF NOT EXISTS memory_truth_single_active_fact_insert
       BEFORE INSERT ON memory_truth
@@ -668,17 +844,30 @@ export class SqlTruthStore {
         SELECT RAISE(ABORT, 'active fact_key uniqueness violation');
       END;
       `);
-        const now = Date.now();
-        db.prepare(`
-      INSERT INTO ${SQL_TRUTH_AUTHORITY_TABLE} (
-        singleton, authority_id, schema_version, created_at, updated_at
-      ) VALUES (1, ?, ?, ?, ?)
-      ON CONFLICT(singleton) DO UPDATE SET
-        authority_id = excluded.authority_id,
-        schema_version = excluded.schema_version,
-        updated_at = excluded.updated_at
-      `).run(SQL_TRUTH_AUTHORITY_ID, SQL_TRUTH_AUTHORITY_SCHEMA_VERSION, now, now);
-        this.reconcileFts();
+            this.injectFault("schema_after_ddl");
+            this.reconcileFts();
+            this.injectFault("schema_after_fts_reconcile");
+            if (!marker)
+                return;
+            const now = marker.evidence?.completedAt ?? Date.now();
+            if (marker.origin === "legacy-upgrade") {
+                const evidence = marker.evidence;
+                if (!evidence) {
+                    throw new Error("CLAWLORE_SQL_TRUTH_LEGACY_UPGRADE_REFUSED: migration evidence missing");
+                }
+                db.prepare(`INSERT INTO ${SQL_TRUTH_MIGRATION_TABLE} (
+             migration_id, source_truth_rows, backup_sha256, completed_at
+           ) VALUES (?, ?, ?, ?)`).run(evidence.migrationId, evidence.sourceTruthRows, evidence.backupSha256, evidence.completedAt);
+            }
+            this.injectFault("schema_before_authority_marker");
+            db.prepare(`
+        INSERT INTO ${SQL_TRUTH_AUTHORITY_TABLE} (
+          singleton, authority_id, schema_version, origin, migration_id,
+          backup_sha256, created_at, updated_at
+        ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+        `).run(SQL_TRUTH_AUTHORITY_ID, SQL_TRUTH_AUTHORITY_SCHEMA_VERSION, marker.origin, marker.evidence?.migrationId ?? null, marker.evidence?.backupSha256 ?? null, now, now);
+            this.injectFault("schema_after_authority_marker");
+        });
     }
     ftsIntegrityReport() {
         const db = this.requireDb();
@@ -741,6 +930,15 @@ export class SqlTruthStore {
     }
     withTransaction(operation) {
         const db = this.requireDb();
+        if (!this.privacyEstablished) {
+            throw new Error("CLAWLORE_SQL_TRUTH_PERMISSION_ENFORCEMENT_FAILED: storage privacy is not established");
+        }
+        // Windows ACL enforcement invokes external system tools. Verify before
+        // taking the SQLite write lock; the protected parent DACL makes newly
+        // created WAL/SHM files inherit the owner-only policy.
+        if (process.platform === "win32") {
+            this.enforcePrivateFiles();
+        }
         const savepoint = `clawlore_truth_${++this.savepointSequence}`;
         runSql(db, `SAVEPOINT ${savepoint}`);
         try {
@@ -748,7 +946,9 @@ export class SqlTruthStore {
             // File privacy is part of the durable write contract. Validate it before
             // releasing the savepoint so an enforcement failure rolls SQL/FTS/outbox
             // state back instead of reporting a false API failure after commit.
-            this.enforcePrivateFiles();
+            if (process.platform !== "win32") {
+                this.enforcePrivateFiles();
+            }
             runSql(db, `RELEASE SAVEPOINT ${savepoint}`);
             return result;
         }
@@ -804,6 +1004,11 @@ export class SqlTruthStore {
      */
     getDb() {
         return this.requireDb();
+    }
+    verifyFilePrivacy() {
+        enforcePrivatePath(dirname(this.sqlitePath), { kind: "directory" });
+        this.enforcePrivateFiles();
+        this.privacyEstablished = true;
     }
     requireDb() {
         if (!this.db) {

@@ -21,7 +21,12 @@ official npm registry. A missing dependency, advisory endpoint failure, or
 transport failure is a red gate; none may be interpreted as zero findings.
 The gate also requires the candidate worktree to remain clean after build in
 both source-only and live-artifact modes; generated artifact drift is a red
-gate.
+gate. It packs the real npm tarball, installs that tarball into an empty
+production-only directory, resolves the supported OpenClaw SDK, and loads the
+installed `clawlore`, `scope-recall`, and `memory-pro` CLI registration surface.
+The package metadata marks `smoke:packed-runtime` as the only published runtime
+script; all other npm scripts require a source checkout and are not public
+installed-package capabilities.
 
 Do not continue to live rollout until all source gates pass and an independent
 audit approves the exact candidate commit.
@@ -46,8 +51,28 @@ truncate, recreate, or delete the truth file to force vector recovery.
 New stores may create an authority only when both the SQL truth and companion
 are absent/empty. The created database contains a versioned
 `clawlore_sql_truth_authority` marker. A structurally complete, non-empty legacy
-truth database may receive that marker during the controlled 1.1→1.2 schema
-upgrade; an empty or partial unmarked database is never upgraded implicitly.
+truth database may receive that marker only through the controlled, explicit,
+backup-backed 1.1→1.2 schema upgrade; an empty or partial unmarked database is
+never upgraded implicitly. Preview first, then apply with operator-reviewed
+paths outside the live database directory:
+
+```bash
+openclaw clawlore authority inspect --db /path/to/memory.sqlite3
+openclaw clawlore authority migrate \
+  --db /path/to/memory.sqlite3 \
+  --backup /private/backup/memory.sqlite3 \
+  --receipt /private/receipts/clawlore-authority-migration.json
+
+openclaw clawlore authority migrate \
+  --db /path/to/memory.sqlite3 \
+  --backup /private/backup/memory.sqlite3 \
+  --receipt /private/receipts/clawlore-authority-migration.json \
+  --apply
+```
+
+Ordinary plugin startup never performs the legacy upgrade. The apply command
+creates and verifies the backup before changing the source, writes a durable
+receipt, and refuses a second migration after the authority is valid.
 
 Doctor/dashboard diagnostics expose `scanBudgetExhaustions` and
 `lastScanBudgetExhaustedAt`. A new exhaustion means stale companion rows

@@ -1908,7 +1908,7 @@ function registerCliMetadata(api: OpenClawPluginApi): void {
     pluginConfig: (api.pluginConfig ?? {}) as Record<string, unknown>,
     beforeAction: async (commandPath: string[]) => {
       const root = commandPath[0];
-      if (root === "version" || root === "auth" || initialized) return;
+      if (root === "version" || root === "auth" || root === "authority" || initialized) return;
       const runtime = createCoreMemoryRuntime(api, await resolveCliPluginConfig(api));
       context.store = runtime.store;
       context.retriever = runtime.retriever;

@@ -29,6 +29,9 @@ import { buildKnowledgeSkillDrafts, } from "./src/knowledge-skill-bridge.js";
 import { ensureExperienceSchema, getExperienceStats, reviewPlaybook, searchPlaybooks, } from "./src/experience-store.js";
 import { loadReplayCases, runReplaySuite } from "./src/experience-replay.js";
 import { getDefaultOauthModelForProvider, getOAuthProviderLabel, isOauthModelSupported, listOAuthProviders, normalizeOauthModel, normalizeOAuthProviderId, performOAuthLogin, } from "./src/llm-oauth.js";
+import { readOAuthSessionFile } from "./src/oauth-session-storage.js";
+import { SqlTruthStore } from "./src/sql-truth-store.js";
+import { inspectLegacyAuthorityMigration, migrateLegacySqlAuthority, } from "./src/sql-authority-migration.js";
 // ============================================================================
 // Utility Functions
 // ============================================================================
@@ -548,6 +551,71 @@ export function registerMemoryCLI(program, context) {
         .action(() => {
         console.log(getPluginVersion());
     });
+    const authority = memory
+        .command("authority")
+        .description("Inspect or explicitly migrate the SQL truth authority");
+    authority
+        .command("inspect")
+        .requiredOption("--db <path>", "Explicit memory.sqlite3 path")
+        .option("--json", "Output as JSON")
+        .action((options) => {
+        try {
+            const inspection = SqlTruthStore.inspectAuthority(path.resolve(options.db));
+            if (options.json)
+                writeJson(inspection);
+            else {
+                console.log(`Authority: ${inspection.status}`);
+                console.log(`Reason: ${inspection.reason}`);
+                console.log(`Schema version: ${inspection.schemaVersion ?? "unknown"}`);
+                console.log(`Truth rows: ${inspection.truthRows ?? "unknown"}`);
+            }
+            if (inspection.status !== "valid" && inspection.status !== "legacy")
+                process.exitCode = 1;
+        }
+        catch (error) {
+            console.error(`Authority inspection failed: ${diagnosticErrorSummary(error)}`);
+            process.exitCode = 1;
+        }
+    });
+    authority
+        .command("migrate")
+        .requiredOption("--db <path>", "Explicit memory.sqlite3 path")
+        .requiredOption("--backup <path>", "New verified SQLite backup path")
+        .requiredOption("--receipt <path>", "New private migration receipt path")
+        .option("--apply", "Apply the migration; without this flag the command is dry-run")
+        .option("--json", "Output as JSON")
+        .action(async (options) => {
+        try {
+            const params = {
+                sqlitePath: path.resolve(options.db),
+                backupPath: path.resolve(options.backup),
+                receiptPath: path.resolve(options.receipt),
+            };
+            if (!options.apply) {
+                const plan = inspectLegacyAuthorityMigration(params);
+                if (options.json)
+                    writeJson({ dryRun: true, ...plan });
+                else
+                    console.log(`DRY-RUN authority migration: ${plan.status} (${plan.reason})`);
+                if (plan.status !== "ready")
+                    process.exitCode = 1;
+                return;
+            }
+            const receipt = await migrateLegacySqlAuthority(params);
+            if (options.json)
+                writeJson(receipt);
+            else {
+                console.log(`Authority migration: ${receipt.status}`);
+                console.log(`Migration id: ${receipt.migrationId}`);
+                console.log(`Truth rows: ${receipt.sourceTruthRows}`);
+                console.log(`Backup SHA-256: ${receipt.backupSha256}`);
+            }
+        }
+        catch (error) {
+            console.error(`Authority migration failed: ${diagnosticErrorSummary(error)}`);
+            process.exitCode = 1;
+        }
+    });
     const auth = memory
         .command("auth")
         .description("Manage OAuth authentication for smart-extraction LLM access");
@@ -647,7 +715,7 @@ export function registerMemoryCLI(program, context) {
             const oauthPath = resolveConfiguredOauthPath(configPath, llm.oauthPath);
             let tokenInfo = "missing";
             try {
-                const session = await readFile(oauthPath, "utf8");
+                const session = await readOAuthSessionFile(oauthPath);
                 tokenInfo = session.trim() ? "present" : "empty";
             }
             catch {
@@ -857,6 +925,7 @@ export function registerMemoryCLI(program, context) {
         .action(async (options) => {
         try {
             const stats = await context.store.stats();
+            await context.store.verifyFilePrivacy();
             const scopeStats = context.scopeManager.getStats();
             const diagnostics = context.store.getDiagnostics();
             const vectorDrift = await context.store.getVectorCompanionDriftReport();

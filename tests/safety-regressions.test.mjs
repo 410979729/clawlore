@@ -490,6 +490,8 @@ test("operator CLI exposes Yuheng 1.6 governance function surface", () => {
     ".command(\"experience\")",
     ".command(\"playbooks\")",
     ".command(\"supersede\")",
+    ".command(\"authority\")",
+    ".command(\"migrate\")",
   ]) {
     assert.ok(cli.includes(marker), marker);
   }
@@ -533,6 +535,16 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   assert.match(gate, /OPENCLAW_CONFIG_PATH/);
   assert.match(gate, /plugins",\s*"inspect",\s*"clawlore"/);
   assert.match(gate, /"clawlore",\s*"doctor",\s*"--json",\s*"--quiet"/);
+  assert.match(gate, /scripts\/packed-runtime-smoke\.mjs/);
+  assert.match(gate, /"npm", \[\s*"install"/);
+  assert.match(gate, /packedRuntimeSmoke: true/);
+  assert.equal(
+    packageJson.clawloreRelease.scriptPolicy,
+    "all-except-published-runtime-scripts-are-source-checkout-only",
+  );
+  assert.deepEqual(packageJson.clawloreRelease.publishedRuntimeScripts, ["smoke:packed-runtime"]);
+  assert.equal(packageJson.scripts["smoke:packed-runtime"], "node scripts/packed-runtime-smoke.mjs");
+  assert.ok(packageJson.files.includes("scripts/packed-runtime-smoke.mjs"));
   assert.match(indexSource, /diagnosticBuildTag = `\$\{DIAG_BUILD_TAG_PREFIX\}-\$\{pluginVersion\}`/);
   assert.doesNotMatch(indexSource, /scope-recall-openclaw-1\.0\.24/);
 });

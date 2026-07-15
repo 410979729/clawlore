@@ -19,7 +19,8 @@
     "docs/response-contracts.md",
     "openclaw.plugin.json",
     "package.json",
-    "package-lock.json"
+    "package-lock.json",
+    "scripts/packed-runtime-smoke.mjs"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -99,6 +100,7 @@
     "smoke:clawlore-encrypted-legacy-snapshot": "node --test tests/clawlore-encrypted-legacy-snapshot.test.mjs",
     "smoke:clawlore-migration-drill": "node --test tests/clawlore-legacy-migration-drill.test.mjs",
     "smoke:vector-repair": "node scripts/smoke-vector-repair.mjs",
+    "smoke:packed-runtime": "node scripts/packed-runtime-smoke.mjs",
     "preflight:dependencies": "node scripts/dependency-preflight.mjs",
     "audit:release": "node scripts/supply-chain-audit.mjs",
     "release:gate": "CLAWLORE_ALLOW_NESTED_GIT_ROOT=1 node scripts/release-gate.mjs",
@@ -132,6 +134,12 @@
   "homepage": "https://github.com/410979729/clawlore#readme",
   "author": "win4r",
   "license": "MIT",
+  "clawloreRelease": {
+    "scriptPolicy": "all-except-published-runtime-scripts-are-source-checkout-only",
+    "publishedRuntimeScripts": [
+      "smoke:packed-runtime"
+    ]
+  },
   "dependencies": {
     "@lancedb/lancedb": "^0.26.2",
     "@sinclair/typebox": "0.34.48",
