@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import { chmodSync, existsSync, mkdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, statSync } from "node:fs";
 import type { MemoryEntry, MemorySearchResult } from "./store.js";
 import { parseSmartMetadata, isMemoryActiveAt } from "./smart-metadata.js";
 
@@ -193,7 +193,6 @@ export class SqlTruthStore {
 
   upsert(entry: MemoryEntry): void {
     this.withTransaction(() => this.upsertStatements(entry));
-    this.enforcePrivateFiles();
   }
 
   upsertWithVectorIntent(entry: MemoryEntry, operation: string): void {
@@ -206,7 +205,6 @@ export class SqlTruthStore {
         error: "pending_vector_companion_sync",
       });
     });
-    this.enforcePrivateFiles();
   }
 
   private upsertStatements(entry: MemoryEntry): void {
@@ -245,7 +243,6 @@ export class SqlTruthStore {
 
   delete(id: string): void {
     this.withTransaction(() => this.deleteStatements(id));
-    this.enforcePrivateFiles();
   }
 
   deleteWithVectorIntent(id: string, operation: string): void {
@@ -258,7 +255,6 @@ export class SqlTruthStore {
         error: "pending_vector_companion_sync",
       });
     });
-    this.enforcePrivateFiles();
   }
 
   private deleteStatements(id: string): void {
@@ -321,7 +317,6 @@ export class SqlTruthStore {
       }
 
     });
-    this.enforcePrivateFiles();
   }
 
   getById(id: string, scopeFilter?: string[]): MemoryEntry | null {
@@ -360,8 +355,7 @@ export class SqlTruthStore {
     operation: string;
     error: string;
   }): void {
-    this.recordVectorRepairDebtStatements(input);
-    this.enforcePrivateFiles();
+    this.withTransaction(() => this.recordVectorRepairDebtStatements(input));
   }
 
   private recordVectorRepairDebtStatements(input: {
@@ -388,10 +382,11 @@ export class SqlTruthStore {
   }
 
   clearVectorRepairDebt(memoryId: string): void {
-    this.requireDb()
-      .prepare("DELETE FROM vector_companion_repair_outbox WHERE memory_id = ?")
-      .run(memoryId);
-    this.enforcePrivateFiles();
+    this.withTransaction(() => {
+      this.requireDb()
+        .prepare("DELETE FROM vector_companion_repair_outbox WHERE memory_id = ?")
+        .run(memoryId);
+    });
   }
 
   vectorRepairDebtReport(): VectorRepairDebtReport {
@@ -545,7 +540,6 @@ export class SqlTruthStore {
         });
       }
     });
-    this.enforcePrivateFiles();
     return rows.map((row) => row.id);
   }
 
@@ -572,7 +566,6 @@ export class SqlTruthStore {
           deleted++;
         }
       }
-      this.enforcePrivateFiles();
       return { upserted, deleted };
     });
   }
@@ -801,6 +794,10 @@ export class SqlTruthStore {
     runSql(db, `SAVEPOINT ${savepoint}`);
     try {
       const result = operation();
+      // File privacy is part of the durable write contract. Validate it before
+      // releasing the savepoint so an enforcement failure rolls SQL/FTS/outbox
+      // state back instead of reporting a false API failure after commit.
+      this.enforcePrivateFiles();
       runSql(db, `RELEASE SAVEPOINT ${savepoint}`);
       return result;
     } catch (err) {
@@ -811,11 +808,29 @@ export class SqlTruthStore {
   }
 
   private enforcePrivateFiles(): void {
+    // Windows does not expose POSIX owner/group/other mode semantics. The
+    // containing OpenClaw state ACL is the authority there; never report a
+    // post-commit Unix-mode failure on that platform.
+    if (process.platform === "win32") return;
+    this.injectFault("permissions_before_enforce");
     for (const path of [this.sqlitePath, `${this.sqlitePath}-wal`, `${this.sqlitePath}-shm`]) {
       try {
-        if (existsSync(path)) chmodSync(path, 0o600);
+        if (!existsSync(path)) continue;
+        chmodSync(path, 0o600);
+        const mode = statSync(path).mode & 0o777;
+        if (mode !== 0o600) {
+          throw new Error(`unexpected mode ${mode.toString(8)}`);
+        }
       } catch (err) {
-        throw new Error(`Failed to enforce 0600 on SQL truth file ${path}: ${String(err)}`);
+        const name = path === this.sqlitePath
+          ? "database"
+          : path.endsWith("-wal")
+            ? "wal"
+            : "shm";
+        throw new Error(
+          `CLAWLORE_SQL_TRUTH_PERMISSION_ENFORCEMENT_FAILED: ${name} is not private`,
+          { cause: err },
+        );
       }
     }
   }

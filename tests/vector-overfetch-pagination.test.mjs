@@ -49,3 +49,34 @@ test("vector hydration expands beyond 200 stale companion rows within a bounded 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("vector scan budget exhaustion is explicit in diagnostics", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "clawlore-vector-budget-diagnostic-"));
+  try {
+    const store = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: "sqlite-bruteforce" });
+    await store.getSqlTruthDb();
+    store.sqliteVectorStore.search = (_vector, limit) => Array.from({ length: limit }, (_, index) => ({
+      entry: {
+        id: `stale-budget-${index}`,
+        text: `stale ${index}`,
+        vector: [1, 0, 0, 0],
+        category: "fact",
+        scope: "user:a",
+        importance: 1,
+        timestamp: index,
+        metadata: "{}",
+      },
+      score: 1,
+    }));
+
+    assert.deepEqual(await store.vectorSearch([1, 0, 0, 0], 1, 0.1, ["user:a"]), []);
+    const diagnostics = store.getDiagnostics().vectorCompanion;
+    assert.equal(diagnostics.scanBudgetExhaustions, 1);
+    assert.equal(typeof diagnostics.lastScanBudgetExhaustedAt, "number");
+    assert.equal(diagnostics.needsRepair, true);
+    assert.match(diagnostics.message, /scan budget exhausted/);
+    await store.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -1,7 +1,7 @@
 # ClawLore v1 project handoff
 
 Current through Phase 9, H1-H5 production hardening, the R1 canonical identity
-transition, and three independent-audit remediation rounds on 2026-07-15.
+transition, and four independent-audit remediation rounds on 2026-07-15.
 
 ## Canonical identity candidate
 
@@ -42,6 +42,20 @@ integrity, and treats advisory endpoint failures as failures. Verification now
 covers 313 tests. See
 `eval/clawlore-v1-third-independent-audit-remediation-run-2026-07-15.md`.
 
+The fourth independent audit then reproduced two post-restart/post-commit
+consistency gaps. Ordinary startup no longer performs vector-to-truth
+reconciliation, so a failed companion delete cannot resurrect a memory after
+restart; a missing SQL authority beside non-empty companion data is now the
+distinct fail-closed `SQL_TRUTH_MIGRATION_REQUIRED` state. File privacy
+enforcement runs before SQLite savepoint release for every durable mutation,
+including repair-debt creation/clear, so a `0600` failure rolls truth, FTS, and
+outbox state back together. Playbook receipts now contain complete durable
+snapshots with recursive secret/path redaction. Initialization outages are
+latched until explicit recovery, scan-budget truncation is observable, raw
+internal tool errors are fully redacted, and source-only gates reject
+post-build dirty trees. Verification covers 321 tests. See
+`eval/clawlore-v1-fourth-independent-audit-remediation-run-2026-07-15.md`.
+
 This candidate does not authorize a live rename, V2 writes, lifecycle
 promotion, ContextEngine, prompt mutation, or final-recall cutover. Tianxuan's
 re-audit of the exact clean remediation commit is the next gate; repository
@@ -76,7 +90,7 @@ not an implied approval to switch later without fresh evidence.
 
 ## Next controlled boundary
 
-1. Commit the exact third-audit remediation candidate and record its recursive
+1. Commit the exact fourth-audit remediation candidate and record its recursive
    runtime digest plus clean release-gate evidence.
 2. Give Tianxuan the commit, this handoff, the identity-transition runbook, and
    all dated audit-remediation reports for independent read-only re-audit.

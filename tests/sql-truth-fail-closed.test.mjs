@@ -81,3 +81,38 @@ for (const scenario of scenarios) {
     }
   });
 }
+
+test("authority outage is latched until explicit recovery and does not retry every request", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "clawlore-truth-outage-latch-"));
+  const truthPath = join(dir, "memory.sqlite3");
+  const originalError = console.error;
+  let errorLogs = 0;
+  try {
+    const vector = new SqliteBruteForceVectorStore(dir, 4);
+    vector.open();
+    vector.upsert(staleEntry);
+    vector.close();
+    mkdirSync(truthPath);
+    console.error = () => { errorLogs++; };
+
+    const store = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: "sqlite-bruteforce" });
+    const attempts = await Promise.allSettled(
+      Array.from({ length: 100 }, () => store.getById(staleEntry.id)),
+    );
+    assert.ok(attempts.every((result) => result.status === "rejected"));
+    const firstReason = attempts[0].reason;
+    assert.ok(attempts.every((result) => result.reason === firstReason));
+    assert.equal(errorLogs, 1, "one authority outage must produce one initialization attempt/log");
+
+    rmSync(truthPath, { recursive: true, force: true });
+    const restored = new DatabaseSync(truthPath);
+    restored.close();
+    await store.reopenAfterRecovery();
+    assert.equal(await store.getById(staleEntry.id), null);
+    assert.deepEqual(await store.vectorSearch([1, 0, 0, 0], 5, 0.1), []);
+    await store.close();
+  } finally {
+    console.error = originalError;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

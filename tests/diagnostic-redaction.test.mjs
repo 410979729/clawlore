@@ -35,8 +35,12 @@ test("diagnostic summaries never emit user text, credentials, identifiers, or pa
 test("runtime logging paths do not reintroduce raw response or user previews", () => {
   const indexSource = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
   const llmSource = readFileSync(new URL("../src/llm-client.ts", import.meta.url), "utf8");
+  const toolsSource = readFileSync(new URL("../src/tools.ts", import.meta.url), "utf8");
   for (const forbidden of ["summarizeTextPreview", "preview=", "jsonPreview=", "previewText("]) {
     assert.equal(indexSource.includes(forbidden), false, `index.ts contains raw preview marker ${forbidden}`);
     assert.equal(llmSource.includes(forbidden), false, `llm-client.ts contains raw preview marker ${forbidden}`);
+  }
+  for (const forbidden of ["String(err)", "${err}", "err.message"]) {
+    assert.equal(toolsSource.includes(forbidden), false, `tools.ts contains raw error interpolation ${forbidden}`);
   }
 });

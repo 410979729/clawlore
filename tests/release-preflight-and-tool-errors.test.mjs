@@ -7,6 +7,7 @@ import { createRequire } from "node:module";
 
 import { assertDependencyTree, inspectDependencyTree } from "../scripts/dependency-preflight.mjs";
 import { interpretAuditResult } from "../scripts/supply-chain-audit.mjs";
+import { assertReleaseSourceState } from "../scripts/release-source-state.mjs";
 
 const require = createRequire(import.meta.url);
 const { createJiti } = require("jiti");
@@ -40,10 +41,29 @@ test("audit endpoint failures are release failures, never zero-vulnerability suc
   );
 });
 
+test("source-only and live release gates both reject post-build dirty trees", () => {
+  assert.doesNotThrow(() => assertReleaseSourceState({ gitDirty: false, sourceOnly: true }));
+  assert.throws(
+    () => assertReleaseSourceState({ gitDirty: true, sourceOnly: true }),
+    /source-only.*post-build candidate worktree.*clean/,
+  );
+  assert.throws(
+    () => assertReleaseSourceState({ gitDirty: true, sourceOnly: false }),
+    /live-artifact.*post-build candidate worktree.*clean/,
+  );
+});
+
 test("model-visible tool catches do not interpolate raw exception strings", () => {
   for (const relative of ["../src/tools.ts", "../src/experience-tools.ts"]) {
     const source = readFileSync(new URL(relative, import.meta.url), "utf8");
-    for (const forbidden of ["String(error)", "${error}", "error.message"]) {
+    for (const forbidden of [
+      "String(error)",
+      "${error}",
+      "error.message",
+      "String(err)",
+      "${err}",
+      "err.message",
+    ]) {
       assert.equal(source.includes(forbidden), false, `${relative} exposes ${forbidden}`);
     }
     assert.match(source, /diagnosticErrorSummary/);

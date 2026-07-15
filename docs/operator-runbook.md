@@ -19,6 +19,9 @@ The source gate includes the full test/typecheck/build/benchmark/package scan,
 SBOM, dependency-integrity preflight, and an advisory audit pinned to the
 official npm registry. A missing dependency, advisory endpoint failure, or
 transport failure is a red gate; none may be interpreted as zero findings.
+The gate also requires the candidate worktree to remain clean after build in
+both source-only and live-artifact modes; generated artifact drift is a red
+gate.
 
 Do not continue to live rollout until all source gates pass and an independent
 audit approves the exact candidate commit.
@@ -28,6 +31,18 @@ directory, or schema-incompatible, ClawLore intentionally refuses reads and
 writes with `CLAWLORE_SQL_TRUTH_UNAVAILABLE`. Do not enable vector-only recall.
 Restore or repair the SQLite authority from a verified backup, run doctor and
 the vector-repair dry run, then repeat the clean source/live gate.
+
+If `memory.sqlite3` is missing while the vector companion still contains rows,
+startup stops with `CLAWLORE_SQL_TRUTH_MIGRATION_REQUIRED`. Ordinary startup
+never imports companion rows into truth. Restore the authority from a verified
+backup or use a separately reviewed, backup-backed explicit migration; never
+rename or delete the truth file to force vector recovery.
+
+Doctor/dashboard diagnostics expose `scanBudgetExhaustions` and
+`lastScanBudgetExhaustedAt`. A new exhaustion means stale companion rows
+consumed the bounded 5,000-row scan before enough SQL-valid results were found.
+Run vector-repair dry-run, review the debt, apply repair only under operator
+authority, and then recheck diagnostics.
 
 ## Live Rollout
 

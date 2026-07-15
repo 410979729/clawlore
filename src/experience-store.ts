@@ -6,6 +6,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { redactSupportBundle } from "./v2/operator/support-bundle.js";
 
 // Use any to avoid TypeScript issues with experimental node:sqlite
 type DatabaseSync = any;
@@ -421,12 +422,31 @@ export interface CreatePlaybookParams {
   metadata?: Record<string, unknown>;
 }
 
-export function createPlaybook(db: DatabaseSync, params: CreatePlaybookParams): ProceduralPlaybook & { id: string; created_at: string } {
+export interface DurablePlaybookSnapshot extends ProceduralPlaybook {
+  id: string;
+  scope_id: string;
+  shared_scope_id: string;
+  evidence_anchors: string[];
+  related_skills: string[];
+  environment_constraints: Record<string, unknown>;
+  success_count: number;
+  failure_count: number;
+  stale_count: number;
+  created_from_episode_id: string;
+  superseded_by: string;
+  last_used_at: string | null;
+  last_verified_at: string | null;
+  created_at: string;
+  updated_at: string;
+  metadata: Record<string, unknown>;
+}
+
+export function createPlaybook(db: DatabaseSync, params: CreatePlaybookParams): DurablePlaybookSnapshot {
   const validated = validateProceduralPlaybook(params.payload);
   const now = new Date().toISOString();
   const id = randomUUID();
 
-  withExperienceTransaction(db, () => {
+  const durable = withExperienceTransaction(db, () => {
     db.prepare(`
       INSERT INTO procedural_playbooks (
         id, scope_id, shared_scope_id, task_class, title, trigger, goal,
@@ -459,24 +479,20 @@ export function createPlaybook(db: DatabaseSync, params: CreatePlaybookParams): 
       JSON.stringify(params.metadata ?? {}),
     );
     updatePlaybookFts(db, id, validated);
-    const durable = getPlaybook(db, id);
-    if (!durable) throw new Error("playbook create did not produce a durable row");
-    createPlaybookVersion(db, id, 1, "create", "Initial creation", durable);
+    const created = getPlaybook(db, id);
+    if (!created) throw new Error("playbook create did not produce a durable row");
+    createPlaybookVersion(db, id, 1, "create", "Initial creation", created);
+    return created;
   });
 
-  return { ...validated, id, created_at: now };
+  return durable;
 }
 
 export function getPlaybook(
   db: DatabaseSync,
   playbookId: string,
   scopeIds?: string[],
-): (ProceduralPlaybook & {
-  id: string;
-  scope_id: string;
-  shared_scope_id: string;
-  superseded_by: string;
-}) | null {
+): DurablePlaybookSnapshot | null {
   const scope = experienceScopeClause(scopeIds, "scope_id", "shared_scope_id");
   const row = db.prepare(`SELECT * FROM procedural_playbooks WHERE id = ? AND ${scope.sql}`)
     .get(playbookId, ...scope.params) as Record<string, unknown> | undefined;
@@ -690,12 +706,7 @@ export function reviewPlaybook(
   return { reviewed: true, id: playbookId, status, version: newVersion };
 }
 
-function rowToPlaybook(row: Record<string, unknown>): ProceduralPlaybook & {
-  id: string;
-  scope_id: string;
-  shared_scope_id: string;
-  superseded_by: string;
-} {
+function rowToPlaybook(row: Record<string, unknown>): DurablePlaybookSnapshot {
   return {
     id: row.id as string,
     scope_id: row.scope_id as string,
@@ -711,9 +722,21 @@ function rowToPlaybook(row: Record<string, unknown>): ProceduralPlaybook & {
     pitfalls: safeJsonParse(row.pitfalls, []),
     verification: safeJsonParse(row.verification, []),
     cleanup: safeJsonParse(row.cleanup, []),
+    evidence_anchors: safeJsonParse(row.evidence_anchors, []),
+    related_skills: safeJsonParse(row.related_skills, []),
+    environment_constraints: safeJsonParse(row.environment_constraints, {}),
     reuse_policy: safeJsonParse(row.reuse_policy, {}),
     status: row.status as string,
-    confidence: row.confidence as number,
+    confidence: Number(row.confidence),
+    success_count: Number(row.success_count),
+    failure_count: Number(row.failure_count),
+    stale_count: Number(row.stale_count),
+    created_from_episode_id: (row.created_from_episode_id as string) ?? "",
+    last_used_at: (row.last_used_at as string | null) ?? null,
+    last_verified_at: (row.last_verified_at as string | null) ?? null,
+    created_at: row.created_at as string,
+    updated_at: row.updated_at as string,
+    metadata: safeJsonParse(row.metadata, {}),
     requires_operator_review: row.status !== "promoted",
   };
 }
@@ -769,7 +792,7 @@ function createPlaybookVersion(
     version,
     changeType,
     changeReason,
-    JSON.stringify(snapshot),
+    JSON.stringify(redactSupportBundle(snapshot)),
     now,
   );
 }

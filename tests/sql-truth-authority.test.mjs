@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -118,6 +118,53 @@ async function withFailingVectorDeleteOnly(store, action) {
 }
 
 for (const backend of BACKENDS) {
+  test(`${backend}: stale deleted companion rows stay deleted across restart`, async () => {
+    const dir = mkdtempSync(join(tmpdir(), `clawlore-sql-restart-delete-${backend}-`));
+    const id = "09000000-0000-4000-8000-000000000009";
+    try {
+      const first = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: backend });
+      await first.importEntry(entry(id, "restart must not resurrect this memory"));
+      assert.equal(await withFailingVectorDeleteOnly(first, () => first.delete(id)), true);
+      const beforeRestartDb = await first.getSqlTruthDb();
+      assert.equal(beforeRestartDb.prepare("SELECT COUNT(*) AS n FROM memory_truth WHERE id = ?").get(id).n, 0);
+      assert.equal(beforeRestartDb.prepare("SELECT action FROM vector_companion_repair_outbox WHERE memory_id = ?").get(id).action, "delete");
+      await first.close();
+
+      const second = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: backend });
+      assert.equal(await second.getById(id), null);
+      assert.deepEqual(await second.vectorSearch([1, 0, 0, 0], 5, 0.1), []);
+      assert.deepEqual(await second.bm25Search("restart must not resurrect", 5), []);
+      const afterRestartDb = await second.getSqlTruthDb();
+      assert.equal(afterRestartDb.prepare("SELECT COUNT(*) AS n FROM memory_truth WHERE id = ?").get(id).n, 0);
+      assert.equal(afterRestartDb.prepare("SELECT action FROM vector_companion_repair_outbox WHERE memory_id = ?").get(id).action, "delete");
+      await second.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test(`${backend}: missing SQL authority with companion rows requires explicit migration`, async () => {
+    const dir = mkdtempSync(join(tmpdir(), `clawlore-sql-missing-${backend}-`));
+    const id = "08000000-0000-4000-8000-000000000008";
+    const truthPath = join(dir, "memory.sqlite3");
+    try {
+      const first = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: backend });
+      await first.importEntry(entry(id, "companion is not a backup"));
+      await first.close();
+      for (const path of [truthPath, `${truthPath}-wal`, `${truthPath}-shm`]) {
+        rmSync(path, { force: true });
+      }
+
+      const second = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: backend });
+      await assert.rejects(second.getById(id), /CLAWLORE_SQL_TRUTH_MIGRATION_REQUIRED/);
+      assert.equal(second.getDiagnostics().sqlTruth.errorCode, "SQL_TRUTH_MIGRATION_REQUIRED");
+      assert.equal(existsSync(truthPath), false, "startup must not create an empty truth DB before failing closed");
+      await second.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test(`${backend}: deleted SQL truth never returns when vector delete fails`, async () => {
     const dir = mkdtempSync(join(tmpdir(), `clawlore-sql-delete-${backend}-`));
     const id = "10000000-0000-4000-8000-000000000001";

@@ -732,7 +732,7 @@ export function registerMemoryStoreTool(api, context) {
                         ], { excludeInactive: true });
                     }
                     catch (err) {
-                        console.warn(`clawlore: duplicate pre-check failed, continue store: ${String(err)}`);
+                        console.warn(`clawlore: duplicate pre-check failed, continue store: ${diagnosticErrorSummary(err)}`);
                     }
                     if (existing.length > 0 && existing[0].score > 0.98) {
                         return {
@@ -779,7 +779,7 @@ export function registerMemoryStoreTool(api, context) {
                         conflictReview = await recordConflictReviewRelations(runtimeContext.store, entry, [targetScope]);
                     }
                     catch (err) {
-                        console.warn(`clawlore: conflict-review marking fails: ${String(err)}`);
+                        console.warn(`clawlore: conflict-review marking fails: ${diagnosticErrorSummary(err)}`);
                     }
                     // Dual-write to Markdown mirror if enabled
                     if (context.mdMirror) {

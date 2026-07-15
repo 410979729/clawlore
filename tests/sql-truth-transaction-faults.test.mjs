@@ -68,6 +68,77 @@ test("truth, FTS, and vector intent roll back together under injected faults", (
   }
 });
 
+test("permission enforcement failures roll back every durable mutation", () => {
+  const dir = mkdtempSync(join(tmpdir(), "clawlore-truth-permission-atomic-"));
+  let failAt = "";
+  const truth = new SqlTruthStore(join(dir, "memory.sqlite3"), (point) => {
+    if (point === failAt) throw new Error(`injected ${point}`);
+  });
+  try {
+    truth.open();
+    const db = truth.getDb();
+    const old = entry("permission-old", "old atomic fact");
+    truth.upsertWithVectorIntent(old, "seed");
+    truth.clearVectorRepairDebt(old.id);
+
+    failAt = "permissions_before_enforce";
+    const baseline = counts(db);
+    assert.throws(
+      () => truth.upsertWithVectorIntent(entry("permission-new"), "store"),
+      /injected permissions_before_enforce/,
+    );
+    assert.deepEqual(counts(db), baseline);
+
+    assert.throws(
+      () => truth.deleteWithVectorIntent(old.id, "delete"),
+      /injected permissions_before_enforce/,
+    );
+    assert.deepEqual(counts(db), baseline);
+    assert.equal(truth.getById(old.id)?.text, "old atomic fact");
+
+    const now = Date.now();
+    const invalidatedOld = {
+      ...old,
+      metadata: JSON.stringify({
+        state: "confirmed",
+        fact_key: "permission-fact",
+        invalidated_at: now,
+        valid_to: now,
+        superseded_by: "permission-replacement",
+      }),
+    };
+    const replacement = {
+      ...entry("permission-replacement", "new atomic fact"),
+      metadata: JSON.stringify({ state: "confirmed", fact_key: "permission-fact", valid_from: now }),
+    };
+    assert.throws(
+      () => truth.supersedeAtomically(invalidatedOld, replacement, "permission-fact"),
+      /injected permissions_before_enforce/,
+    );
+    assert.deepEqual(counts(db), baseline);
+    assert.equal(truth.getById(replacement.id), null);
+
+    failAt = "";
+    truth.recordVectorRepairDebt({
+      memoryId: old.id,
+      action: "upsert",
+      operation: "permission-test",
+      error: "pending",
+    });
+    const debtBaseline = counts(db);
+    failAt = "permissions_before_enforce";
+    assert.throws(
+      () => truth.clearVectorRepairDebt(old.id),
+      /injected permissions_before_enforce/,
+    );
+    assert.deepEqual(counts(db), debtBaseline);
+    assert.equal(truth.listVectorRepairDebt().some((row) => row.memoryId === old.id), true);
+  } finally {
+    truth.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("SQL truth search errors return fail-closed empty results with stable diagnostics", async () => {
   const dir = mkdtempSync(join(tmpdir(), "clawlore-truth-search-failure-"));
   try {

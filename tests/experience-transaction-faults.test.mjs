@@ -45,7 +45,29 @@ test("playbook create and review roll back when version receipts fail", () => {
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM procedural_playbooks_fts").get().n, 0);
   db.exec("DROP TRIGGER reject_initial_version");
 
-  const playbook = createPlaybook(db, { scope_id: "user:a", payload: payload() });
+  const playbook = createPlaybook(db, {
+    scope_id: "user:a",
+    shared_scope_id: "project:release",
+    payload: payload(),
+    created_from_episode_id: "episode-1",
+    evidence_anchors: ["receipt:one"],
+    related_skills: ["release-gate"],
+    environment_constraints: { platform: "linux", risk: "high" },
+    metadata: { safe: "visible", api_key: "redact-this", nested: { token: "redact-this-too" } },
+  });
+  const initial = getPlaybookVersions(db, playbook.id, ["user:a"])[0].snapshot;
+  assert.deepEqual(initial.evidence_anchors, ["receipt:one"]);
+  assert.deepEqual(initial.related_skills, ["release-gate"]);
+  assert.deepEqual(initial.environment_constraints, { platform: "linux", risk: "high" });
+  assert.equal(initial.created_from_episode_id, "episode-1");
+  assert.equal(initial.success_count, 0);
+  assert.equal(initial.failure_count, 0);
+  assert.equal(initial.stale_count, 0);
+  assert.equal(initial.metadata.safe, "visible");
+  assert.equal(initial.metadata.api_key, "<redacted-secret>");
+  assert.equal(initial.metadata.nested.token, "<redacted-secret>");
+  assert.equal(typeof initial.created_at, "string");
+  assert.equal(typeof initial.updated_at, "string");
   db.exec(`
     CREATE TRIGGER reject_later_version
     BEFORE INSERT ON playbook_versions
@@ -61,6 +83,16 @@ test("playbook create and review roll back when version receipts fail", () => {
   assert.equal(getPlaybookVersions(db, playbook.id, ["user:a"]).length, 1);
   db.exec("DROP TRIGGER reject_later_version");
 
+  recordPlaybookFeedbackAtomically(db, {
+    playbook_id: playbook.id,
+    scope_id: "user:a",
+    decision: "used",
+    confidence_at_use: 0.7,
+    outcome: "success",
+    counter: "success",
+    scope_ids: ["user:a"],
+  });
+
   const result = reviewPlaybook(db, {
     playbookId: playbook.id,
     action: "supersede",
@@ -72,6 +104,11 @@ test("playbook create and review roll back when version receipts fail", () => {
   const latest = getPlaybookVersions(db, playbook.id, ["user:a"])[0].snapshot;
   assert.equal(latest.status, durable.status);
   assert.equal(latest.superseded_by, durable.superseded_by);
+  assert.equal(latest.success_count, durable.success_count);
+  assert.deepEqual(latest.evidence_anchors, durable.evidence_anchors);
+  assert.deepEqual(latest.related_skills, durable.related_skills);
+  assert.deepEqual(latest.environment_constraints, durable.environment_constraints);
+  assert.equal(latest.metadata.safe, durable.metadata.safe);
   db.close();
 });
 

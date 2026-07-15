@@ -9,6 +9,7 @@ import {
   runtimeArtifactIdentity,
 } from "./release-artifact-identity.mjs";
 import { scanReleaseDirectory } from "./release-content-scan.mjs";
+import { assertReleaseSourceState } from "./release-source-state.mjs";
 
 async function exists(path) {
   try {
@@ -407,6 +408,7 @@ run("node", ["scripts/scalability-benchmark.mjs", "--rows", "200000", "--queries
 const candidateIdentity = await runtimeArtifactIdentity(sourceRoot);
 const gitCommit = runCapture("git", ["rev-parse", "HEAD"]).trim();
 const gitDirty = Boolean(runCapture("git", ["status", "--porcelain", "--", diffPathspec || "."]).trim());
+assertReleaseSourceState({ gitDirty, sourceOnly });
 let extensionRoot;
 if (sourceOnly) {
   console.log("release gate: explicit source-only mode; live extension and runtime smoke are not claimed");
@@ -414,9 +416,6 @@ if (sourceOnly) {
   extensionRoot = await realpath(extensionDir);
   if (extensionRoot === sourceRoot) {
     throw new Error("release gate failed: extension dir resolves to source root; refusing self-drift comparison");
-  }
-  if (gitDirty) {
-    throw new Error("release gate failed: live artifact verification requires a clean candidate worktree");
   }
   const deployedIdentity = await runtimeArtifactIdentity(extensionRoot);
   const comparison = compareRuntimeArtifactIdentity(candidateIdentity, deployedIdentity);

@@ -962,7 +962,7 @@ export function registerMemoryStoreTool(
             ], { excludeInactive: true });
           } catch (err) {
             console.warn(
-              `clawlore: duplicate pre-check failed, continue store: ${String(err)}`,
+              `clawlore: duplicate pre-check failed, continue store: ${diagnosticErrorSummary(err)}`,
             );
           }
 
@@ -1023,7 +1023,7 @@ export function registerMemoryStoreTool(
               [targetScope],
             );
           } catch (err) {
-            console.warn(`clawlore: conflict-review marking fails: ${String(err)}`);
+            console.warn(`clawlore: conflict-review marking fails: ${diagnosticErrorSummary(err)}`);
           }
 
           // Dual-write to Markdown mirror if enabled

@@ -72,7 +72,11 @@ export interface MemoryStoreDiagnostics {
     path: string | null;
     count: number | null;
     fts: SqlTruthFtsReport | null;
-    errorCode: "SQL_TRUTH_UNAVAILABLE" | "SQL_TRUTH_RUNTIME_FAILURE" | null;
+    errorCode:
+      | "SQL_TRUTH_UNAVAILABLE"
+      | "SQL_TRUTH_MIGRATION_REQUIRED"
+      | "SQL_TRUTH_RUNTIME_FAILURE"
+      | null;
     error: string | null;
   };
   fts: {
@@ -86,6 +90,8 @@ export interface MemoryStoreDiagnostics {
     configuredDimension: number;
     backend: "lancedb" | "sqlite-bruteforce";
     repairDebt: VectorRepairDebtReport | null;
+    scanBudgetExhaustions: number;
+    lastScanBudgetExhaustedAt: number | null;
   };
 }
 
@@ -279,12 +285,15 @@ export class MemoryStore {
   private sqlTruthStore: SqlTruthStore | null = null;
   private sqliteVectorStore: SqliteBruteForceVectorStore | null = null;
   private initPromise: Promise<void> | null = null;
+  private initializationFailure: Error | null = null;
   private initialized = false;
   private ftsIndexCreated = false;
   private updateQueue: Promise<void> = Promise.resolve();
   private vectorCompanionError: string | null = null;
   private sqlTruthErrorCode: MemoryStoreDiagnostics["sqlTruth"]["errorCode"] = null;
   private sqlTruthError: string | null = null;
+  private scanBudgetExhaustions = 0;
+  private lastScanBudgetExhaustedAt: number | null = null;
 
   constructor(private readonly config: StoreConfig) { }
 
@@ -310,23 +319,57 @@ export class MemoryStore {
     if (this.initialized) {
       return;
     }
+    if (this.initializationFailure) {
+      throw this.initializationFailure;
+    }
     if (this.initPromise) {
       return this.initPromise;
     }
 
-    this.initPromise = this.doInitialize().catch((err) => {
-      this.initPromise = null;
-      throw err;
+    this.initPromise = this.doInitialize().catch(async (err) => {
+      await this.releaseInitializationResources();
+      const stableError = err instanceof Error ? err : new Error(String(err));
+      this.initializationFailure = stableError;
+      throw stableError;
     });
     return this.initPromise;
   }
 
+  private async releaseInitializationResources(): Promise<void> {
+    try { this.sqlTruthStore?.close(); } catch {}
+    try { this.sqliteVectorStore?.close(); } catch {}
+    try { await (this.table as any)?.close?.(); } catch {}
+    try { await (this.db as any)?.close?.(); } catch {}
+    this.sqlTruthStore = null;
+    this.sqliteVectorStore = null;
+    this.table = null;
+    this.db = null;
+    this.initialized = false;
+    this.ftsIndexCreated = false;
+  }
+
+  /** Explicit recovery boundary after an operator has restored truth storage. */
+  async reopenAfterRecovery(): Promise<void> {
+    await this.releaseInitializationResources();
+    this.initPromise = null;
+    this.initializationFailure = null;
+    this.sqlTruthErrorCode = null;
+    this.sqlTruthError = null;
+    await this.ensureInitialized();
+  }
+
+  /** Release local store handles. Primarily used by restart/canary tests. */
+  async close(): Promise<void> {
+    await this.releaseInitializationResources();
+    this.initPromise = null;
+  }
+
   private async doInitialize(): Promise<void> {
     if (this.config.vectorBackend === "sqlite-bruteforce") {
-      await this.initializeSqlTruthStore([]);
       const sqliteVectorStore = new SqliteBruteForceVectorStore(this.config.dbPath, this.config.vectorDim);
       sqliteVectorStore.open();
       this.sqliteVectorStore = sqliteVectorStore;
+      await this.initializeSqlTruthStore(sqliteVectorStore.listIds().length > 0);
       this.vectorCompanionError = null;
       this.initialized = true;
       return;
@@ -443,7 +486,9 @@ export class MemoryStore {
 
     this.db = db;
     this.table = table;
-    await this.initializeSqlTruthStore();
+    const companionProbe = await table.query().select(["id"]).limit(1).toArray();
+    const hasCompanionRows = companionProbe.some((row: any) => row?.id && row.id !== "__schema__");
+    await this.initializeSqlTruthStore(hasCompanionRows);
     this.initialized = true;
   }
 
@@ -461,31 +506,23 @@ export class MemoryStore {
     };
   }
 
-  private async initializeSqlTruthStore(sourceEntries?: MemoryEntry[]): Promise<void> {
+  private async initializeSqlTruthStore(hasCompanionRows: boolean): Promise<void> {
     let truth: SqlTruthStore | null = null;
+    const truthPath = join(this.config.dbPath, "memory.sqlite3");
+    // A companion with rows but no SQL authority is an outage or an explicit
+    // legacy-migration situation. Ordinary startup must never recreate truth
+    // from vectors because stale deleted/superseded rows can be resurrected.
+    if (!existsSync(truthPath) && hasCompanionRows) {
+      this.sqlTruthStore = null;
+      this.sqlTruthErrorCode = "SQL_TRUTH_MIGRATION_REQUIRED";
+      this.sqlTruthError = "SQL truth is missing while vector companion data exists";
+      throw new Error(
+        "CLAWLORE_SQL_TRUTH_MIGRATION_REQUIRED: restore memory.sqlite3 from backup or run the explicit backup-backed legacy migration; vector-to-truth startup import is forbidden",
+      );
+    }
     try {
-      truth = new SqlTruthStore(join(this.config.dbPath, "memory.sqlite3"));
+      truth = new SqlTruthStore(truthPath);
       truth.open();
-      let entries = sourceEntries;
-      if (!entries && this.table) {
-        const rows = await this.table.query().select([
-          "id",
-          "text",
-          "category",
-          "scope",
-          "importance",
-          "timestamp",
-          "metadata",
-        ]).toArray();
-        entries = rows
-          .filter((row: any) => row?.id && row?.text !== undefined)
-          .map((row: any) => this.rowToEntry(row, false));
-      }
-      // SQL is the authority once present. Startup may import rows from the
-      // older LanceDB-only store, but must never delete SQL rows just because
-      // the companion vector table is stale or missing them.
-      const missingEntries = (entries ?? []).filter((entry) => !truth.getById(entry.id));
-      truth.reconcile(missingEntries, { deleteMissing: false });
       this.sqlTruthStore = truth;
       this.sqlTruthErrorCode = null;
       this.sqlTruthError = null;
@@ -495,7 +532,9 @@ export class MemoryStore {
     } catch (err) {
       try { truth?.close(); } catch {}
       this.sqlTruthStore = null;
-      this.sqlTruthErrorCode = "SQL_TRUTH_UNAVAILABLE";
+      if (this.sqlTruthErrorCode !== "SQL_TRUTH_MIGRATION_REQUIRED") {
+        this.sqlTruthErrorCode = "SQL_TRUTH_UNAVAILABLE";
+      }
       this.sqlTruthError = diagnosticErrorSummary(err);
       console.error(
         `clawlore: SQL truth initialization failed; memory operations are fail-closed: ${this.sqlTruthError}`,
@@ -940,6 +979,13 @@ export class MemoryStore {
             sqliteResults.length < fetchLimit ||
             fetchLimit >= maxScanBudget
           ) {
+            if (
+              hydrated.length < safeLimit &&
+              fetchLimit >= maxScanBudget &&
+              sqliteResults.length >= fetchLimit
+            ) {
+              this.noteVectorScanBudgetExhausted();
+            }
             return hydrated;
           }
           fetchLimit = Math.min(fetchLimit * 2, maxScanBudget);
@@ -1009,6 +1055,13 @@ export class MemoryStore {
         results.length < fetchLimit ||
         fetchLimit >= maxScanBudget
       ) {
+        if (
+          hydrated.length < safeLimit &&
+          fetchLimit >= maxScanBudget &&
+          results.length >= fetchLimit
+        ) {
+          this.noteVectorScanBudgetExhausted();
+        }
         return hydrated;
       }
       fetchLimit = Math.min(fetchLimit * 2, maxScanBudget);
@@ -1774,6 +1827,8 @@ export class MemoryStore {
     configuredDimension: number;
     backend: "lancedb" | "sqlite-bruteforce";
     repairDebt: VectorRepairDebtReport | null;
+    scanBudgetExhaustions: number;
+    lastScanBudgetExhaustedAt: number | null;
   } {
     let repairDebt: VectorRepairDebtReport | null = null;
     try {
@@ -1786,7 +1841,16 @@ export class MemoryStore {
       configuredDimension: this.config.vectorDim,
       backend: this.sqliteVectorStore ? "sqlite-bruteforce" : "lancedb",
       repairDebt,
+      scanBudgetExhaustions: this.scanBudgetExhaustions,
+      lastScanBudgetExhaustedAt: this.lastScanBudgetExhaustedAt,
     };
+  }
+
+  private noteVectorScanBudgetExhausted(): void {
+    this.scanBudgetExhaustions++;
+    this.lastScanBudgetExhaustedAt = Date.now();
+    this.vectorCompanionError =
+      "vector scan budget exhausted before enough SQL-valid rows were found; run vector companion repair";
   }
 
   async getVectorCompanionDriftReport(maxTruthRows = 100_000): Promise<VectorCompanionDriftReport> {

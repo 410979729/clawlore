@@ -5,6 +5,7 @@
  * Handles CRUD operations for task_episodes, procedural_playbooks, and experience_runs
  */
 import { randomUUID } from "node:crypto";
+import { redactSupportBundle } from "./v2/operator/support-bundle.js";
 let experienceTransactionSequence = 0;
 function withExperienceTransaction(db, operation) {
     const savepoint = `clawlore_experience_${++experienceTransactionSequence}`;
@@ -301,7 +302,7 @@ export function createPlaybook(db, params) {
     const validated = validateProceduralPlaybook(params.payload);
     const now = new Date().toISOString();
     const id = randomUUID();
-    withExperienceTransaction(db, () => {
+    const durable = withExperienceTransaction(db, () => {
         db.prepare(`
       INSERT INTO procedural_playbooks (
         id, scope_id, shared_scope_id, task_class, title, trigger, goal,
@@ -311,12 +312,13 @@ export function createPlaybook(db, params) {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(id, params.scope_id, params.shared_scope_id ?? "", validated.task_class, validated.title, validated.trigger, validated.goal, JSON.stringify(validated.preconditions), JSON.stringify(validated.steps), JSON.stringify(validated.pitfalls), JSON.stringify(validated.verification), JSON.stringify(validated.cleanup), JSON.stringify(params.evidence_anchors ?? []), JSON.stringify(params.related_skills ?? []), JSON.stringify(params.environment_constraints ?? {}), JSON.stringify(validated.reuse_policy), validated.status, validated.confidence, params.created_from_episode_id ?? "", now, now, JSON.stringify(params.metadata ?? {}));
         updatePlaybookFts(db, id, validated);
-        const durable = getPlaybook(db, id);
-        if (!durable)
+        const created = getPlaybook(db, id);
+        if (!created)
             throw new Error("playbook create did not produce a durable row");
-        createPlaybookVersion(db, id, 1, "create", "Initial creation", durable);
+        createPlaybookVersion(db, id, 1, "create", "Initial creation", created);
+        return created;
     });
-    return { ...validated, id, created_at: now };
+    return durable;
 }
 export function getPlaybook(db, playbookId, scopeIds) {
     const scope = experienceScopeClause(scopeIds, "scope_id", "shared_scope_id");
@@ -480,9 +482,21 @@ function rowToPlaybook(row) {
         pitfalls: safeJsonParse(row.pitfalls, []),
         verification: safeJsonParse(row.verification, []),
         cleanup: safeJsonParse(row.cleanup, []),
+        evidence_anchors: safeJsonParse(row.evidence_anchors, []),
+        related_skills: safeJsonParse(row.related_skills, []),
+        environment_constraints: safeJsonParse(row.environment_constraints, {}),
         reuse_policy: safeJsonParse(row.reuse_policy, {}),
         status: row.status,
-        confidence: row.confidence,
+        confidence: Number(row.confidence),
+        success_count: Number(row.success_count),
+        failure_count: Number(row.failure_count),
+        stale_count: Number(row.stale_count),
+        created_from_episode_id: row.created_from_episode_id ?? "",
+        last_used_at: row.last_used_at ?? null,
+        last_verified_at: row.last_verified_at ?? null,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        metadata: safeJsonParse(row.metadata, {}),
         requires_operator_review: row.status !== "promoted",
     };
 }
@@ -508,7 +522,7 @@ function createPlaybookVersion(db, playbookId, version, changeType, changeReason
     db.prepare(`
     INSERT INTO playbook_versions (id, playbook_id, version, change_type, change_reason, snapshot, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(id, playbookId, version, changeType, changeReason, JSON.stringify(snapshot), now);
+  `).run(id, playbookId, version, changeType, changeReason, JSON.stringify(redactSupportBundle(snapshot)), now);
 }
 export function getPlaybookVersions(db, playbookId, scopeIds) {
     const scope = experienceScopeClause(scopeIds, "p.scope_id", "p.shared_scope_id");
