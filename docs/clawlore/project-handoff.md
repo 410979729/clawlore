@@ -117,6 +117,40 @@ command/ACL fixtures; it does not claim a real second-account Windows ACL or
 concurrent-write benchmark. That remains an independent platform-validation
 item and does not authorize weakening the default-deny policy.
 
+The sixth independent review then found five deeper blockers in the new
+migration/platform boundary. The seventh remediation closes them without
+deploying the candidate. Windows ACL enforcement now uses an encoded
+PowerShell program with path/SID/kind supplied through structured environment
+input instead of string-form `-Command` arguments. SQL authority validity is
+bound to an exact schema fingerprint covering primary keys, constraints,
+indexes, triggers, outbox, marker/migration tables, and the FTS5 definition.
+Migration canonicalizes source/backup/receipt identities, rejects relative and
+symlink-parent aliases before writes, requires separate dedicated private leaf
+directories, fsyncs the backup and parent, and compares an exact logical
+snapshot under a SQLite writer lock before committing the marker. Existing
+parents are verified but never chmod'd or have ACLs rewritten. The internal
+SQLite migration receipt is commit truth and can idempotently reconstruct an
+interrupted external completed receipt.
+
+Release scripts now use a cross-platform Node wrapper, TypeScript strict mode
+is enabled, unreachable vector-first fallback branches are removed, and the
+final installed tarball runs both native-free and native LanceDB
+store/reopen/delete/repair smokes plus the isolated real OpenClaw CLI smoke.
+Machine-generated evidence for exact clean code commit
+`854591269632d31e03d5fc500ebdc4168d7257f4` records 361 tests passed, 0
+failed, one Windows-only integration skipped on Linux, runtime digest
+`0883f4b2fd7ad419f88b5784c2741c190dbdc95c838e4d44b98a0f5b78bcb270`,
+42 SBOM components, 186 package files, official-registry production
+vulnerabilities 0, all three packed smokes true, and `dirty=false`. See
+`eval/clawlore-v1-seventh-independent-audit-remediation-run-2026-07-16.md` and
+`eval/clawlore-v1-seventh-release-evidence-2026-07-16.json`.
+
+The real Windows second-account test remains an explicit evidence limitation:
+the authorized Windows client was unreachable over its registered management
+path during this run. The conditional real-PowerShell test is present and will
+run on Windows CI; Linux fixtures prove command construction and default-deny
+ACL evaluation but are not misrepresented as a Windows canary.
+
 The live Gateway port source was separately aligned from stale config `19421`
 to the service/listener truth `19021` under a controlled backup. That config
 restart did not deploy the candidate or alter the memory data plane.

@@ -1,0 +1,15 @@
+{
+  "schema": "clawlore.release-evidence.v1",
+  "package": "clawlore@1.2.0",
+  "commit": "854591269632d31e03d5fc500ebdc4168d7257f4",
+  "runtimeDigest": "0883f4b2fd7ad419f88b5784c2741c190dbdc95c838e4d44b98a0f5b78bcb270",
+  "sourceOnly": true,
+  "dirty": false,
+  "packFileCount": 186,
+  "sbomComponentCount": 42,
+  "sbomSha256": "095c805f4e5306bd6a565997f1278fb1941383dfd8d318167c79a022d124aff9",
+  "supplyChainRegistry": "https://registry.npmjs.org",
+  "packedRuntimeSmoke": true,
+  "packedLanceDbSmoke": true,
+  "packedOpenClawCliSmoke": true
+}

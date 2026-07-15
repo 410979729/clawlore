@@ -68,8 +68,37 @@ Updated: 2026-07-16
 - [x] Pass 349/349 tests and the exact clean-install source gate with
       typecheck/build, vector repair, 124-case recall, 200k FTS, official audit
       0, 42-component SBOM, 185-file pack scan, and build `dirty=false`.
-- [ ] Obtain Tianxuan's sixth independent acceptance of the exact delivered
-      candidate before repository publication, deployment, or V2 cutover.
+- [x] Receive Tianxuan's sixth independent review of the exact delivered
+      candidate. The result was NO-GO with five migration/Windows blockers;
+      those findings are tracked and closed in the seventh remediation below.
+
+### Seventh independent-audit remediation
+
+- [x] Run Windows ACL enforcement through an encoded PowerShell command with
+      structured environment input; keep paths/SIDs out of command source and
+      add a real-Windows conditional integration test.
+- [x] Bind SQL authority to an exact schema fingerprint covering PK/constraints,
+      indexes, triggers, FTS5 definition, outbox, marker, and migration tables.
+- [x] Canonicalize source/backup/receipt identities and reject all aliases,
+      including relative paths, symlinked parents, source WAL/SHM, and shared
+      output directories, before any write.
+- [x] Make the migration backup durable with file/parent fsync, then take a
+      SQLite writer lock and compare a logical snapshot digest before marker
+      creation; concurrent source changes abort the migration.
+- [x] Treat the internal SQLite migration receipt as commit truth and rebuild a
+      missing external completed receipt idempotently after post-commit faults.
+- [x] Create only missing owner-private state-directory suffixes; verify but
+      never rewrite an existing parent directory or its ACL/mode.
+- [x] Make release-gate entry points cross-platform Node wrappers, add a final
+      packed native-LanceDB reopen/delete/repair smoke, enable strict TypeScript,
+      and remove unreachable vector-first fallback branches.
+- [x] Pass the exact clean code gate for `854591269632d31e03d5fc500ebdc4168d7257f4`:
+      361 tests passed, 0 failed, 1 Windows-only integration skipped on Linux;
+      typecheck/build/vector repair, 124-case recall, 200k FTS, official audit
+      0, 42-component SBOM, 186-file pack, packed runtime/LanceDB/OpenClaw CLI
+      smokes, and build `dirty=false`.
+- [ ] Obtain Tianxuan's seventh independent acceptance before repository push,
+      package release, live deployment, or V2 cutover.
 
 ## ClawLore v1 production hardening — active after Phase 9
 
