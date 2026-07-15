@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 import test from "node:test";
+import { artifactBinding, releaseProvenance } from "./fixtures/release-provenance.mjs";
 
 const require = createRequire(import.meta.url);
 const { createJiti } = require("jiti");
@@ -13,6 +14,7 @@ const { loadRuntimeRolloutControlsV1 } = jiti("../src/v2/adapters/openclaw/runti
 const { createLegacyShadowCandidateRetrieverV1 } = jiti("../src/v2/adapters/openclaw/legacy-shadow-retrieval.ts");
 
 function readiness() {
+  const provenance = releaseProvenance();
   return buildReleaseReadinessReceipt({
     rolloutId: "live-shadow-fixture",
     requestedMode: "shadow",
@@ -30,6 +32,7 @@ function readiness() {
       legacyHashUnchanged: false,
       forbiddenScopeViolations: 0,
     },
+    provenance,
     now: () => new Date("2026-07-12T04:00:00.000Z"),
   });
 }
@@ -40,12 +43,19 @@ test("rollout controls require one valid 0600 readiness file", async () => {
     const readinessFile = join(root, "readiness.json");
     await writeFile(readinessFile, `${JSON.stringify(readiness())}\n`, { mode: 0o600 });
 
-    const loaded = loadRuntimeRolloutControlsV1({ readinessFile });
+    const loaded = loadRuntimeRolloutControlsV1({ readinessFile, expectedBinding: artifactBinding() });
     assert.deepEqual(loaded.errors, []);
     assert.equal(loaded.readiness?.status, "ready");
 
+    const mismatched = loadRuntimeRolloutControlsV1({
+      readinessFile,
+      expectedBinding: { ...artifactBinding(), runtimeDigest: "f".repeat(64) },
+    });
+    assert.deepEqual(mismatched.errors, ["release_readiness_provenance_mismatch:runtimeDigest"]);
+    assert.equal(mismatched.readiness, undefined);
+
     await chmod(readinessFile, 0o644);
-    const unsafe = loadRuntimeRolloutControlsV1({ readinessFile });
+    const unsafe = loadRuntimeRolloutControlsV1({ readinessFile, expectedBinding: artifactBinding() });
     assert.deepEqual(unsafe.errors, ["rollout_control_permissions_must_be_0600"]);
     assert.equal(unsafe.readiness, undefined);
   } finally {

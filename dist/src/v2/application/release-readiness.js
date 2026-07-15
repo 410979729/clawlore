@@ -46,6 +46,64 @@ function evidenceFailures(mode, evidence) {
     }
     return failures;
 }
+const SHA256_RE = /^[a-f0-9]{64}$/i;
+const COMMIT_RE = /^[a-f0-9]{40}$/i;
+function provenanceFailures(mode, provenance, now) {
+    if (mode === "disabled")
+        return [];
+    const failures = [];
+    if (!COMMIT_RE.test(provenance.sourceCommit))
+        failures.push("provenance_source_commit_invalid");
+    for (const field of [
+        "runtimeDigest",
+        "packageDigest",
+        "lockDigest",
+        "configDigest",
+        "truthSnapshotDigest",
+        "testLogDigest",
+    ]) {
+        if (!SHA256_RE.test(provenance[field]))
+            failures.push(`provenance_digest_invalid:${field}`);
+    }
+    if (!provenance.generatedBy.trim())
+        failures.push("provenance_generator_missing");
+    const createdAt = Date.parse(provenance.createdAt);
+    const expiresAt = Date.parse(provenance.expiresAt);
+    if (!Number.isFinite(createdAt))
+        failures.push("provenance_created_at_invalid");
+    if (!Number.isFinite(expiresAt))
+        failures.push("provenance_expires_at_invalid");
+    if (Number.isFinite(createdAt) && createdAt > now.getTime() + 60_000)
+        failures.push("provenance_created_in_future");
+    if (Number.isFinite(expiresAt) && expiresAt <= now.getTime())
+        failures.push("provenance_expired");
+    if (Number.isFinite(createdAt) && Number.isFinite(expiresAt) && expiresAt <= createdAt) {
+        failures.push("provenance_expiry_order_invalid");
+    }
+    if (mode === "v2-write" || mode === "cutover") {
+        if (provenance.lifecycle.active <= 0)
+            failures.push("lifecycle_active_empty");
+        if (provenance.shadow.sampleCount < 30)
+            failures.push("shadow_sample_count_below_30");
+        if (provenance.shadow.directSamples < 20)
+            failures.push("shadow_direct_samples_below_20");
+        if (provenance.shadow.groupSamples < 5)
+            failures.push("shadow_group_samples_below_5");
+        if (provenance.shadow.positiveCandidateSamples < 10)
+            failures.push("shadow_positive_samples_below_10");
+        if (provenance.shadow.overlapRatio < 0.8)
+            failures.push("shadow_overlap_below_0_8");
+        if (provenance.shadow.rankAgreement < 0.8)
+            failures.push("shadow_rank_agreement_below_0_8");
+        if (provenance.shadow.p95LatencyMs > 750)
+            failures.push("shadow_latency_above_750ms");
+        if (provenance.shadow.forbiddenViolations !== 0)
+            failures.push("shadow_forbidden_violation");
+        if (provenance.shadow.promptBudgetViolations !== 0)
+            failures.push("shadow_prompt_budget_violation");
+    }
+    return failures;
+}
 function rolloutSteps(mode) {
     const steps = [
         { order: 1, action: "record_live_inventory_and_config_hash", mutatesLive: false, rollback: "none" },
@@ -63,9 +121,11 @@ function rolloutSteps(mode) {
     return steps;
 }
 export function previewRollout(input) {
+    const now = input.now?.() ?? new Date();
     const blockingReasons = [
         ...(input.compatibilityFailures ?? []),
         ...evidenceFailures(input.requestedMode, input.evidence),
+        ...provenanceFailures(input.requestedMode, input.provenance, now),
     ].sort();
     return {
         schemaVersion: 1,
@@ -77,7 +137,7 @@ export function previewRollout(input) {
         blockingReasons,
         steps: rolloutSteps(input.requestedMode),
         compatibility: CLAWLORE_COMPATIBILITY_SURFACE_V1,
-        createdAt: (input.now?.() ?? new Date()).toISOString(),
+        createdAt: now.toISOString(),
     };
 }
 export function buildReleaseReadinessReceipt(input) {
@@ -87,6 +147,7 @@ export function buildReleaseReadinessReceipt(input) {
         status: rollout.ready ? "ready" : "blocked",
         compatibilityValid: (input.compatibilityFailures ?? []).length === 0,
         rollout,
+        provenance: input.provenance,
         responseSchemas: ["memory-action.v2", "memory-center.v1", "projection-convergence.v1", "replay-evaluation.v2"],
     };
 }

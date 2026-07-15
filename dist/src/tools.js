@@ -8,7 +8,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { isNoise } from "./noise-filter.js";
 import { evaluateCaptureSafety, sanitizeCaptureText } from "./capture-safety.js";
-import { isSystemBypassId, resolveScopeFilter, parseAgentIdFromSessionKey } from "./scopes.js";
+import { isSystemBypassId, parseAgentIdFromSessionKey } from "./scopes.js";
 import { appendRelation, buildSmartMetadata, deriveFactKey, parseSmartMetadata, stringifySmartMetadata, } from "./smart-metadata.js";
 import { TEMPORAL_VERSIONED_CATEGORIES } from "./memory-categories.js";
 import { appendSelfImprovementEntry, ensureSelfImprovementLearningFiles } from "./self-improvement-files.js";
@@ -18,6 +18,7 @@ import { enrichContentWithArtifactAnchors, mergeArtifactMetadata } from "./artif
 import { buildSecretIndex } from "./secret-index.js";
 import { buildGovernanceReviewCandidates, recordConflictReviewRelations, } from "./conflict-governance.js";
 import { buildRuntimeScopeMetadata } from "./runtime-scope-metadata.js";
+import { resolveRuntimeMemoryAccess, runtimeBoundaryMetadata, } from "./runtime-memory-boundary.js";
 // ============================================================================
 // Types
 // ============================================================================
@@ -185,6 +186,35 @@ function requireRuntimeAgentId(staticAgentId, runtimeCtx, toolName) {
     if (agentId)
         return { ok: true, agentId };
     return { ok: false, response: missingAgentContextResponse(toolName) };
+}
+function deniedMemoryBoundaryResponse(toolName, access) {
+    return {
+        content: [{
+                type: "text",
+                text: access.denyReason === "group_memory_denied"
+                    ? `${toolName} is disabled in group and channel conversations.`
+                    : `${toolName} requires a resolvable private or explicitly enabled conversation boundary.`,
+            }],
+        details: {
+            error: "memory_boundary_denied",
+            reason: access.denyReason,
+            boundary: access.boundary.kind,
+            tool: toolName,
+        },
+    };
+}
+function requireRuntimeMemoryAccess(context, agentId, staticContext, runtimeContext, toolName) {
+    const access = resolveRuntimeMemoryAccess({
+        scopeManager: context.scopeManager,
+        agentId,
+        config: context.principalIsolation,
+        staticContext,
+        runtimeContext,
+    });
+    if (access.denied) {
+        return { ok: false, response: deniedMemoryBoundaryResponse(toolName, access) };
+    }
+    return { ok: true, access };
 }
 async function sleep(ms) {
     await new Promise(resolve => setTimeout(resolve, ms));
@@ -481,14 +511,18 @@ export function registerMemoryRecallTool(api, context) {
                     if (agentResolution.ok === false)
                         return agentResolution.response;
                     const agentId = agentResolution.agentId;
+                    const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_recall");
+                    if (accessResolution.ok === false)
+                        return accessResolution.response;
+                    const access = accessResolution.access;
                     const safeLimit = includeFullText
                         ? clampInt(limit, 1, 20)
                         : clampInt(limit, 1, 6);
                     const safeCharsPerItem = clampInt(maxCharsPerItem, 60, 1000);
                     // Determine accessible scopes
-                    let scopeFilter = resolveScopeFilter(runtimeContext.scopeManager, agentId);
+                    let scopeFilter = access.scopeFilter;
                     if (scope) {
-                        if (runtimeContext.scopeManager.isAccessible(scope, agentId)) {
+                        if (access.isAccessible(scope)) {
                             scopeFilter = [scope];
                         }
                         else {
@@ -602,6 +636,10 @@ export function registerMemoryStoreTool(api, context) {
                     if (agentResolution.ok === false)
                         return agentResolution.response;
                     const agentId = agentResolution.agentId;
+                    const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_store");
+                    if (accessResolution.ok === false)
+                        return accessResolution.response;
+                    const access = accessResolution.access;
                     // Determine target scope
                     let targetScope = scope;
                     if (!targetScope) {
@@ -619,10 +657,10 @@ export function registerMemoryStoreTool(api, context) {
                                 },
                             };
                         }
-                        targetScope = runtimeContext.scopeManager.getDefaultScope(agentId);
+                        targetScope = access.defaultScope;
                     }
                     // Validate scope access
-                    if (!runtimeContext.scopeManager.isAccessible(targetScope, agentId)) {
+                    if (!targetScope || !access.isAccessible(targetScope)) {
                         return {
                             content: [
                                 {
@@ -691,6 +729,7 @@ export function registerMemoryStoreTool(api, context) {
                         scopeFilter: [targetScope],
                         workspaceDir: resolveWorkspaceDir(runtimeCtx, runtimeContext.workspaceDir),
                     });
+                    Object.assign(runtimeScopeMetadata, runtimeBoundaryMetadata(access.boundary));
                     // Check for duplicates using raw vector similarity (bypasses importance/recency weighting)
                     // Fail-open by design: dedup must never block a legitimate memory write.
                     // excludeInactive: superseded historical records must not block new writes.
@@ -805,7 +844,10 @@ export function registerMemoryStoreSecretIndexTool(api, context) {
                 notes: Type.Optional(Type.String({ description: "Non-secret notes" })),
                 entities: Type.Optional(Type.Array(Type.String())),
                 tags: Type.Optional(Type.Array(Type.String())),
-                secretValue: Type.Optional(Type.String({ description: "Optional plaintext used only to compute a short SHA-256 fingerprint; never stored" })),
+                secretFingerprintSha256: Type.Optional(Type.String({
+                    description: "Optional SHA-256 fingerprint generated locally by a trusted vault/client helper; plaintext is forbidden",
+                    pattern: "^[A-Fa-f0-9]{64}$",
+                })),
                 scope: Type.Optional(Type.String({ description: "Memory scope (optional, defaults to agent scope)" })),
             }),
             async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
@@ -814,6 +856,10 @@ export function registerMemoryStoreSecretIndexTool(api, context) {
                     if (agentResolution.ok === false)
                         return agentResolution.response;
                     const agentId = agentResolution.agentId;
+                    const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_store_secret_index");
+                    if (accessResolution.ok === false)
+                        return accessResolution.response;
+                    const access = accessResolution.access;
                     const raw = params;
                     let targetScope = typeof raw.scope === "string" && raw.scope.trim() ? raw.scope.trim() : undefined;
                     if (!targetScope) {
@@ -823,9 +869,9 @@ export function registerMemoryStoreSecretIndexTool(api, context) {
                                 details: { error: "explicit_scope_required", agentId },
                             };
                         }
-                        targetScope = runtimeContext.scopeManager.getDefaultScope(agentId);
+                        targetScope = access.defaultScope;
                     }
-                    if (!runtimeContext.scopeManager.isAccessible(targetScope, agentId)) {
+                    if (!targetScope || !access.isAccessible(targetScope)) {
                         return {
                             content: [{ type: "text", text: `Access denied to scope: ${targetScope}` }],
                             details: { error: "scope_access_denied", requestedScope: targetScope },
@@ -842,6 +888,7 @@ export function registerMemoryStoreSecretIndexTool(api, context) {
                         scopeFilter: [targetScope],
                         workspaceDir: resolveWorkspaceDir(runtimeCtx, runtimeContext.workspaceDir),
                     });
+                    Object.assign(runtimeScopeMetadata, runtimeBoundaryMetadata(access.boundary));
                     const entry = await runtimeContext.store.store({
                         text,
                         vector,
@@ -906,10 +953,14 @@ export function registerMemoryForgetTool(api, context) {
                     if (agentResolution.ok === false)
                         return agentResolution.response;
                     const agentId = agentResolution.agentId;
+                    const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_forget");
+                    if (accessResolution.ok === false)
+                        return accessResolution.response;
+                    const access = accessResolution.access;
                     // Determine accessible scopes
-                    let scopeFilter = resolveScopeFilter(runtimeContext.scopeManager, agentId);
+                    let scopeFilter = access.scopeFilter;
                     if (scope) {
-                        if (runtimeContext.scopeManager.isAccessible(scope, agentId)) {
+                        if (access.isAccessible(scope)) {
                             scopeFilter = [scope];
                         }
                         else {
@@ -1054,7 +1105,10 @@ export function registerMemoryUpdateTool(api, context) {
                     if (agentResolution.ok === false)
                         return agentResolution.response;
                     const agentId = agentResolution.agentId;
-                    const scopeFilter = resolveScopeFilter(runtimeContext.scopeManager, agentId);
+                    const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_update");
+                    if (accessResolution.ok === false)
+                        return accessResolution.response;
+                    const scopeFilter = accessResolution.access.scopeFilter;
                     // Resolve memoryId: if it doesn't look like a UUID, try search
                     let resolvedId = memoryId;
                     const uuidLike = /^[0-9a-f]{8}(-[0-9a-f]{4}){0,4}/i.test(memoryId);
@@ -1121,52 +1175,48 @@ export function registerMemoryUpdateTool(api, context) {
                         if (existing) {
                             const meta = parseSmartMetadata(existing.metadata, existing);
                             if (TEMPORAL_VERSIONED_CATEGORIES.has(meta.memory_category)) {
-                                const now = Date.now();
                                 const factKey = meta.fact_key ?? deriveFactKey(meta.memory_category, text);
-                                // Create new superseding record
-                                const newMeta = buildSmartMetadata({ text, category: existing.category }, {
-                                    l0_abstract: text,
-                                    l1_overview: meta.l1_overview,
-                                    l2_content: text,
-                                    memory_category: meta.memory_category,
-                                    tier: meta.tier,
-                                    access_count: 0,
-                                    confidence: importance !== undefined ? clamp01(importance, 0.7) : meta.confidence,
-                                    valid_from: now,
-                                    fact_key: factKey,
-                                    supersedes: resolvedId,
-                                    relations: appendRelation([], {
-                                        type: "supersedes",
-                                        targetId: resolvedId,
-                                    }),
-                                });
-                                const newEntry = await context.store.store({
+                                const newEntry = await context.store.supersede(resolvedId, {
                                     text,
                                     vector: newVector,
                                     category: category ? category : existing.category,
-                                    scope: existing.scope,
                                     importance: importance !== undefined
                                         ? clamp01(importance, 0.7)
                                         : existing.importance,
-                                    metadata: stringifySmartMetadata(newMeta),
-                                });
-                                // Invalidate old record (metadata-only patch — safe)
-                                try {
-                                    const invalidatedMeta = buildSmartMetadata(existing, {
-                                        fact_key: factKey,
-                                        invalidated_at: now,
-                                        superseded_by: newEntry.id,
-                                        relations: appendRelation(meta.relations, {
-                                            type: "superseded_by",
-                                            targetId: newEntry.id,
-                                        }),
-                                    });
-                                    await context.store.update(resolvedId, { metadata: stringifySmartMetadata(invalidatedMeta) }, scopeFilter);
-                                }
-                                catch (patchErr) {
-                                    // New record is already the source of truth; log but don't fail
-                                    console.warn(`clawlore: failed to patch superseded record ${resolvedId.slice(0, 8)}: ${patchErr}`);
-                                }
+                                    buildMetadata: ({ oldEntry, newId, now }) => {
+                                        const currentMeta = parseSmartMetadata(oldEntry.metadata, oldEntry);
+                                        const newMeta = buildSmartMetadata({ text, category: existing.category }, {
+                                            l0_abstract: text,
+                                            l1_overview: currentMeta.l1_overview,
+                                            l2_content: text,
+                                            memory_category: currentMeta.memory_category,
+                                            tier: currentMeta.tier,
+                                            access_count: 0,
+                                            confidence: importance !== undefined ? clamp01(importance, 0.7) : currentMeta.confidence,
+                                            valid_from: now,
+                                            fact_key: factKey,
+                                            supersedes: oldEntry.id,
+                                            relations: appendRelation([], {
+                                                type: "supersedes",
+                                                targetId: oldEntry.id,
+                                            }),
+                                        });
+                                        const invalidatedMeta = buildSmartMetadata(oldEntry, {
+                                            fact_key: factKey,
+                                            invalidated_at: now,
+                                            superseded_by: newId,
+                                            relations: appendRelation(currentMeta.relations, {
+                                                type: "superseded_by",
+                                                targetId: newId,
+                                            }),
+                                        });
+                                        return {
+                                            factKey,
+                                            newMetadata: stringifySmartMetadata(newMeta),
+                                            oldMetadata: stringifySmartMetadata(invalidatedMeta),
+                                        };
+                                    },
+                                }, scopeFilter);
                                 return {
                                     content: [
                                         {
@@ -1260,10 +1310,13 @@ export function registerMemoryStatsTool(api, context) {
                     if (agentResolution.ok === false)
                         return agentResolution.response;
                     const agentId = agentResolution.agentId;
+                    const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_stats");
+                    if (accessResolution.ok === false)
+                        return accessResolution.response;
                     // Determine accessible scopes
-                    let scopeFilter = resolveScopeFilter(context.scopeManager, agentId);
+                    let scopeFilter = accessResolution.access.scopeFilter;
                     if (scope) {
-                        if (context.scopeManager.isAccessible(scope, agentId)) {
+                        if (accessResolution.access.isAccessible(scope)) {
                             scopeFilter = [scope];
                         }
                         else {
@@ -1356,10 +1409,13 @@ export function registerMemoryDebugTool(api, context) {
                     if (agentResolution.ok === false)
                         return agentResolution.response;
                     const agentId = agentResolution.agentId;
+                    const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_debug");
+                    if (accessResolution.ok === false)
+                        return accessResolution.response;
                     const safeLimit = clampInt(limit, 1, 20);
-                    let scopeFilter = resolveScopeFilter(context.scopeManager, agentId);
+                    let scopeFilter = accessResolution.access.scopeFilter;
                     if (scope) {
-                        if (context.scopeManager.isAccessible(scope, agentId)) {
+                        if (accessResolution.access.isAccessible(scope)) {
                             scopeFilter = [scope];
                         }
                         else {
@@ -1463,10 +1519,13 @@ export function registerMemoryListTool(api, context) {
                     if (agentResolution.ok === false)
                         return agentResolution.response;
                     const agentId = agentResolution.agentId;
+                    const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_list");
+                    if (accessResolution.ok === false)
+                        return accessResolution.response;
                     // Determine accessible scopes
-                    let scopeFilter = resolveScopeFilter(context.scopeManager, agentId);
+                    let scopeFilter = accessResolution.access.scopeFilter;
                     if (scope) {
-                        if (context.scopeManager.isAccessible(scope, agentId)) {
+                        if (accessResolution.access.isAccessible(scope)) {
                             scopeFilter = [scope];
                         }
                         else {
@@ -1590,9 +1649,12 @@ export function registerMemoryContextTool(api, context) {
                     if (agentResolution.ok === false)
                         return agentResolution.response;
                     const agentId = agentResolution.agentId;
-                    let scopeFilter = resolveScopeFilter(runtimeContext.scopeManager, agentId);
+                    const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_context");
+                    if (accessResolution.ok === false)
+                        return accessResolution.response;
+                    let scopeFilter = accessResolution.access.scopeFilter;
                     if (scope) {
-                        if (!runtimeContext.scopeManager.isAccessible(scope, agentId)) {
+                        if (!accessResolution.access.isAccessible(scope)) {
                             return {
                                 content: [{ type: "text", text: `Access denied to scope: ${scope}` }],
                                 details: { error: "scope_access_denied", requestedScope: scope },
@@ -1688,9 +1750,12 @@ export function registerMemoryInspectTool(api, context) {
                     if (agentResolution.ok === false)
                         return agentResolution.response;
                     const agentId = agentResolution.agentId;
-                    let scopeFilter = resolveScopeFilter(runtimeContext.scopeManager, agentId);
+                    const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_inspect");
+                    if (accessResolution.ok === false)
+                        return accessResolution.response;
+                    let scopeFilter = accessResolution.access.scopeFilter;
                     if (scope) {
-                        if (!runtimeContext.scopeManager.isAccessible(scope, agentId)) {
+                        if (!accessResolution.access.isAccessible(scope)) {
                             return {
                                 content: [{ type: "text", text: `Access denied to scope: ${scope}` }],
                                 details: { error: "scope_access_denied", requestedScope: scope },
@@ -1769,9 +1834,12 @@ export function registerMemoryGovernTool(api, context) {
                 if (agentResolution.ok === false)
                     return agentResolution.response;
                 const agentId = agentResolution.agentId;
-                let scopeFilter = resolveScopeFilter(context.scopeManager, agentId);
+                const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_govern");
+                if (accessResolution.ok === false)
+                    return accessResolution.response;
+                let scopeFilter = accessResolution.access.scopeFilter;
                 if (scope) {
-                    if (!context.scopeManager.isAccessible(scope, agentId)) {
+                    if (!accessResolution.access.isAccessible(scope)) {
                         return {
                             content: [{ type: "text", text: `Access denied to scope: ${scope}` }],
                             details: { error: "scope_access_denied", requestedScope: scope },
@@ -1843,9 +1911,12 @@ export function registerMemoryPromoteTool(api, context) {
                 if (agentResolution.ok === false)
                     return agentResolution.response;
                 const agentId = agentResolution.agentId;
-                let scopeFilter = resolveScopeFilter(context.scopeManager, agentId);
+                const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_promote");
+                if (accessResolution.ok === false)
+                    return accessResolution.response;
+                let scopeFilter = accessResolution.access.scopeFilter;
                 if (scope) {
-                    if (!context.scopeManager.isAccessible(scope, agentId)) {
+                    if (!accessResolution.access.isAccessible(scope)) {
                         return {
                             content: [{ type: "text", text: `Access denied to scope: ${scope}` }],
                             details: { error: "scope_access_denied", requestedScope: scope },
@@ -1923,9 +1994,12 @@ export function registerMemoryArchiveTool(api, context) {
                 if (agentResolution.ok === false)
                     return agentResolution.response;
                 const agentId = agentResolution.agentId;
-                let scopeFilter = resolveScopeFilter(context.scopeManager, agentId);
+                const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_archive");
+                if (accessResolution.ok === false)
+                    return accessResolution.response;
+                let scopeFilter = accessResolution.access.scopeFilter;
                 if (scope) {
-                    if (!context.scopeManager.isAccessible(scope, agentId)) {
+                    if (!accessResolution.access.isAccessible(scope)) {
                         return {
                             content: [{ type: "text", text: `Access denied to scope: ${scope}` }],
                             details: { error: "scope_access_denied", requestedScope: scope },
@@ -1980,9 +2054,12 @@ export function registerMemoryCompactTool(api, context) {
                 if (agentResolution.ok === false)
                     return agentResolution.response;
                 const agentId = agentResolution.agentId;
-                let scopeFilter = resolveScopeFilter(context.scopeManager, agentId);
+                const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_compact");
+                if (accessResolution.ok === false)
+                    return accessResolution.response;
+                let scopeFilter = accessResolution.access.scopeFilter;
                 if (scope) {
-                    if (!context.scopeManager.isAccessible(scope, agentId)) {
+                    if (!accessResolution.access.isAccessible(scope)) {
                         return {
                             content: [{ type: "text", text: `Access denied to scope: ${scope}` }],
                             details: { error: "scope_access_denied", requestedScope: scope },
@@ -2059,9 +2136,12 @@ export function registerMemoryExplainRankTool(api, context) {
                 if (agentResolution.ok === false)
                     return agentResolution.response;
                 const agentId = agentResolution.agentId;
-                let scopeFilter = resolveScopeFilter(context.scopeManager, agentId);
+                const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_explain_rank");
+                if (accessResolution.ok === false)
+                    return accessResolution.response;
+                let scopeFilter = accessResolution.access.scopeFilter;
                 if (scope) {
-                    if (!context.scopeManager.isAccessible(scope, agentId)) {
+                    if (!accessResolution.access.isAccessible(scope)) {
                         return {
                             content: [{ type: "text", text: `Access denied to scope: ${scope}` }],
                             details: { error: "scope_access_denied", requestedScope: scope },

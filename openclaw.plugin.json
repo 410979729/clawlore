@@ -1567,6 +1567,35 @@
           }
         }
       },
+      "principalIsolation": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Bind memory reads and writes to the authenticated principal/conversation. Enabled by default; group memory is denied unless explicitly isolated by conversation.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "groupMemory": {
+            "type": "string",
+            "enum": ["deny", "conversation"],
+            "default": "deny",
+            "description": "Deny all group/channel memory activity, or isolate it to a hashed conversation scope."
+          },
+          "legacyAgentScopePrincipals": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "uniqueItems": true,
+            "default": [],
+            "description": "Exact canonical principals (platform:account:principal) permitted to read the pre-1.2 agent scope during migration."
+          },
+          "allowGlobalRead": {
+            "type": "boolean",
+            "default": false,
+            "description": "Opt in to shared global-scope reads for externally authenticated principals."
+          }
+        }
+      },
       "memoryCompaction": {
         "type": "object",
         "additionalProperties": false,
@@ -2260,6 +2289,25 @@
     "workspaceBoundary.userMdExclusive.filterRecall": {
       "label": "Filter USER.md Facts From Recall",
       "help": "Hide USER.md-exclusive facts from plugin auto-recall and memory_recall output.",
+      "advanced": true
+    },
+    "principalIsolation.enabled": {
+      "label": "Principal Memory Isolation",
+      "help": "Bind external memory access to authenticated principal/conversation scopes. Keep enabled."
+    },
+    "principalIsolation.groupMemory": {
+      "label": "Group Memory Policy",
+      "help": "deny is safest; conversation requires an explicitly isolated per-chat scope.",
+      "advanced": true
+    },
+    "principalIsolation.legacyAgentScopePrincipals": {
+      "label": "Legacy Scope Principals",
+      "help": "Exact principals allowed to read the legacy agent scope during migration.",
+      "advanced": true
+    },
+    "principalIsolation.allowGlobalRead": {
+      "label": "Allow Shared Global Recall",
+      "help": "Disabled by default to prevent cross-principal recall.",
       "advanced": true
     },
     "llm.auth": {

@@ -1096,6 +1096,54 @@ export class MemoryStore {
             return updated;
         }));
     }
+    async supersede(id, replacement, scopeFilter) {
+        await this.ensureInitialized();
+        if (isExplicitDenyAllScopeFilter(scopeFilter)) {
+            throw new Error(`Memory ${id} is outside accessible scopes`);
+        }
+        if (!this.sqlTruthStore) {
+            throw new Error("Atomic supersede requires the SQL truth store");
+        }
+        if (!Array.isArray(replacement.vector) || replacement.vector.length !== this.config.vectorDim) {
+            throw new Error(`Vector dimension mismatch: expected ${this.config.vectorDim}, got ${Array.isArray(replacement.vector) ? replacement.vector.length : "non-array"}`);
+        }
+        return this.runWithFileLock(() => this.runSerializedUpdate(async () => {
+            const original = this.resolveSqlEntry(id, scopeFilter);
+            if (!original)
+                throw new Error(`Memory ${id} not found or outside accessible scopes`);
+            const oldVectorEntry = await this.getVectorEntryById(original.id).catch(() => null);
+            const now = Date.now();
+            const newId = randomUUID();
+            const metadata = replacement.buildMetadata({ oldEntry: original, newId, now });
+            if (!metadata.factKey.trim())
+                throw new Error("Atomic supersede requires a non-empty fact key");
+            const invalidatedOld = {
+                ...original,
+                vector: oldVectorEntry?.vector ?? original.vector,
+                metadata: metadata.oldMetadata,
+            };
+            const newEntry = {
+                id: newId,
+                timestamp: now,
+                text: replacement.text,
+                vector: replacement.vector,
+                category: replacement.category,
+                scope: original.scope,
+                importance: replacement.importance,
+                metadata: metadata.newMetadata,
+            };
+            this.sqlTruthStore.supersedeAtomically(invalidatedOld, newEntry, metadata.factKey);
+            if (Array.isArray(invalidatedOld.vector) && invalidatedOld.vector.length === this.config.vectorDim) {
+                await this.deleteVectorCompanionById(invalidatedOld.id, "supersede-delete-old-vector");
+                await this.addVectorCompanion(invalidatedOld, "supersede-add-invalidated-old-vector");
+            }
+            else {
+                this.markVectorCompanionNeedsRepair("supersede-old", new Error(`missing ${this.config.vectorDim}-dimension vector for ${invalidatedOld.id}`));
+            }
+            await this.addVectorCompanion(newEntry, "supersede-add-new-vector");
+            return newEntry;
+        }));
+    }
     async runSerializedUpdate(action) {
         const previous = this.updateQueue;
         let release;

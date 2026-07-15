@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { mkdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { MemoryEntry, MemorySearchResult } from "./store.js";
 
@@ -80,11 +80,13 @@ export class SqliteBruteForceVectorStore {
     const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: new (path: string) => DatabaseSync };
     mkdirSync(dirname(this.sqlitePath), { recursive: true });
     this.db = new DatabaseSync(this.sqlitePath);
+    this.enforcePrivateFiles();
     runSql(this.db, "PRAGMA busy_timeout = 10000");
     runSql(this.db, "PRAGMA journal_mode = WAL");
     runSql(this.db, "PRAGMA synchronous = NORMAL");
     this.ensureSchema();
     this.resetOnDimensionChange();
+    this.enforcePrivateFiles();
   }
 
   close(): void {
@@ -123,10 +125,12 @@ export class SqliteBruteForceVectorStore {
       JSON.stringify(vector),
       Date.now(),
     );
+    this.enforcePrivateFiles();
   }
 
   delete(id: string): void {
     this.requireDb().prepare("DELETE FROM vector_records WHERE id = ?").run(id);
+    this.enforcePrivateFiles();
   }
 
   getById(id: string): MemoryEntry | null {
@@ -249,5 +253,11 @@ export class SqliteBruteForceVectorStore {
       throw new Error("sqlite-bruteforce vector store is not open");
     }
     return this.db;
+  }
+
+  private enforcePrivateFiles(): void {
+    for (const path of [this.sqlitePath, `${this.sqlitePath}-wal`, `${this.sqlitePath}-shm`]) {
+      if (existsSync(path)) chmodSync(path, 0o600);
+    }
   }
 }

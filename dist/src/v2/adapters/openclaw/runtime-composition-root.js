@@ -86,6 +86,7 @@ async function observeWithoutBlockingReply(input) {
         clearTimeout(timer);
     if (outcome === "timeout")
         input.onError?.("shadow_observer_timeout");
+    return outcome;
 }
 function observerKey(event, context) {
     const material = [
@@ -170,6 +171,15 @@ export function composeClawLoreRuntimeV1(input) {
             : undefined);
     let sequence = 0;
     const activeObservers = new Set();
+    let lateObservers = 0;
+    let observerTimeouts = 0;
+    let observerSaturations = 0;
+    const emitObserverMetrics = () => input.dependencies.onObserverMetrics?.({
+        active: activeObservers.size,
+        late: lateObservers,
+        timeouts: observerTimeouts,
+        saturated: observerSaturations,
+    });
     input.host.on("message_received", async (event, context) => {
         sequence += 1;
         const metadata = record(event.metadata);
@@ -180,11 +190,14 @@ export function composeClawLoreRuntimeV1(input) {
             return;
         }
         if (activeObservers.size >= input.config.maxConcurrent) {
+            observerSaturations += 1;
             input.dependencies.onObserverError?.("shadow_observer_saturated");
+            emitObserverMetrics();
             return;
         }
         const controller = new AbortController();
         activeObservers.add(key);
+        emitObserverMetrics();
         const operation = runDefaultOffRuntimeShadow({
             config: { enabled: true },
             sink,
@@ -220,13 +233,21 @@ export function composeClawLoreRuntimeV1(input) {
                     : {}),
             },
         });
-        void operation.then(() => activeObservers.delete(key), () => activeObservers.delete(key));
-        await observeWithoutBlockingReply({
+        const outcome = await observeWithoutBlockingReply({
             operation,
             controller,
             maxLatencyMs: input.config.maxLatencyMs,
             onError: input.dependencies.onObserverError,
         });
+        // Release the concurrency slot when the bounded observer window ends,
+        // even when a non-cooperative provider ignores AbortSignal forever.
+        activeObservers.delete(key);
+        if (outcome === "timeout") {
+            observerTimeouts += 1;
+            lateObservers += 1;
+            void operation.then(() => { lateObservers = Math.max(0, lateObservers - 1); emitObserverMetrics(); }, () => { lateObservers = Math.max(0, lateObservers - 1); emitObserverMetrics(); });
+        }
+        emitObserverMetrics();
     }, { priority: -100 });
     return { ...base, status: "registered", registeredHooks: ["message_received"] };
 }

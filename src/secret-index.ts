@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { evaluateCaptureSafety } from "./capture-safety.js";
 
 const ALLOWED_SECRET_TYPES = new Set(["password", "token", "api_key", "private_key", "cookie", "credential", "other"]);
@@ -31,8 +30,12 @@ function secretType(value: unknown): string {
 }
 
 function fingerprint(value: unknown): string {
-  const text = String(value || "");
-  return text ? createHash("sha256").update(text).digest("hex").slice(0, 16) : "";
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return "";
+  if (!/^[a-f0-9]{64}$/.test(normalized)) {
+    throw new Error("secret index fingerprint must be a locally generated 64-character SHA-256 digest");
+  }
+  return normalized.slice(0, 16);
 }
 
 function safeIndexField(field: string, value: unknown, maxChars: number): string {
@@ -57,7 +60,9 @@ export function buildSecretIndex(args: Record<string, unknown>): { content: stri
   const notes = safeIndexField("notes", args.notes, 300);
   const rotationDue = safeIndexField("rotationDue", args.rotationDue || args.rotation_due || args.expires_at, 80);
   const kind = secretType(args.secretType || args.secret_type || args.type);
-  const secretFingerprint = fingerprint(args.secretValue || args.secret_value);
+  const secretFingerprint = fingerprint(
+    args.secretFingerprintSha256 || args.secret_fingerprint_sha256,
+  );
   const safeLabel = label || service || account || vaultRef || "unnamed credential";
 
   const lines = [`Secret index: ${safeLabel}`, `Kind: ${kind}`];
@@ -69,7 +74,7 @@ export function buildSecretIndex(args: Record<string, unknown>): { content: stri
   if (rotationDue) lines.push(`Rotation due: ${rotationDue}`);
   if (secretFingerprint) lines.push(`Secret fingerprint: sha256:${secretFingerprint}`);
   if (notes) lines.push(`Notes: ${notes}`);
-  lines.push("Plaintext secret value: [not stored in scope-recall SQL/FTS/vector]");
+  lines.push("Plaintext secret value: [never accepted by ClawLore]");
 
   const entities = [safeLabel, service, account, username, hostname, vaultRef, ...stringList(args.entities)]
     .map((item) => normalizeEntity(item))

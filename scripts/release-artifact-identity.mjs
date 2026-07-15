@@ -4,6 +4,7 @@ import { relative, resolve } from "node:path";
 
 async function collect(root, current, output) {
   for (const entry of await readdir(current, { withFileTypes: true })) {
+    if (entry.name === "clawlore-build-provenance.json") continue;
     const path = resolve(current, entry.name);
     const name = relative(root, path).split("\\").join("/");
     if (entry.isSymbolicLink()) throw new Error(`runtime artifact contains symlink: ${name}`);

@@ -23,6 +23,13 @@ Public installs default to conservative behavior:
 - `autoBackup` is off; daily JSONL memory exports are plaintext and should only be enabled deliberately.
 - Hosted embeddings and reranking can send text to configured providers. Use `local-hash`, local endpoints, or disabled reranking for sensitive deployments.
 - `memory_forget` requires `confirm: true` for deletion; query mode returns candidates first.
+- External memory access is principal-bound by default. Private chats use a
+  hashed `user:` scope; group/channel memory is denied unless an operator
+  explicitly selects isolated per-conversation scopes. Shared `agent:` and
+  `global` reads require an exact migration allowlist or explicit opt-in.
+- The secret-index tool never accepts plaintext secret values. An optional
+  fingerprint must be a SHA-256 digest produced locally by a trusted vault or
+  client helper before the tool call.
 
 ## Lineage
 
@@ -75,6 +82,23 @@ openclaw clawlore doctor --json --quiet
 ```
 
 The stats command reports SQL truth availability, SQLite row count, FTS integrity, and whether the vector companion needs repair. The doctor command is read-only and adds scope distribution checks, SQL-vs-vector scope comparison, configured vector dimensions, missing/stale vector row counts, and a repair hint. Use `--json --quiet` when automation needs JSON written directly to stdout through the OpenClaw CLI wrapper.
+
+## Runtime isolation and release readiness
+
+Keep `principalIsolation.enabled: true` and `principalIsolation.groupMemory:
+"deny"` for public or mixed-membership groups. The optional
+`legacyAgentScopePrincipals` list is an exact, temporary migration allowlist;
+it should contain only canonical principals that are authorized to read the
+pre-1.2 `agent:<id>` scope. Host channel policy should independently deny all
+memory tools in groups so framework and plugin enforcement remain layered.
+
+Shadow activation requires a private `0600` readiness receipt. The loader
+binds that receipt to the exact Git commit, runtime artifact, package and lock
+files, normalized plugin config, SQL truth snapshot, and test log. Receipts
+expire and any mismatch fails closed. V2 write/cutover approval additionally
+requires non-empty active lifecycle data and minimum real shadow sample,
+overlap, rank, latency, forbidden-scope, and prompt-budget thresholds. A
+zero-active or zero-parity dataset cannot produce a cutover-ready receipt.
 
 ## Operator CLI
 
@@ -136,6 +160,11 @@ artifact and canonical OpenClaw inspect/doctor smoke; it must fail before audite
 deployment. The pack scan rejects runtime or sensitive artifacts such as databases,
 logs, backups, `node_modules`, temporary/archive directories, and credential-shaped
 paths.
+
+After all gates pass on a clean commit, `npm run release:readiness` can create
+the immutable build-provenance sidecar and expiring shadow receipt. The command
+requires explicit paths for the full test log, OpenClaw config, SQL truth DB,
+and receipt output; it does not authorize V2 writes or cutover.
 
 ## Public Release Staging
 

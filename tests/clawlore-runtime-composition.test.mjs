@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import test from "node:test";
+import { releaseProvenance } from "./fixtures/release-provenance.mjs";
 
 const require = createRequire(import.meta.url);
 const { createJiti } = require("jiti");
@@ -29,6 +30,7 @@ function readiness() {
     requestedMode: "shadow",
     currentMode: "disabled",
     evidence: evidence(),
+    provenance: releaseProvenance(),
     now: () => new Date("2026-07-12T03:00:00.000Z"),
   });
 }
@@ -391,4 +393,37 @@ test("shadow observers deduplicate sessions and enforce a hard concurrency bound
   for (const release of releases) release();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(active, 0);
+});
+
+test("a timed-out non-cooperative provider releases its concurrency slot and is tracked as late", async () => {
+  const host = new FixtureHost();
+  const errors = [];
+  const metrics = [];
+  let calls = 0;
+  composeClawLoreRuntimeV1({
+    config: normalizeClawLoreRuntimeConfigV1({ mode: "shadow", maxLatencyMs: 25, maxConcurrent: 1 }),
+    host,
+    dependencies: dependencies({
+      retrieveCandidates: async () => {
+        calls += 1;
+        if (calls === 1) return new Promise(() => {});
+        return [];
+      },
+      onObserverError: (code) => errors.push(code),
+      onObserverMetrics: (value) => metrics.push({ ...value }),
+    }),
+    readiness: readiness(),
+  });
+  await host.emitMessageReceived(
+    { content: "first request", senderId: "user-1" },
+    { channelId: "telegram", sessionKey: "agent:main:telegram:default:direct:user-1" },
+  );
+  await host.emitMessageReceived(
+    { content: "second request", senderId: "user-2" },
+    { channelId: "telegram", sessionKey: "agent:main:telegram:default:direct:user-2" },
+  );
+  assert.equal(calls, 2);
+  assert.equal(errors.filter((code) => code === "shadow_observer_timeout").length, 1);
+  assert.equal(errors.filter((code) => code === "shadow_observer_saturated").length, 0);
+  assert.ok(metrics.some((value) => value.active === 0 && value.late === 1 && value.timeouts === 1));
 });

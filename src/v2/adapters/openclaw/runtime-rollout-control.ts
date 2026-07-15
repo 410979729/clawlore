@@ -1,5 +1,5 @@
 import { readFileSync, statSync } from "node:fs";
-import type { ReleaseReadinessReceiptV1 } from "../../domain/release.js";
+import type { ReleaseArtifactBindingV1, ReleaseReadinessReceiptV1 } from "../../domain/release.js";
 
 const MAX_CONTROL_FILE_BYTES = 128 * 1024;
 
@@ -20,21 +20,52 @@ function readPrivateJson(path: string): Record<string, unknown> {
   return record(JSON.parse(readFileSync(path, "utf8")));
 }
 
-function readiness(value: Record<string, unknown>): ReleaseReadinessReceiptV1 {
+function readiness(
+  value: Record<string, unknown>,
+  expectedBinding: ReleaseArtifactBindingV1,
+  now: Date,
+): ReleaseReadinessReceiptV1 {
   const rollout = record(value.rollout);
+  const provenance = record(value.provenance);
   if (
     value.schemaVersion !== 1
     || !["ready", "blocked"].includes(String(value.status))
     || rollout.requestedMode !== "shadow"
     || typeof rollout.rolloutId !== "string"
+    || typeof provenance.generatedBy !== "string"
+    || typeof provenance.createdAt !== "string"
+    || typeof provenance.expiresAt !== "string"
   ) {
     throw new Error("release_readiness_schema_invalid");
+  }
+  const createdAt = Date.parse(provenance.createdAt as string);
+  const expiresAt = Date.parse(provenance.expiresAt as string);
+  if (!Number.isFinite(createdAt) || !Number.isFinite(expiresAt)) {
+    throw new Error("release_readiness_freshness_invalid");
+  }
+  if (createdAt > now.getTime() + 60_000) throw new Error("release_readiness_created_in_future");
+  if (expiresAt <= now.getTime()) throw new Error("release_readiness_expired");
+  if (expiresAt <= createdAt) throw new Error("release_readiness_expiry_order_invalid");
+  for (const field of [
+    "sourceCommit",
+    "runtimeDigest",
+    "packageDigest",
+    "lockDigest",
+    "configDigest",
+    "truthSnapshotDigest",
+    "testLogDigest",
+  ] as const) {
+    if (provenance[field] !== expectedBinding[field]) {
+      throw new Error(`release_readiness_provenance_mismatch:${field}`);
+    }
   }
   return value as unknown as ReleaseReadinessReceiptV1;
 }
 
 export function loadRuntimeRolloutControlsV1(input: {
   readinessFile?: string;
+  expectedBinding: ReleaseArtifactBindingV1;
+  now?: () => Date;
 }): {
   readiness?: ReleaseReadinessReceiptV1;
   errors: string[];
@@ -43,7 +74,13 @@ export function loadRuntimeRolloutControlsV1(input: {
   let releaseReadiness: ReleaseReadinessReceiptV1 | undefined;
   if (!input.readinessFile) errors.push("release_readiness_file_missing");
   else {
-    try { releaseReadiness = readiness(readPrivateJson(input.readinessFile)); }
+    try {
+      releaseReadiness = readiness(
+        readPrivateJson(input.readinessFile),
+        input.expectedBinding,
+        input.now?.() ?? new Date(),
+      );
+    }
     catch (error) { errors.push(error instanceof Error ? error.message : "release_readiness_load_failed"); }
   }
   return { readiness: releaseReadiness, errors: [...new Set(errors)].sort() };

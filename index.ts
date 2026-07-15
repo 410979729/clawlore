@@ -94,6 +94,15 @@ import {
 } from "./src/smart-metadata.js";
 import { buildRuntimeScopeMetadata } from "./src/runtime-scope-metadata.js";
 import {
+  resolveRuntimeMemoryAccess,
+  runtimeBoundaryMetadata,
+  type PrincipalIsolationConfig,
+} from "./src/runtime-memory-boundary.js";
+import {
+  computeRuntimeReleaseBinding,
+  resolvePluginRoot,
+} from "./src/release-provenance.js";
+import {
   filterUserMdExclusiveRecallResults,
   isUserMdExclusiveMemory,
   type WorkspaceBoundaryConfig,
@@ -253,6 +262,7 @@ interface PluginConfig {
   };
   mdMirror?: { enabled?: boolean; dir?: string };
   workspaceBoundary?: WorkspaceBoundaryConfig;
+  principalIsolation?: PrincipalIsolationConfig;
   admissionControl?: AdmissionControlConfig;
   memoryCompaction?: {
     enabled?: boolean;
@@ -1991,13 +2001,27 @@ const clawLorePlugin = {
     }
 
     const clawloreRuntimeConfig = normalizeClawLoreRuntimeConfigV1(config.clawloreV2);
-    const rolloutControls = clawloreRuntimeConfig.mode === "shadow"
+    let runtimeReleaseBinding: ReturnType<typeof computeRuntimeReleaseBinding> | undefined;
+    const rolloutBindingErrors: string[] = [];
+    if (clawloreRuntimeConfig.mode === "shadow") {
+      try {
+        runtimeReleaseBinding = computeRuntimeReleaseBinding({
+          pluginRoot: resolvePluginRoot(import.meta.url),
+          config,
+          sqlitePath: join(resolvedDbPath, "memory.sqlite3"),
+        });
+      } catch (error) {
+        rolloutBindingErrors.push(`release_runtime_binding_failed:${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    const rolloutControls = clawloreRuntimeConfig.mode === "shadow" && runtimeReleaseBinding
       ? loadRuntimeRolloutControlsV1({
           readinessFile: config.clawloreV2?.readinessFile
             ? api.resolvePath(config.clawloreV2.readinessFile)
             : undefined,
+          expectedBinding: runtimeReleaseBinding,
         })
-      : { readiness: undefined, errors: [] as string[] };
+      : { readiness: undefined, errors: rolloutBindingErrors };
     if (rolloutControls.errors.length > 0) {
       api.logger.warn(
         `clawlore-v2: shadow rollout controls blocked: ${rolloutControls.errors.join(",")}`,
@@ -2024,7 +2048,9 @@ const clawLorePlugin = {
       sqlitePath: join(resolvedDbPath, "memory.sqlite3"),
       candidateLimit: clawloreRuntimeConfig.candidateLimit,
       async retrieveVectorCandidates({ request }) {
+        if (request.signal?.aborted) throw new Error("shadow retrieval aborted");
         const candidates = await cachedLegacyShadowRetriever(request);
+        if (request.signal?.aborted) throw new Error("shadow retrieval aborted");
         return candidates.map((candidate) => ({
           legacyId: candidate.id.startsWith("legacy:")
             ? candidate.id.slice("legacy:".length)
@@ -2048,6 +2074,11 @@ const clawLorePlugin = {
         retrieveComparisonCandidates: cachedLegacyShadowRetriever,
         onObserverError(code) {
           api.logger.warn(`clawlore-v2: read-only shadow observer ${code}`);
+        },
+        onObserverMetrics(metrics) {
+          api.logger.debug?.(
+            `clawlore-v2: observer metrics active=${metrics.active} late=${metrics.late} timeouts=${metrics.timeouts} saturated=${metrics.saturated}`,
+          );
         },
       },
       readiness: rolloutControls.readiness,
@@ -2264,6 +2295,25 @@ const clawLorePlugin = {
     const autoCapturePendingIngressTexts = new Map<string, string[]>();
     const autoCaptureRecentTexts = new Map<string, string[]>();
 
+    const runtimeMemoryAccessFor = (event: unknown, ctx: any) => {
+      const sessionKey = typeof ctx?.sessionKey === "string"
+        ? ctx.sessionKey
+        : typeof (event as any)?.sessionKey === "string"
+          ? (event as any).sessionKey
+          : undefined;
+      const agentId = resolveHookAgentId(ctx?.agentId, sessionKey);
+      return {
+        agentId,
+        access: resolveRuntimeMemoryAccess({
+          scopeManager,
+          agentId,
+          config: config.principalIsolation,
+          runtimeContext: ctx,
+          event,
+        }),
+      };
+    };
+
     const logReg = isCliRegistrationMode(api) ? api.logger.debug : api.logger.info;
     logReg(
       `clawlore@${pluginVersion}: plugin registered (db: ${resolvedDbPath}, model: ${embeddingModel}, vectorBackend: ${config.vectorBackend || "lancedb"}, smartExtraction: ${smartExtractor ? 'ON' : 'OFF'})`
@@ -2271,12 +2321,13 @@ const clawLorePlugin = {
     logReg(`clawlore: diagnostic build tag loaded (${diagnosticBuildTag})`);
 
     api.on("message_received", (event: any, ctx: any) => {
+      const { access } = runtimeMemoryAccessFor(event, ctx);
       const conversationKey = buildAutoCaptureConversationKeyFromIngress(
         ctx.channelId,
         ctx.conversationId,
       );
       const normalized = normalizeAutoCaptureText("user", event.content, shouldSkipReflectionMessage);
-      if (conversationKey && normalized) {
+      if (!access.denied && conversationKey && normalized) {
         const queue = autoCapturePendingIngressTexts.get(conversationKey) || [];
         queue.push(normalized);
         autoCapturePendingIngressTexts.set(conversationKey, queue.slice(-6));
@@ -2325,6 +2376,7 @@ const clawLorePlugin = {
         workspaceDir: getDefaultWorkspaceDir(),
         mdMirror,
         workspaceBoundary: config.workspaceBoundary,
+        principalIsolation: config.principalIsolation,
       },
       {
         enableManagementTools: agentOperatorToolsEnabled,
@@ -2413,6 +2465,8 @@ const clawLorePlugin = {
       // for the short-message skip heuristic in shouldSkipRetrieval).
       const lastRawUserMessage = new Map<string, string>();
       api.on("message_received", (event: any, ctx: any) => {
+        const { access } = runtimeMemoryAccessFor(event, ctx);
+        if (access.denied) return;
         // Both message_received and before_prompt_build have channelId in ctx,
         // so use it as the shared cache key for raw user message gating.
         const cacheKey = ctx?.channelId || ctx?.conversationId || "default";
@@ -2425,6 +2479,8 @@ const clawLorePlugin = {
 
       const AUTO_RECALL_TIMEOUT_MS = parsePositiveInt(config.autoRecallTimeoutMs) ?? 5_000; // configurable; default raised from 3s to 5s for remote embedding APIs behind proxies
       api.on("before_prompt_build", async (event: any, ctx: any) => {
+        const { agentId: traceAgentId, access: memoryAccess } = runtimeMemoryAccessFor(event, ctx);
+        if (memoryAccess.denied) return;
         // Manually increment turn counter for this session
         const sessionId = ctx?.sessionId || "default";
 
@@ -2459,10 +2515,9 @@ const clawLorePlugin = {
             throw new Error("retrieval aborted");
           }
         };
-        const traceAgentId = resolveHookAgentId(ctx?.agentId, (event as any).sessionKey);
         const traceCurrentScope = isSystemBypassId(traceAgentId)
           ? config.scopes?.default ?? "global"
-          : scopeManager.getDefaultScope(traceAgentId);
+          : memoryAccess.defaultScope ?? scopeManager.getDefaultScope(traceAgentId);
         const rankReasonsForTrace = (result: any): string[] => {
           const sources = result?.sources || {};
           const reasons: string[] = [];
@@ -2535,7 +2590,7 @@ const clawLorePlugin = {
           throwIfRecallAborted();
           // Determine agent ID and accessible scopes
           const agentId = traceAgentId;
-          const accessibleScopes = resolveScopeFilter(scopeManager, agentId);
+          const accessibleScopes = memoryAccess.scopeFilter;
 
           // FR-04: Embed the current user's clean request, not the assembled
           // system/history/context prompt. This avoids polluting recall with
@@ -2670,7 +2725,10 @@ const clawLorePlugin = {
               candidate_scope: r.entry.scope,
               allow_cross_scope: config.autoRecallAllowCrossScope === true,
             });
-            if (!scopeDecision.injectable) {
+            const legacyOwnerScope = memoryAccess.boundary.kind === "private"
+              && r.entry.scope === `agent:${agentId}`
+              && memoryAccess.isAccessible(r.entry.scope);
+            if (!scopeDecision.injectable && !legacyOwnerScope) {
               crossScopeFilteredCount++;
               traceStatusById.set(r.entry.id, {
                 status: "suppressed",
@@ -2937,6 +2995,9 @@ const clawLorePlugin = {
         // See: https://github.com/410979729/clawlore/issues/260
         const backgroundRun = (async () => {
         try {
+          const { agentId, access: memoryAccess } = runtimeMemoryAccessFor(event, ctx);
+          if (memoryAccess.denied) return;
+
           // Feature 7: Check extraction rate limit before any work
           if (extractionRateLimiter.isRateLimited()) {
             api.logger.debug(
@@ -2946,11 +3007,11 @@ const clawLorePlugin = {
           }
 
           // Determine agent ID and default scope
-          const agentId = resolveHookAgentId(ctx?.agentId, (event as any).sessionKey);
-          const accessibleScopes = resolveScopeFilter(scopeManager, agentId);
-          const defaultScope = isSystemBypassId(agentId)
-            ? config.scopes?.default ?? "global"
-            : scopeManager.getDefaultScope(agentId);
+          const accessibleScopes = memoryAccess.scopeFilter;
+          const defaultScope = memoryAccess.defaultScope
+            ?? (isSystemBypassId(agentId)
+              ? config.scopes?.default ?? "global"
+              : scopeManager.getDefaultScope(agentId));
           const sessionKey = ctx?.sessionKey || (event as any).sessionKey || "unknown";
           const runtimeScopeMetadata = buildRuntimeScopeMetadata({
             agentId,
@@ -2961,6 +3022,7 @@ const clawLorePlugin = {
             workspaceDir: resolveWorkspaceDirFromContext(ctx),
             sourceSession: sessionKey,
           });
+          Object.assign(runtimeScopeMetadata, runtimeBoundaryMetadata(memoryAccess.boundary));
 
           api.logger.debug(
             `clawlore: auto-capture agent_end payload for agent ${agentId} (sessionKey=${sessionKey}, captureAssistant=${config.captureAssistant === true}, ${summarizeAgentEndMessages(event.messages)})`,
@@ -3309,6 +3371,8 @@ const clawLorePlugin = {
 
         const backgroundRun = (async () => {
           try {
+            const { agentId, access: memoryAccess } = runtimeMemoryAccessFor(event, ctx);
+            if (memoryAccess.denied) return;
             if (!llmClientForExtraction) {
               api.logger.debug(
                 "task-experience: skipped because smart extraction LLM client is unavailable",
@@ -3316,10 +3380,10 @@ const clawLorePlugin = {
               return;
             }
 
-            const agentId = resolveHookAgentId(ctx?.agentId, sessionKey);
-            const defaultScope = isSystemBypassId(agentId)
-              ? config.scopes?.default ?? "global"
-              : scopeManager.getDefaultScope(agentId);
+            const defaultScope = memoryAccess.defaultScope
+              ?? (isSystemBypassId(agentId)
+                ? config.scopes?.default ?? "global"
+                : scopeManager.getDefaultScope(agentId));
             const taskExperienceConfig = config.taskExperienceCapture!;
             const transcript = extractTaskExperienceTranscript(event.messages, taskExperienceConfig.maxInputChars);
             const result = await captureTaskExperience({
@@ -3589,17 +3653,19 @@ const clawLorePlugin = {
         }
       }, { priority: 15 });
 
-      api.on("before_prompt_build", async (_event: any, ctx: any) => {
+      api.on("before_prompt_build", async (event: any, ctx: any) => {
         const sessionKey = typeof ctx.sessionKey === "string" ? ctx.sessionKey : "";
         if (isInternalReflectionSessionKey(sessionKey)) return;
         if (reflectionInjectMode !== "inheritance-only" && reflectionInjectMode !== "inheritance+derived") return;
         try {
+          const { access } = runtimeMemoryAccessFor(event, ctx);
+          if (access.denied) return;
           pruneReflectionSessionState();
           const agentId = resolveHookAgentId(
             typeof ctx.agentId === "string" ? ctx.agentId : undefined,
             sessionKey,
           );
-          const scopes = resolveScopeFilter(scopeManager, agentId);
+          const scopes = access.scopeFilter;
           const slices = await loadAgentReflectionSlices(agentId, scopes);
           if (slices.invariants.length === 0) return;
           const body = slices.invariants.slice(0, 6).map((line, i) => `${i + 1}. ${line}`).join("\n");
@@ -3616,9 +3682,11 @@ const clawLorePlugin = {
         }
       }, { priority: 12 });
 
-      api.on("before_prompt_build", async (_event: any, ctx: any) => {
+      api.on("before_prompt_build", async (event: any, ctx: any) => {
         const sessionKey = typeof ctx.sessionKey === "string" ? ctx.sessionKey : "";
         if (isInternalReflectionSessionKey(sessionKey)) return;
+        const { access } = runtimeMemoryAccessFor(event, ctx);
+        if (access.denied) return;
         const agentId = resolveHookAgentId(
           typeof ctx.agentId === "string" ? ctx.agentId : undefined,
           sessionKey,
@@ -3628,7 +3696,7 @@ const clawLorePlugin = {
         const blocks: string[] = [];
         if (reflectionInjectMode === "inheritance+derived") {
           try {
-            const scopes = resolveScopeFilter(scopeManager, agentId);
+            const scopes = access.scopeFilter;
             const derivedCache = sessionKey ? reflectionDerivedBySession.get(sessionKey) : null;
             const derivedLines = derivedCache?.derived?.length
               ? derivedCache.derived
@@ -3678,9 +3746,11 @@ const clawLorePlugin = {
       const runMemoryReflection = async (event: any) => {
         const sessionKey = typeof event.sessionKey === "string" ? event.sessionKey : "";
         try {
+          const context = (event.context || {}) as Record<string, unknown>;
+          const { agentId: sourceAgentId, access: memoryAccess } = runtimeMemoryAccessFor(event, context);
+          if (memoryAccess.denied) return;
           pruneReflectionSessionState();
           const action = String(event?.action || "unknown");
-          const context = (event.context || {}) as Record<string, unknown>;
           const cfg = context.cfg;
           const workspaceDir = resolveWorkspaceDirFromContext(context);
           if (!cfg) {
@@ -3691,7 +3761,6 @@ const clawLorePlugin = {
           const sessionEntry = (context.previousSessionEntry || context.sessionEntry || {}) as Record<string, unknown>;
           const currentSessionId = typeof sessionEntry.sessionId === "string" ? sessionEntry.sessionId : "unknown";
           let currentSessionFile = typeof sessionEntry.sessionFile === "string" ? sessionEntry.sessionFile : undefined;
-          const sourceAgentId = parseAgentIdFromSessionKey(sessionKey) || "main";
           const commandSource = typeof context.commandSource === "string" ? context.commandSource : "";
           api.logger.info(
             `memory-reflection: command:${action} hook start; sessionKey=${sessionKey || "(none)"}; source=${commandSource || "(unknown)"}; sessionId=${currentSessionId}; sessionFile=${currentSessionFile || "(none)"}`
@@ -3749,9 +3818,10 @@ const clawLorePlugin = {
           const timeHms = timeIso.split(".")[0];
           const timeCompact = timeIso.replace(/[:.]/g, "");
           const reflectionRunAgentId = resolveReflectionRunAgentId(cfg, sourceAgentId);
-          const targetScope = isSystemBypassId(sourceAgentId)
-            ? config.scopes?.default ?? "global"
-            : scopeManager.getDefaultScope(sourceAgentId);
+          const targetScope = memoryAccess.defaultScope
+            ?? (isSystemBypassId(sourceAgentId)
+              ? config.scopes?.default ?? "global"
+              : scopeManager.getDefaultScope(sourceAgentId));
           const toolErrorSignals = sessionKey
             ? (reflectionErrorStateBySession.get(sessionKey)?.entries ?? []).slice(-reflectionErrorReminderMaxEntries)
             : [];
@@ -4051,14 +4121,13 @@ const clawLorePlugin = {
         if (event.reason !== "new") return;
 
         try {
+          const { agentId, access: memoryAccess } = runtimeMemoryAccessFor(event, ctx);
+          if (memoryAccess.denied) return;
           const sessionKey = typeof ctx.sessionKey === "string" ? ctx.sessionKey : "";
-          const agentId = resolveHookAgentId(
-            typeof ctx.agentId === "string" ? ctx.agentId : undefined,
-            sessionKey,
-          );
-          const defaultScope = isSystemBypassId(agentId)
-            ? config.scopes?.default ?? "global"
-            : scopeManager.getDefaultScope(agentId);
+          const defaultScope = memoryAccess.defaultScope
+            ?? (isSystemBypassId(agentId)
+              ? config.scopes?.default ?? "global"
+              : scopeManager.getDefaultScope(agentId));
           const currentSessionId =
             typeof ctx.sessionId === "string" && ctx.sessionId.trim().length > 0
               ? ctx.sessionId
@@ -4460,6 +4529,21 @@ export function parsePluginConfig(value: unknown): PluginConfig {
             : undefined,
         }
         : undefined,
+    principalIsolation: (() => {
+      const raw = typeof cfg.principalIsolation === "object" && cfg.principalIsolation !== null
+        ? cfg.principalIsolation as Record<string, unknown>
+        : null;
+      return {
+        enabled: raw?.enabled !== false,
+        groupMemory: raw?.groupMemory === "conversation" ? "conversation" : "deny",
+        legacyAgentScopePrincipals: Array.isArray(raw?.legacyAgentScopePrincipals)
+          ? (raw!.legacyAgentScopePrincipals as unknown[])
+            .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+            .map((value) => value.trim())
+          : [],
+        allowGlobalRead: raw?.allowGlobalRead === true,
+      };
+    })(),
     admissionControl: normalizeAdmissionControlConfig(cfg.admissionControl),
     memoryCompaction: (() => {
       const raw =

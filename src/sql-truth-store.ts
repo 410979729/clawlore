@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import { mkdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import type { MemoryEntry, MemorySearchResult } from "./store.js";
 import { parseSmartMetadata, isMemoryActiveAt } from "./smart-metadata.js";
 
@@ -156,10 +156,12 @@ export class SqlTruthStore {
     const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: new (path: string) => DatabaseSync };
     mkdirSync(dirname(this.sqlitePath), { recursive: true });
     this.db = new DatabaseSync(this.sqlitePath);
+    this.enforcePrivateFiles();
     runSql(this.db, "PRAGMA busy_timeout = 10000");
     runSql(this.db, "PRAGMA journal_mode = WAL");
     runSql(this.db, "PRAGMA synchronous = NORMAL");
     this.ensureSchema();
+    this.enforcePrivateFiles();
   }
 
   close(): void {
@@ -201,12 +203,64 @@ export class SqlTruthStore {
       Date.now(),
     );
     this.replaceFts(entry.id, entry.text || "", metadataText);
+    this.enforcePrivateFiles();
   }
 
   delete(id: string): void {
     const db = this.requireDb();
     db.prepare("DELETE FROM memory_truth_fts WHERE memory_id = ?").run(id);
     db.prepare("DELETE FROM memory_truth WHERE id = ?").run(id);
+    this.enforcePrivateFiles();
+  }
+
+  /**
+   * Persist a temporal revision and invalidate its predecessor in one SQL
+   * transaction. SQL truth is authoritative; either both rows commit or
+   * neither does.
+   */
+  supersedeAtomically(oldEntry: MemoryEntry, newEntry: MemoryEntry, factKey: string): void {
+    const db = this.requireDb();
+    runSql(db, "BEGIN IMMEDIATE");
+    try {
+      const current = db.prepare("SELECT id, scope FROM memory_truth WHERE id = ? LIMIT 1")
+        .get(oldEntry.id) as { id: string; scope: string } | undefined;
+      if (!current || current.scope !== oldEntry.scope) {
+        throw new Error(`Supersede predecessor ${oldEntry.id} no longer exists in scope ${oldEntry.scope}`);
+      }
+      if (oldEntry.id === newEntry.id) {
+        throw new Error("Supersede revision must use a new memory id");
+      }
+
+      this.upsert(oldEntry);
+      this.upsert(newEntry);
+
+      const active = db.prepare(
+        `
+        SELECT id
+        FROM memory_truth
+        WHERE scope = ?
+          AND json_extract(metadata, '$.fact_key') = ?
+          AND COALESCE(json_extract(metadata, '$.invalidated_at'), 0) = 0
+          AND COALESCE(json_extract(metadata, '$.superseded_by'), '') = ''
+          AND (
+            json_extract(metadata, '$.valid_to') IS NULL
+            OR CAST(json_extract(metadata, '$.valid_to') AS REAL) > ?
+          )
+        `,
+      ).all(oldEntry.scope, factKey, Date.now()) as Array<{ id: string }>;
+      if (active.length !== 1 || active[0]?.id !== newEntry.id) {
+        throw new Error(
+          `Atomic supersede invariant failed for ${oldEntry.scope}/${factKey}: expected only ${newEntry.id}, found ${active.map((row) => row.id).join(",") || "none"}`,
+        );
+      }
+
+      runSql(db, "COMMIT");
+      this.enforcePrivateFiles();
+    } catch (err) {
+      try { runSql(db, "ROLLBACK"); } catch {}
+      this.enforcePrivateFiles();
+      throw err;
+    }
   }
 
   getById(id: string, scopeFilter?: string[]): MemoryEntry | null {
@@ -453,6 +507,38 @@ export class SqlTruthStore {
         ON memory_truth(scope, timestamp DESC);
       CREATE INDEX IF NOT EXISTS idx_memory_truth_category_timestamp
         ON memory_truth(category, timestamp DESC);
+      CREATE TRIGGER IF NOT EXISTS memory_truth_single_active_fact_insert
+      BEFORE INSERT ON memory_truth
+      WHEN json_extract(NEW.metadata, '$.fact_key') IS NOT NULL
+        AND COALESCE(json_extract(NEW.metadata, '$.invalidated_at'), 0) = 0
+        AND COALESCE(json_extract(NEW.metadata, '$.superseded_by'), '') = ''
+        AND EXISTS (
+          SELECT 1 FROM memory_truth AS current
+          WHERE current.scope = NEW.scope
+            AND current.id != NEW.id
+            AND json_extract(current.metadata, '$.fact_key') = json_extract(NEW.metadata, '$.fact_key')
+            AND COALESCE(json_extract(current.metadata, '$.invalidated_at'), 0) = 0
+            AND COALESCE(json_extract(current.metadata, '$.superseded_by'), '') = ''
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'active fact_key uniqueness violation');
+      END;
+      CREATE TRIGGER IF NOT EXISTS memory_truth_single_active_fact_update
+      BEFORE UPDATE OF scope, metadata ON memory_truth
+      WHEN json_extract(NEW.metadata, '$.fact_key') IS NOT NULL
+        AND COALESCE(json_extract(NEW.metadata, '$.invalidated_at'), 0) = 0
+        AND COALESCE(json_extract(NEW.metadata, '$.superseded_by'), '') = ''
+        AND EXISTS (
+          SELECT 1 FROM memory_truth AS current
+          WHERE current.scope = NEW.scope
+            AND current.id != NEW.id
+            AND json_extract(current.metadata, '$.fact_key') = json_extract(NEW.metadata, '$.fact_key')
+            AND COALESCE(json_extract(current.metadata, '$.invalidated_at'), 0) = 0
+            AND COALESCE(json_extract(current.metadata, '$.superseded_by'), '') = ''
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'active fact_key uniqueness violation');
+      END;
       `,
     );
     this.reconcileFts();
@@ -523,10 +609,21 @@ export class SqlTruthStore {
     db.prepare("INSERT INTO memory_truth_fts(memory_id, text, metadata_text) VALUES (?, ?, ?)").run(id, text, metadataText);
   }
 
+  private enforcePrivateFiles(): void {
+    for (const path of [this.sqlitePath, `${this.sqlitePath}-wal`, `${this.sqlitePath}-shm`]) {
+      try {
+        if (existsSync(path)) chmodSync(path, 0o600);
+      } catch (err) {
+        throw new Error(`Failed to enforce 0600 on SQL truth file ${path}: ${String(err)}`);
+      }
+    }
+  }
+
   private scopeClause(alias: string, scopeFilter?: string[]): ScopeClause {
-    if (!scopeFilter || scopeFilter.length === 0) {
+    if (scopeFilter === undefined) {
       return { sql: "1 = 1", params: [] };
     }
+    if (scopeFilter.length === 0) return { sql: "0 = 1", params: [] };
     const scopes = scopeFilter.filter(Boolean);
     if (scopes.length === 0) {
       return { sql: "0 = 1", params: [] };

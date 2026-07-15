@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { mkdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 const require = createRequire(import.meta.url);
 function runSql(db, statement) {
@@ -60,11 +60,13 @@ export class SqliteBruteForceVectorStore {
         const { DatabaseSync } = require("node:sqlite");
         mkdirSync(dirname(this.sqlitePath), { recursive: true });
         this.db = new DatabaseSync(this.sqlitePath);
+        this.enforcePrivateFiles();
         runSql(this.db, "PRAGMA busy_timeout = 10000");
         runSql(this.db, "PRAGMA journal_mode = WAL");
         runSql(this.db, "PRAGMA synchronous = NORMAL");
         this.ensureSchema();
         this.resetOnDimensionChange();
+        this.enforcePrivateFiles();
     }
     close() {
         try {
@@ -90,9 +92,11 @@ export class SqliteBruteForceVectorStore {
         vector_json = excluded.vector_json,
         updated_at = excluded.updated_at
       `).run(entry.id, entry.text || "", entry.category || "other", entry.scope || "global", Number(entry.importance) || 0, Number(entry.timestamp) || Date.now(), entry.metadata || "{}", JSON.stringify(vector), Date.now());
+        this.enforcePrivateFiles();
     }
     delete(id) {
         this.requireDb().prepare("DELETE FROM vector_records WHERE id = ?").run(id);
+        this.enforcePrivateFiles();
     }
     getById(id) {
         const row = this.requireDb()
@@ -200,5 +204,11 @@ export class SqliteBruteForceVectorStore {
             throw new Error("sqlite-bruteforce vector store is not open");
         }
         return this.db;
+    }
+    enforcePrivateFiles() {
+        for (const path of [this.sqlitePath, `${this.sqlitePath}-wal`, `${this.sqlitePath}-shm`]) {
+            if (existsSync(path))
+                chmodSync(path, 0o600);
+        }
     }
 }

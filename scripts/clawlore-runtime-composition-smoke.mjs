@@ -72,6 +72,24 @@ const readiness = buildReleaseReadinessReceipt({
     migrationDrill: false, rollbackDrill: false, legacyHashUnchanged: false,
     forbiddenScopeViolations: 0,
   },
+  provenance: {
+    sourceCommit: "a".repeat(40),
+    runtimeDigest: "1".repeat(64),
+    packageDigest: "2".repeat(64),
+    lockDigest: "3".repeat(64),
+    configDigest: "4".repeat(64),
+    truthSnapshotDigest: "5".repeat(64),
+    testLogDigest: "6".repeat(64),
+    generatedBy: "runtime-composition-smoke",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    expiresAt: "2099-01-01T00:00:00.000Z",
+    lifecycle: { active: 1, candidate: 0, archived: 0, other: 0 },
+    shadow: {
+      sampleCount: 0, directSamples: 0, groupSamples: 0,
+      positiveCandidateSamples: 0, overlapRatio: 0, rankAgreement: 0,
+      p95LatencyMs: 0, forbiddenViolations: 0, promptBudgetViolations: 0,
+    },
+  },
 });
 const sink = new InMemoryRuntimeShadowSinkV1();
 const shadowHost = new FixtureHost();

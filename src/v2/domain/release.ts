@@ -28,6 +28,39 @@ export interface RolloutEvidenceV1 {
   forbiddenScopeViolations: number;
 }
 
+export interface ReleaseArtifactBindingV1 {
+  sourceCommit: string;
+  runtimeDigest: string;
+  packageDigest: string;
+  lockDigest: string;
+  configDigest: string;
+  truthSnapshotDigest: string;
+  testLogDigest: string;
+}
+
+export interface ReleaseReadinessProvenanceV1 extends ReleaseArtifactBindingV1 {
+  generatedBy: string;
+  createdAt: string;
+  expiresAt: string;
+  lifecycle: {
+    active: number;
+    candidate: number;
+    archived: number;
+    other: number;
+  };
+  shadow: {
+    sampleCount: number;
+    directSamples: number;
+    groupSamples: number;
+    positiveCandidateSamples: number;
+    overlapRatio: number;
+    rankAgreement: number;
+    p95LatencyMs: number;
+    forbiddenViolations: number;
+    promptBudgetViolations: number;
+  };
+}
+
 export interface RolloutPreviewV1 {
   schemaVersion: 1;
   rolloutId: string;
@@ -51,5 +84,6 @@ export interface ReleaseReadinessReceiptV1 {
   status: "ready" | "blocked";
   compatibilityValid: boolean;
   rollout: RolloutPreviewV1;
+  provenance: ReleaseReadinessProvenanceV1;
   responseSchemas: ["memory-action.v2", "memory-center.v1", "projection-convergence.v1", "replay-evaluation.v2"];
 }

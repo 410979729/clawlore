@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-The active beta line is `1.1.x`. Security fixes should target the latest beta unless a maintainer explicitly opens a backport branch.
+The active beta line is `1.2.x`. Security fixes should target the latest beta unless a maintainer explicitly opens a backport branch.
 
 ## Reporting A Vulnerability
 
@@ -13,6 +13,21 @@ Do not paste API keys, bearer tokens, OpenClaw gateway tokens, database password
 ## Secret Handling Expectations
 
 ClawLore must not persist credential-like content as memory. Capture safety blocks common token, bearer, password, and credentialed URL patterns before storage. If you find a secret pattern that is not blocked, treat it as a security bug.
+
+The secret-index surface accepts vault references and an optional locally
+generated SHA-256 fingerprint only. It never accepts plaintext through tool
+arguments because host transcripts and provider logs are outside the plugin's
+database boundary.
+
+Private memory is scoped to the authenticated principal. Group/channel memory
+is denied by default, and host group policies should also deny memory tools.
+Mention requirements are not authorization. Do not enable shared global or
+legacy agent-scope reads for untrusted principals.
+
+Release readiness receipts are not self-attestation booleans. They must be
+private `0600` files bound to an exact commit, runtime artifact, config, data
+snapshot, and test log, with a finite expiry. Any mismatch must block shadow
+registration or cutover.
 
 Public defaults keep automatic capture, LLM extraction, and plaintext JSONL backups disabled. Enabling hosted extraction, embeddings, reranking, OAuth, reflection storage, rejected-candidate audits, or backups can persist or transmit conversation-derived data; do that only with an explicit operator decision.
 

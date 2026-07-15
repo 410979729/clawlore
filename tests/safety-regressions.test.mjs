@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import test from "node:test";
@@ -14,6 +15,7 @@ const { registerAllMemoryTools } = jiti("../src/tools.ts");
 const { EXPERIENCE_TOOL_NAMES } = jiti("../src/experience-tools.ts");
 const { buildSecretIndex } = jiti("../src/secret-index.ts");
 const { SmartExtractor } = jiti("../src/smart-extractor.ts");
+const { resolveRuntimeMemoryAccess } = jiti("../src/runtime-memory-boundary.ts");
 
 function fail(message) {
   throw new Error(message);
@@ -95,6 +97,7 @@ function createWritableToolMap(toolCtx = {}, options = {}) {
     },
     embedder: { embedPassage: async () => [0.1, 0.2, 0.3] },
     workspaceDir: "/workspace/default",
+    principalIsolation: options.principalIsolation,
   };
   registerAllMemoryTools(api, context, {
     enableManagementTools: true,
@@ -103,6 +106,58 @@ function createWritableToolMap(toolCtx = {}, options = {}) {
   });
   return { tools, stored, retrieved };
 }
+
+test("different private principals receive disjoint scopes and only an allowlisted owner can read legacy agent scope", () => {
+  const scopeManager = {
+    getDefaultScope: (agentId) => `agent:${agentId}`,
+    getAccessibleScopes: (agentId) => [`agent:${agentId}`, "global"],
+    getScopeFilter: (agentId) => [`agent:${agentId}`, "global"],
+    isAccessible: (scope, agentId) => scope === `agent:${agentId}` || scope === "global",
+  };
+  const owner = resolveRuntimeMemoryAccess({
+    scopeManager,
+    agentId: "main",
+    config: { legacyAgentScopePrincipals: ["telegram:default:8176453077"] },
+    runtimeContext: { sessionKey: "agent:main:telegram:default:direct:8176453077" },
+  });
+  const stranger = resolveRuntimeMemoryAccess({
+    scopeManager,
+    agentId: "main",
+    config: { legacyAgentScopePrincipals: ["telegram:default:8176453077"] },
+    runtimeContext: { sessionKey: "agent:main:telegram:default:direct:999" },
+  });
+  assert.notEqual(owner.defaultScope, stranger.defaultScope);
+  assert.equal(owner.isAccessible("agent:main"), true);
+  assert.equal(stranger.isAccessible("agent:main"), false);
+  assert.equal(owner.isAccessible(stranger.defaultScope), false);
+  assert.equal(stranger.isAccessible(owner.defaultScope), false);
+});
+
+test("group boundary denies all core memory tools before retrieval, embedding, or DB writes", async () => {
+  const { tools, stored, retrieved } = createWritableToolMap();
+  const runtime = {
+    agentId: "main",
+    sessionKey: "agent:main:telegram:default:group:-100123",
+    channelId: "telegram",
+    accountId: "default",
+    conversationId: "-100123",
+    chatType: "group",
+    senderId: "untrusted-member",
+  };
+  const cases = [
+    ["memory_recall", { query: "private preference" }],
+    ["memory_store", { text: "poison the shared memory" }],
+    ["memory_update", { memoryId: "11111111-1111-1111-1111-111111111111", text: "change it" }],
+    ["memory_forget", { query: "delete private preference", confirm: true }],
+  ];
+  for (const [name, params] of cases) {
+    const result = await tools.get(name).execute("test-call", params, undefined, undefined, runtime);
+    assert.equal(result.details.error, "memory_boundary_denied", name);
+    assert.equal(result.details.reason, "group_memory_denied", name);
+  }
+  assert.equal(retrieved.length, 0);
+  assert.equal(stored.length, 0);
+});
 
 test("core memory tools fail closed when OpenClaw agent context is missing", async () => {
   const originalWarn = console.warn;
@@ -157,10 +212,15 @@ test("secret index rejects plaintext secrets in free-text metadata fields", () =
     label: "prod api key",
     vaultRef: "op://infra/prod-api-key/password",
     notes: "Stored in external vault only.",
-    secretValue: "sk-proj-abcdefghijklmnopqrstuvwxyz1234567890",
+    secretFingerprintSha256: "a".repeat(64),
   });
-  assert.match(safe.content, /Plaintext secret value: \[not stored/);
+  assert.match(safe.content, /Plaintext secret value: \[never accepted by ClawLore\]/);
+  assert.match(safe.content, /Secret fingerprint: sha256:aaaaaaaaaaaaaaaa/);
   assert.doesNotMatch(safe.content, /sk-proj-/);
+  assert.throws(
+    () => buildSecretIndex({ label: "invalid digest", secretFingerprintSha256: "plaintext-secret" }),
+    /locally generated 64-character SHA-256 digest/,
+  );
 });
 
 test("memory_store persists deterministic runtime scope metadata", async () => {
@@ -191,7 +251,8 @@ test("memory_store persists deterministic runtime scope metadata", async () => {
   assert.equal(result.details.action, "created");
   assert.equal(stored.length, 1);
   const metadata = JSON.parse(stored[0].metadata);
-  assert.equal(stored[0].scope, "agent:main");
+  const expectedScope = `user:${createHash("sha256").update("telegram:default:8176453077").digest("hex").slice(0, 32)}`;
+  assert.equal(stored[0].scope, expectedScope);
   assert.equal(metadata.runtime_contract, "openclaw-scope-v1");
   assert.equal(metadata.agentId, "main");
   assert.equal(metadata.agent_id, "main");
@@ -205,9 +266,11 @@ test("memory_store persists deterministic runtime scope metadata", async () => {
   assert.equal(metadata.conversation_id, "8176453077");
   assert.equal(metadata.thread_id, "direct");
   assert.equal(metadata.workspace_dir, "/workspace/runtime");
-  assert.equal(metadata.scope_id, "agent:main");
-  assert.deepEqual(metadata.scope_filter, ["agent:main"]);
+  assert.equal(metadata.scope_id, expectedScope);
+  assert.deepEqual(metadata.scope_filter, [expectedScope]);
   assert.equal(metadata.scope_filter_mode, "restricted");
+  assert.equal(metadata.memory_boundary, "private");
+  assert.equal(metadata.principal_hash.length, 16);
 });
 
 test("memory_store denies inaccessible scopes before embedding or storing", async () => {
