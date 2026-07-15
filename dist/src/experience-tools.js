@@ -7,7 +7,7 @@
 import { Type } from "@sinclair/typebox";
 import { isSystemBypassId, parseAgentIdFromSessionKey } from "./scopes.js";
 import { resolveRuntimeMemoryAccess, } from "./runtime-memory-boundary.js";
-import { ensureExperienceSchema, createTaskEpisode, updateEpisodeOutcome, getEpisode, createPlaybook, getPlaybook, searchPlaybooks, incrementPlaybookCounters, getPlaybookVersions, createExperienceRun, finishExperienceRun, listRunsForPlaybook, getExperienceStats, } from "./experience-store.js";
+import { ensureExperienceSchema, createTaskEpisode, updateEpisodeOutcome, getEpisode, createPlaybook, getPlaybook, searchPlaybooks, getPlaybookVersions, recordPlaybookFeedbackAtomically, listRunsForPlaybook, getExperienceStats, } from "./experience-store.js";
 import { ExperienceValidationError, PLAYBOOK_STATUSES, CAPABILITY_CLASSES } from "./experience-models.js";
 import { buildForgettingReport, runForgettingWithVectorSync } from "./forgetting.js";
 import { applyCleanup, rollbackCleanupBatch } from "./governance-cleanup.js";
@@ -16,6 +16,15 @@ import { buildOperatorDashboard } from "./operator-dashboard.js";
 import { candidateDebtReport, promoteMemoryCandidates } from "./candidate-promotion.js";
 import { graphHygieneReport, repairGraphHygiene } from "./graph-hygiene.js";
 import { digestRecoveryReport, digestReport, recoverDigestChunks, runDigestPipeline, } from "./digest-pipeline.js";
+import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
+export function safeExperienceToolFailure(code, label, error) {
+    console.warn(`clawlore: experience tool ${code}: ${diagnosticErrorSummary(error)}`);
+    return {
+        content: [{ type: "text", text: `${label}. Reference: ${code}` }],
+        details: { error: code },
+        isError: true,
+    };
+}
 export const EXPERIENCE_TOOL_NAMES = [
     "scope_recall_episode_create",
     "scope_recall_episode_complete",
@@ -189,10 +198,7 @@ export function registerEpisodeCreateTool(api, context) {
                     };
                 }
                 catch (error) {
-                    return {
-                        content: [{ type: "text", text: `Error creating episode: ${error}` }],
-                        isError: true,
-                    };
+                    return safeExperienceToolFailure("episode_create_failed", "Error creating episode", error);
                 }
             },
         };
@@ -249,10 +255,7 @@ export function registerEpisodeCompleteTool(api, context) {
                     };
                 }
                 catch (error) {
-                    return {
-                        content: [{ type: "text", text: `Error completing episode: ${error}` }],
-                        isError: true,
-                    };
+                    return safeExperienceToolFailure("episode_complete_failed", "Error completing episode", error);
                 }
             },
         };
@@ -320,10 +323,7 @@ export function registerPlaybookSearchTool(api, context) {
                     };
                 }
                 catch (error) {
-                    return {
-                        content: [{ type: "text", text: `Error searching playbooks: ${error}` }],
-                        isError: true,
-                    };
+                    return safeExperienceToolFailure("playbook_search_failed", "Error searching playbooks", error);
                 }
             },
         };
@@ -376,10 +376,7 @@ export function registerPlaybookInspectTool(api, context) {
                     };
                 }
                 catch (error) {
-                    return {
-                        content: [{ type: "text", text: `Error inspecting playbook: ${error}` }],
-                        isError: true,
-                    };
+                    return safeExperienceToolFailure("playbook_inspect_failed", "Error inspecting playbook", error);
                 }
             },
         };
@@ -467,15 +464,9 @@ export function registerPlaybookCreateTool(api, context) {
                 }
                 catch (error) {
                     if (error instanceof ExperienceValidationError) {
-                        return {
-                            content: [{ type: "text", text: `Validation error: ${error.message}` }],
-                            isError: true,
-                        };
+                        return safeExperienceToolFailure("playbook_validation_failed", "Playbook validation failed", error);
                     }
-                    return {
-                        content: [{ type: "text", text: `Error creating playbook: ${error}` }],
-                        isError: true,
-                    };
+                    return safeExperienceToolFailure("playbook_create_failed", "Error creating playbook", error);
                 }
             },
         };
@@ -515,8 +506,7 @@ export function registerPlaybookFeedbackTool(api, context) {
                             isError: true,
                         };
                     }
-                    // Create experience run record
-                    const run = createExperienceRun(db, {
+                    const run = recordPlaybookFeedbackAtomically(db, {
                         playbook_id,
                         scope_id: runtime.defaultScope,
                         decision: "used",
@@ -525,15 +515,9 @@ export function registerPlaybookFeedbackTool(api, context) {
                         evidence: evidence || [],
                         outcome,
                         outcome_reason: outcome_reason || "",
+                        counter: outcome === "partial" ? "stale" : outcome,
+                        scope_ids: runtime.scopeFilter,
                     });
-                    finishExperienceRun(db, run.id, outcome, outcome_reason);
-                    // Update playbook counters
-                    if (!incrementPlaybookCounters(db, playbook_id, outcome === "partial" ? "stale" : outcome, runtime.scopeFilter)) {
-                        return {
-                            content: [{ type: "text", text: `Playbook not found: ${playbook_id}` }],
-                            isError: true,
-                        };
-                    }
                     return {
                         content: [
                             {
@@ -545,10 +529,7 @@ export function registerPlaybookFeedbackTool(api, context) {
                     };
                 }
                 catch (error) {
-                    return {
-                        content: [{ type: "text", text: `Error recording feedback: ${error}` }],
-                        isError: true,
-                    };
+                    return safeExperienceToolFailure("playbook_feedback_failed", "Error recording feedback", error);
                 }
             },
         };
@@ -628,10 +609,7 @@ export function registerExperiencePreflightTool(api, context) {
                     };
                 }
                 catch (error) {
-                    return {
-                        content: [{ type: "text", text: `Error in preflight check: ${error}` }],
-                        isError: true,
-                    };
+                    return safeExperienceToolFailure("experience_preflight_failed", "Error in preflight check", error);
                 }
             },
         };
@@ -688,10 +666,7 @@ export function registerExperienceStatsTool(api, context) {
                     };
                 }
                 catch (error) {
-                    return {
-                        content: [{ type: "text", text: `Error getting stats: ${error}` }],
-                        isError: true,
-                    };
+                    return safeExperienceToolFailure("experience_stats_failed", "Error getting experience stats", error);
                 }
             },
         };
@@ -762,10 +737,7 @@ ${result.items.map((item) => {
                     };
                 }
                 catch (error) {
-                    return {
-                        content: [{ type: "text", text: `Error running promotion: ${error}` }],
-                        isError: true,
-                    };
+                    return safeExperienceToolFailure("experience_promotion_failed", "Error running promotion", error);
                 }
             },
         };
@@ -824,10 +796,7 @@ ${result.soft_archive_candidates.items.slice(0, 10).map((item) => `- archive ${i
                     };
                 }
                 catch (error) {
-                    return {
-                        content: [{ type: "text", text: `Error running forgetting loop: ${error}` }],
-                        isError: true,
-                    };
+                    return safeExperienceToolFailure("forgetting_report_failed", "Error running forgetting report", error);
                 }
             },
         };
@@ -884,10 +853,7 @@ function registerForgettingRunTool(api, context) {
                     };
                 }
                 catch (error) {
-                    return {
-                        content: [{ type: "text", text: `Error running forgetting: ${error}` }],
-                        isError: true,
-                    };
+                    return safeExperienceToolFailure("forgetting_run_failed", "Error running forgetting", error);
                 }
             },
         };
@@ -938,7 +904,7 @@ function registerGovernanceCleanupReportTool(api, context) {
                     };
                 }
                 catch (error) {
-                    return { content: [{ type: "text", text: `Error building governance cleanup report: ${error}` }], isError: true };
+                    return safeExperienceToolFailure("governance_cleanup_report_failed", "Error building governance cleanup report", error);
                 }
             },
         };
@@ -1008,7 +974,7 @@ function registerGovernanceCleanupRunTool(api, context) {
                     };
                 }
                 catch (error) {
-                    return { content: [{ type: "text", text: `Error running governance cleanup: ${error}` }], isError: true };
+                    return safeExperienceToolFailure("governance_cleanup_run_failed", "Error running governance cleanup", error);
                 }
             },
         };
@@ -1418,10 +1384,7 @@ ${params.reason ? `**Reason:** ${params.reason}` : ""}`;
                     };
                 }
                 catch (error) {
-                    return {
-                        content: [{ type: "text", text: `Error reviewing playbook: ${error}` }],
-                        isError: true,
-                    };
+                    return safeExperienceToolFailure("playbook_review_failed", "Error reviewing playbook", error);
                 }
             },
         };
@@ -1475,10 +1438,7 @@ ${suite.results.map((r) => {
                     };
                 }
                 catch (error) {
-                    return {
-                        content: [{ type: "text", text: `Error running replay: ${error}` }],
-                        isError: true,
-                    };
+                    return safeExperienceToolFailure("experience_replay_failed", "Error running replay", error);
                 }
             },
         };

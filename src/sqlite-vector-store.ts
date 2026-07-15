@@ -171,7 +171,7 @@ export class SqliteBruteForceVectorStore {
     minScore = 0.3,
     scopeFilter?: string[],
   ): MemorySearchResult[] {
-    const safeLimit = clampInt(limit, 1, 20);
+    const safeLimit = clampInt(limit, 1, 5_000);
     const queryVector = this.coerceVector(vector);
     const rows = this.selectRows(scopeFilter);
     const results: MemorySearchResult[] = [];

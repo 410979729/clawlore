@@ -99,6 +99,8 @@
     "smoke:clawlore-encrypted-legacy-snapshot": "node --test tests/clawlore-encrypted-legacy-snapshot.test.mjs",
     "smoke:clawlore-migration-drill": "node --test tests/clawlore-legacy-migration-drill.test.mjs",
     "smoke:vector-repair": "node scripts/smoke-vector-repair.mjs",
+    "preflight:dependencies": "node scripts/dependency-preflight.mjs",
+    "audit:release": "node scripts/supply-chain-audit.mjs",
     "release:gate": "CLAWLORE_ALLOW_NESTED_GIT_ROOT=1 node scripts/release-gate.mjs",
     "release:gate:source": "CLAWLORE_ALLOW_NESTED_GIT_ROOT=1 CLAWLORE_SOURCE_ONLY=1 node scripts/release-gate.mjs",
     "release:reproducibility": "node scripts/reproducible-install-gate.mjs"

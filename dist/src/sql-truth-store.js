@@ -102,9 +102,12 @@ function toMemoryEntry(row) {
 }
 export class SqlTruthStore {
     sqlitePath;
+    faultInjector;
     db = null;
-    constructor(sqlitePath) {
+    savepointSequence = 0;
+    constructor(sqlitePath, faultInjector) {
         this.sqlitePath = sqlitePath;
+        this.faultInjector = faultInjector;
     }
     get path() {
         return this.sqlitePath;
@@ -131,6 +134,22 @@ export class SqlTruthStore {
         }
     }
     upsert(entry) {
+        this.withTransaction(() => this.upsertStatements(entry));
+        this.enforcePrivateFiles();
+    }
+    upsertWithVectorIntent(entry, operation) {
+        this.withTransaction(() => {
+            this.upsertStatements(entry);
+            this.recordVectorRepairDebtStatements({
+                memoryId: entry.id,
+                action: "upsert",
+                operation,
+                error: "pending_vector_companion_sync",
+            });
+        });
+        this.enforcePrivateFiles();
+    }
+    upsertStatements(entry) {
         const db = this.requireDb();
         const metadata = entry.metadata || "{}";
         const metadataText = metadataSearchText(metadata);
@@ -148,14 +167,30 @@ export class SqlTruthStore {
         metadata_text = excluded.metadata_text,
         updated_at = excluded.updated_at
       `).run(entry.id, entry.text || "", entry.category || "other", entry.scope || "global", Number(entry.importance) || 0, Number(entry.timestamp) || Date.now(), metadata, metadataText, Date.now());
+        this.injectFault("truth_after_upsert");
         this.replaceFts(entry.id, entry.text || "", metadataText);
-        this.enforcePrivateFiles();
     }
     delete(id) {
+        this.withTransaction(() => this.deleteStatements(id));
+        this.enforcePrivateFiles();
+    }
+    deleteWithVectorIntent(id, operation) {
+        this.withTransaction(() => {
+            this.deleteStatements(id);
+            this.recordVectorRepairDebtStatements({
+                memoryId: id,
+                action: "delete",
+                operation,
+                error: "pending_vector_companion_sync",
+            });
+        });
+        this.enforcePrivateFiles();
+    }
+    deleteStatements(id) {
         const db = this.requireDb();
+        this.injectFault("fts_before_delete");
         db.prepare("DELETE FROM memory_truth_fts WHERE memory_id = ?").run(id);
         db.prepare("DELETE FROM memory_truth WHERE id = ?").run(id);
-        this.enforcePrivateFiles();
     }
     /**
      * Persist a temporal revision and invalidate its predecessor in one SQL
@@ -164,8 +199,7 @@ export class SqlTruthStore {
      */
     supersedeAtomically(oldEntry, newEntry, factKey) {
         const db = this.requireDb();
-        runSql(db, "BEGIN IMMEDIATE");
-        try {
+        this.withTransaction(() => {
             const current = db.prepare("SELECT id, scope FROM memory_truth WHERE id = ? LIMIT 1")
                 .get(oldEntry.id);
             if (!current || current.scope !== oldEntry.scope) {
@@ -174,8 +208,20 @@ export class SqlTruthStore {
             if (oldEntry.id === newEntry.id) {
                 throw new Error("Supersede revision must use a new memory id");
             }
-            this.upsert(oldEntry);
-            this.upsert(newEntry);
+            this.upsertStatements(oldEntry);
+            this.upsertStatements(newEntry);
+            this.recordVectorRepairDebtStatements({
+                memoryId: oldEntry.id,
+                action: "upsert",
+                operation: "supersede-old",
+                error: "pending_vector_companion_sync",
+            });
+            this.recordVectorRepairDebtStatements({
+                memoryId: newEntry.id,
+                action: "upsert",
+                operation: "supersede-new",
+                error: "pending_vector_companion_sync",
+            });
             const active = db.prepare(`
         SELECT id
         FROM memory_truth
@@ -191,17 +237,8 @@ export class SqlTruthStore {
             if (active.length !== 1 || active[0]?.id !== newEntry.id) {
                 throw new Error(`Atomic supersede invariant failed for ${oldEntry.scope}/${factKey}: expected only ${newEntry.id}, found ${active.map((row) => row.id).join(",") || "none"}`);
             }
-            runSql(db, "COMMIT");
-            this.enforcePrivateFiles();
-        }
-        catch (err) {
-            try {
-                runSql(db, "ROLLBACK");
-            }
-            catch { }
-            this.enforcePrivateFiles();
-            throw err;
-        }
+        });
+        this.enforcePrivateFiles();
     }
     getById(id, scopeFilter) {
         const db = this.requireDb();
@@ -229,7 +266,12 @@ export class SqlTruthStore {
         return rows.map(toMemoryEntry);
     }
     recordVectorRepairDebt(input) {
+        this.recordVectorRepairDebtStatements(input);
+        this.enforcePrivateFiles();
+    }
+    recordVectorRepairDebtStatements(input) {
         const now = Date.now();
+        this.injectFault("vector_intent_before_insert");
         this.requireDb().prepare(`
       INSERT INTO vector_companion_repair_outbox (
         memory_id, action, operation, last_error, attempts, created_at, updated_at
@@ -241,7 +283,6 @@ export class SqlTruthStore {
         attempts = vector_companion_repair_outbox.attempts + 1,
         updated_at = excluded.updated_at
       `).run(input.memoryId, input.action, input.operation, input.error, now, now);
-        this.enforcePrivateFiles();
     }
     clearVectorRepairDebt(memoryId) {
         this.requireDb()
@@ -351,9 +392,18 @@ export class SqlTruthStore {
             throw new Error("SQL truth bulk delete requires at least scope or timestamp filter");
         }
         const rows = db.prepare(`SELECT m.id FROM memory_truth m WHERE ${clauses.join(" AND ")}`).all(...params);
-        for (const row of rows) {
-            this.delete(row.id);
-        }
+        this.withTransaction(() => {
+            for (const row of rows) {
+                this.deleteStatements(row.id);
+                this.recordVectorRepairDebtStatements({
+                    memoryId: row.id,
+                    action: "delete",
+                    operation: "bulk-delete",
+                    error: "pending_vector_companion_sync",
+                });
+            }
+        });
+        this.enforcePrivateFiles();
         return rows.map((row) => row.id);
     }
     reconcile(entries, options = {}) {
@@ -361,13 +411,12 @@ export class SqlTruthStore {
         let upserted = 0;
         let deleted = 0;
         const deleteMissing = options.deleteMissing === true;
-        runSql(db, "BEGIN IMMEDIATE");
-        try {
+        return this.withTransaction(() => {
             const wanted = new Set(entries.map((entry) => entry.id).filter(Boolean));
             for (const entry of entries) {
                 if (!entry.id)
                     continue;
-                this.upsert(entry);
+                this.upsertStatements(entry);
                 upserted++;
             }
             if (deleteMissing) {
@@ -375,20 +424,13 @@ export class SqlTruthStore {
                 for (const row of rows) {
                     if (wanted.has(row.id))
                         continue;
-                    this.delete(row.id);
+                    this.deleteStatements(row.id);
                     deleted++;
                 }
             }
-            runSql(db, "COMMIT");
+            this.enforcePrivateFiles();
             return { upserted, deleted };
-        }
-        catch (err) {
-            try {
-                runSql(db, "ROLLBACK");
-            }
-            catch { }
-            throw err;
-        }
+        });
     }
     search(query, limit, scopeFilter, options) {
         const db = this.requireDb();
@@ -575,7 +617,32 @@ export class SqlTruthStore {
     replaceFts(id, text, metadataText) {
         const db = this.requireDb();
         db.prepare("DELETE FROM memory_truth_fts WHERE memory_id = ?").run(id);
+        this.injectFault("fts_before_insert");
         db.prepare("INSERT INTO memory_truth_fts(memory_id, text, metadata_text) VALUES (?, ?, ?)").run(id, text, metadataText);
+    }
+    injectFault(point) {
+        this.faultInjector?.(point);
+    }
+    withTransaction(operation) {
+        const db = this.requireDb();
+        const savepoint = `clawlore_truth_${++this.savepointSequence}`;
+        runSql(db, `SAVEPOINT ${savepoint}`);
+        try {
+            const result = operation();
+            runSql(db, `RELEASE SAVEPOINT ${savepoint}`);
+            return result;
+        }
+        catch (err) {
+            try {
+                runSql(db, `ROLLBACK TO SAVEPOINT ${savepoint}`);
+            }
+            catch { }
+            try {
+                runSql(db, `RELEASE SAVEPOINT ${savepoint}`);
+            }
+            catch { }
+            throw err;
+        }
     }
     enforcePrivateFiles() {
         for (const path of [this.sqlitePath, `${this.sqlitePath}-wal`, `${this.sqlitePath}-shm`]) {

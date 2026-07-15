@@ -72,6 +72,7 @@ export interface MemoryStoreDiagnostics {
     path: string | null;
     count: number | null;
     fts: SqlTruthFtsReport | null;
+    errorCode: "SQL_TRUTH_UNAVAILABLE" | "SQL_TRUTH_RUNTIME_FAILURE" | null;
     error: string | null;
   };
   fts: {
@@ -282,6 +283,8 @@ export class MemoryStore {
   private ftsIndexCreated = false;
   private updateQueue: Promise<void> = Promise.resolve();
   private vectorCompanionError: string | null = null;
+  private sqlTruthErrorCode: MemoryStoreDiagnostics["sqlTruth"]["errorCode"] = null;
+  private sqlTruthError: string | null = null;
 
   constructor(private readonly config: StoreConfig) { }
 
@@ -459,8 +462,9 @@ export class MemoryStore {
   }
 
   private async initializeSqlTruthStore(sourceEntries?: MemoryEntry[]): Promise<void> {
+    let truth: SqlTruthStore | null = null;
     try {
-      const truth = new SqlTruthStore(join(this.config.dbPath, "memory.sqlite3"));
+      truth = new SqlTruthStore(join(this.config.dbPath, "memory.sqlite3"));
       truth.open();
       let entries = sourceEntries;
       if (!entries && this.table) {
@@ -483,13 +487,22 @@ export class MemoryStore {
       const missingEntries = (entries ?? []).filter((entry) => !truth.getById(entry.id));
       truth.reconcile(missingEntries, { deleteMissing: false });
       this.sqlTruthStore = truth;
+      this.sqlTruthErrorCode = null;
+      this.sqlTruthError = null;
       console.log(
         `clawlore: SQL truth companion ready (${truth.count()} rows, path=${diagnosticIdentifier(truth.path)})`,
       );
     } catch (err) {
+      try { truth?.close(); } catch {}
       this.sqlTruthStore = null;
-      console.warn(
-        `clawlore: SQL truth companion unavailable; using LanceDB-only retrieval: ${diagnosticErrorSummary(err)}`,
+      this.sqlTruthErrorCode = "SQL_TRUTH_UNAVAILABLE";
+      this.sqlTruthError = diagnosticErrorSummary(err);
+      console.error(
+        `clawlore: SQL truth initialization failed; memory operations are fail-closed: ${this.sqlTruthError}`,
+      );
+      throw new Error(
+        `CLAWLORE_SQL_TRUTH_UNAVAILABLE: SQL truth initialization failed; run doctor and restore the truth database before retrying`,
+        { cause: err },
       );
     }
   }
@@ -512,15 +525,19 @@ export class MemoryStore {
     }
   }
 
-  private writeSqlTruthUpsert(entry: MemoryEntry): boolean {
-    if (!this.sqlTruthStore) return false;
-    this.sqlTruthStore.upsert(entry);
+  private writeSqlTruthUpsert(entry: MemoryEntry, operation: string): boolean {
+    if (!this.sqlTruthStore) {
+      throw new Error("CLAWLORE_SQL_TRUTH_UNAVAILABLE: write denied because SQL truth is unavailable");
+    }
+    this.sqlTruthStore.upsertWithVectorIntent(entry, operation);
     return true;
   }
 
-  private writeSqlTruthDelete(id: string): boolean {
-    if (!this.sqlTruthStore) return false;
-    this.sqlTruthStore.delete(id);
+  private writeSqlTruthDelete(id: string, operation: string): boolean {
+    if (!this.sqlTruthStore) {
+      throw new Error("CLAWLORE_SQL_TRUTH_UNAVAILABLE: delete denied because SQL truth is unavailable");
+    }
+    this.sqlTruthStore.deleteWithVectorIntent(id, operation);
     return true;
   }
 
@@ -783,7 +800,7 @@ export class MemoryStore {
     };
 
     return this.runWithFileLock(async () => {
-      if (this.writeSqlTruthUpsert(fullEntry)) {
+      if (this.writeSqlTruthUpsert(fullEntry, "store")) {
         await this.addVectorCompanion(fullEntry, "store");
         return fullEntry;
       }
@@ -832,7 +849,7 @@ export class MemoryStore {
     };
 
     return this.runWithFileLock(async () => {
-      if (this.writeSqlTruthUpsert(full)) {
+      if (this.writeSqlTruthUpsert(full, "import")) {
         await this.addVectorCompanion(full, "import");
         return full;
       }
@@ -904,84 +921,98 @@ export class MemoryStore {
     // because superseded historical rows can crowd out active ones.
     const inactiveFilter = options?.excludeInactive ?? false;
     const overFetchMultiplier = inactiveFilter ? 20 : 10;
-    const fetchLimit = Math.min(safeLimit * overFetchMultiplier, 200);
+    const initialFetchLimit = Math.min(Math.max(safeLimit * overFetchMultiplier, safeLimit), 200);
+    const maxScanBudget = 5_000;
 
     if (this.sqliteVectorStore) {
+      if (this.sqlTruthStore) {
+        let fetchLimit = initialFetchLimit;
+        while (true) {
+          const sqliteResults = this.sqliteVectorStore.search(vector, fetchLimit, minScore, undefined);
+          const hydrated = this.hydrateVectorResultsFromSql(
+            sqliteResults,
+            scopeFilter,
+            inactiveFilter,
+            safeLimit,
+          );
+          if (
+            hydrated.length >= safeLimit ||
+            sqliteResults.length < fetchLimit ||
+            fetchLimit >= maxScanBudget
+          ) {
+            return hydrated;
+          }
+          fetchLimit = Math.min(fetchLimit * 2, maxScanBudget);
+        }
+      }
       const sqliteResults = this.sqliteVectorStore.search(
         vector,
-        fetchLimit,
+        initialFetchLimit,
         minScore,
-        this.sqlTruthStore ? undefined : scopeFilter,
+        scopeFilter,
       );
-      if (this.sqlTruthStore) {
-        return this.hydrateVectorResultsFromSql(
-          sqliteResults,
-          scopeFilter,
-          inactiveFilter,
-          safeLimit,
-        );
-      }
       const filtered = inactiveFilter
         ? sqliteResults.filter((result) => isMemoryActiveAt(parseSmartMetadata(result.entry.metadata, result.entry)))
         : sqliteResults;
       return filtered.slice(0, safeLimit);
     }
 
-    let query = this.table!.vectorSearch(vector).distanceType('cosine').limit(fetchLimit);
+    let fetchLimit = initialFetchLimit;
+    while (true) {
+      let query = this.table!.vectorSearch(vector).distanceType('cosine').limit(fetchLimit);
 
-    // Apply scope filter if provided
-    if (!this.sqlTruthStore && scopeFilter && scopeFilter.length > 0) {
-      const scopeConditions = scopeFilter
-        .map((scope) => `scope = '${escapeSqlLiteral(scope)}'`)
-        .join(" OR ");
-      query = query.where(`(${scopeConditions}) OR scope IS NULL`); // NULL for backward compatibility
-    }
+      if (!this.sqlTruthStore && scopeFilter && scopeFilter.length > 0) {
+        const scopeConditions = scopeFilter
+          .map((scope) => `scope = '${escapeSqlLiteral(scope)}'`)
+          .join(" OR ");
+        query = query.where(`(${scopeConditions}) OR scope IS NULL`);
+      }
 
-    const results = await query.toArray();
-    const mapped: MemorySearchResult[] = [];
+      const results = await query.toArray();
+      const mapped: MemorySearchResult[] = [];
+      for (const row of results) {
+        const distance = Number(row._distance ?? 0);
+        const score = 1 / (1 + distance);
+        if (score < minScore) continue;
 
-    for (const row of results) {
-      const distance = Number(row._distance ?? 0);
-      const score = 1 / (1 + distance);
+        const rowScope = (row.scope as string | undefined) ?? "global";
+        if (
+          !this.sqlTruthStore &&
+          scopeFilter &&
+          scopeFilter.length > 0 &&
+          !scopeFilter.includes(rowScope)
+        ) {
+          continue;
+        }
 
-      if (score < minScore) continue;
+        const entry: MemoryEntry = {
+          id: row.id as string,
+          text: row.text as string,
+          vector: row.vector as number[],
+          category: row.category as MemoryEntry["category"],
+          scope: rowScope,
+          importance: Number(row.importance),
+          timestamp: Number(row.timestamp),
+          metadata: (row.metadata as string) || "{}",
+        };
+        if (!this.sqlTruthStore && inactiveFilter && !isMemoryActiveAt(parseSmartMetadata(entry.metadata, entry))) {
+          continue;
+        }
+        mapped.push({ entry, score });
+        if (!this.sqlTruthStore && mapped.length >= safeLimit) break;
+      }
 
-      const rowScope = (row.scope as string | undefined) ?? "global";
-
-      // Double-check scope filter in application layer
+      if (!this.sqlTruthStore) return mapped;
+      const hydrated = this.hydrateVectorResultsFromSql(mapped, scopeFilter, inactiveFilter, safeLimit);
       if (
-        !this.sqlTruthStore &&
-        scopeFilter &&
-        scopeFilter.length > 0 &&
-        !scopeFilter.includes(rowScope)
+        hydrated.length >= safeLimit ||
+        results.length < fetchLimit ||
+        fetchLimit >= maxScanBudget
       ) {
-        continue;
+        return hydrated;
       }
-
-      const entry: MemoryEntry = {
-        id: row.id as string,
-        text: row.text as string,
-        vector: row.vector as number[],
-        category: row.category as MemoryEntry["category"],
-        scope: rowScope,
-        importance: Number(row.importance),
-        timestamp: Number(row.timestamp),
-        metadata: (row.metadata as string) || "{}",
-      };
-
-      // Skip inactive (superseded) records when requested
-      if (!this.sqlTruthStore && inactiveFilter && !isMemoryActiveAt(parseSmartMetadata(entry.metadata, entry))) {
-        continue;
-      }
-
-      mapped.push({ entry, score });
-
-      if (!this.sqlTruthStore && mapped.length >= safeLimit) break;
+      fetchLimit = Math.min(fetchLimit * 2, maxScanBudget);
     }
-
-    return this.sqlTruthStore
-      ? this.hydrateVectorResultsFromSql(mapped, scopeFilter, inactiveFilter, safeLimit)
-      : mapped;
   }
 
   async bm25Search(
@@ -1082,9 +1113,12 @@ export class MemoryStore {
   ): MemorySearchResult[] {
     if (!this.sqlTruthStore) return [];
     try {
-      return this.sqlTruthStore.search(query, limit, scopeFilter, options);
+      const results = this.sqlTruthStore.search(query, limit, scopeFilter, options);
+      this._lastFtsError = null;
+      return results;
     } catch (err) {
-      console.warn(`clawlore: SQL truth search failed; falling back to LanceDB search: ${diagnosticErrorSummary(err)}`);
+      this._lastFtsError = `SQL_TRUTH_SEARCH_FAILED: ${diagnosticErrorSummary(err)}`;
+      console.warn(`clawlore: SQL truth search failed; returning fail-closed empty results: ${diagnosticErrorSummary(err)}`);
       return [];
     }
   }
@@ -1186,7 +1220,7 @@ export class MemoryStore {
       if (!sqlEntry) return false;
 
       return this.runWithFileLock(async () => {
-        this.writeSqlTruthDelete(sqlEntry.id);
+        this.writeSqlTruthDelete(sqlEntry.id, "delete");
         await this.deleteVectorCompanionById(sqlEntry.id, "delete");
         return true;
       });
@@ -1378,7 +1412,7 @@ export class MemoryStore {
           metadata: updates.metadata ?? original.metadata,
         };
 
-        this.writeSqlTruthUpsert(updated);
+        this.writeSqlTruthUpsert(updated, "update");
 
         if (Array.isArray(updated.vector) && updated.vector.length === this.config.vectorDim) {
           await this.replaceVectorCompanion(
@@ -1701,7 +1735,8 @@ export class MemoryStore {
         path: null,
         count: null,
         fts: null,
-        error: null,
+        errorCode: this.sqlTruthErrorCode,
+        error: this.sqlTruthError,
       };
     } else {
       try {
@@ -1710,6 +1745,7 @@ export class MemoryStore {
           path: this.sqlTruthStore.path,
           count: this.sqlTruthStore.count(),
           fts: this.sqlTruthStore.ftsIntegrityReport(),
+          errorCode: null,
           error: null,
         };
       } catch (err) {
@@ -1718,7 +1754,8 @@ export class MemoryStore {
           path: this.sqlTruthStore.path,
           count: null,
           fts: null,
-          error: err instanceof Error ? err.message : String(err),
+          errorCode: "SQL_TRUTH_RUNTIME_FAILURE",
+          error: diagnosticErrorSummary(err),
         };
       }
     }

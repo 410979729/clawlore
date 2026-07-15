@@ -16,6 +16,17 @@
   aliases before a deployment can be claimed.
 - Added an audit-first identity-transition runbook. This release candidate does
   not authorize live deployment, V2 writes, prompt mutation, or recall cutover.
+- Made an existing SQL-truth architecture fail closed when its authority store
+  cannot initialize; vector companions can no longer become an emergency truth
+  source after corruption, permission, path, or schema failures.
+- Made SQL truth, FTS, and durable vector-repair intent one recoverable commit
+  boundary, and made Experience playbook state, FTS, version receipts, and
+  feedback counters transactional with post-change snapshots.
+- Added bounded vector over-fetch pagination, stable redacted tool failures,
+  clean-install dependency preflight, and an official-registry advisory gate
+  whose transport or endpoint failures are release failures.
+- Added authority-outage, transaction-fault, stale-companion pagination,
+  dependency-preflight, supply-chain, and tool-error regression coverage.
 
 ## Unreleased
 

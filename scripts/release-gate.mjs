@@ -396,6 +396,7 @@ if (!sourceOnly && !(await exists(extensionDir))) {
 
 const diffPathspec = gitRoot === sourceRoot ? "." : relative(gitRoot, sourceRoot);
 run("git", ["diff", "--check", "--", diffPathspec || "."]);
+run("node", ["scripts/dependency-preflight.mjs"]);
 run("npm", ["test"]);
 run("npm", ["run", "typecheck"]);
 run("npm", ["run", "smoke:vector-repair"]);
@@ -528,4 +529,5 @@ if (sbom.bomFormat !== "CycloneDX" || !Array.isArray(sbom.components) || sbom.co
 }
 const sbomDigest = createHash("sha256").update(sbomRaw).digest("hex");
 console.log(`release gate SBOM ok: ${sbom.components.length} components sha256=${sbomDigest}`);
+run("node", ["scripts/supply-chain-audit.mjs"]);
 console.log(`release gate pack filename/content scan ok: ${packFiles.length} files`);

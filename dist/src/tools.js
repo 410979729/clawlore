@@ -19,6 +19,7 @@ import { buildSecretIndex } from "./secret-index.js";
 import { buildGovernanceReviewCandidates, recordConflictReviewRelations, } from "./conflict-governance.js";
 import { buildRuntimeScopeMetadata } from "./runtime-scope-metadata.js";
 import { resolveRuntimeMemoryAccess, runtimeBoundaryMetadata, } from "./runtime-memory-boundary.js";
+import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
 // ============================================================================
 // Types
 // ============================================================================
@@ -48,6 +49,14 @@ function clamp01(value, fallback = 0.7) {
     if (!Number.isFinite(value))
         return fallback;
     return Math.min(1, Math.max(0, value));
+}
+export function safeToolFailure(code, label, error) {
+    console.warn(`clawlore: tool ${code}: ${diagnosticErrorSummary(error)}`);
+    return {
+        content: [{ type: "text", text: `${label}. Reference: ${code}` }],
+        details: { error: code },
+        isError: true,
+    };
 }
 function normalizeInlineText(text) {
     return text.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
@@ -315,10 +324,7 @@ export function registerSelfImprovementLogTool(api, context) {
                 };
             }
             catch (error) {
-                return {
-                    content: [{ type: "text", text: `Failed to log self-improvement entry: ${error instanceof Error ? error.message : String(error)}` }],
-                    details: { error: "self_improvement_log_failed", message: String(error) },
-                };
+                return safeToolFailure("self_improvement_log_failed", "Failed to log self-improvement entry", error);
             }
         },
     }), { name: "self_improvement_log" });
@@ -422,10 +428,7 @@ export function registerSelfImprovementExtractSkillTool(api, context) {
                 };
             }
             catch (error) {
-                return {
-                    content: [{ type: "text", text: `Failed to extract skill: ${error instanceof Error ? error.message : String(error)}` }],
-                    details: { error: "self_improvement_extract_skill_failed", message: String(error) },
-                };
+                return safeToolFailure("self_improvement_extract_skill_failed", "Failed to extract skill", error);
             }
         },
     }), { name: "self_improvement_extract_skill" });
@@ -468,10 +471,7 @@ export function registerSelfImprovementReviewTool(api, context) {
                 };
             }
             catch (error) {
-                return {
-                    content: [{ type: "text", text: `Failed to review self-improvement backlog: ${error instanceof Error ? error.message : String(error)}` }],
-                    details: { error: "self_improvement_review_failed", message: String(error) },
-                };
+                return safeToolFailure("self_improvement_review_failed", "Failed to review self-improvement backlog", error);
             }
         },
     }), { name: "self_improvement_review" });
@@ -600,15 +600,7 @@ export function registerMemoryRecallTool(api, context) {
                     };
                 }
                 catch (error) {
-                    return {
-                        content: [
-                            {
-                                type: "text",
-                                text: `Memory recall failed: ${error instanceof Error ? error.message : String(error)}`,
-                            },
-                        ],
-                        details: { error: "recall_failed", message: String(error) },
-                    };
+                    return safeToolFailure("recall_failed", "Memory recall failed", error);
                 }
             },
         };
@@ -811,15 +803,7 @@ export function registerMemoryStoreTool(api, context) {
                     };
                 }
                 catch (error) {
-                    return {
-                        content: [
-                            {
-                                type: "text",
-                                text: `Memory storage failed: ${error instanceof Error ? error.message : String(error)}`,
-                            },
-                        ],
-                        details: { error: "store_failed", message: String(error) },
-                    };
+                    return safeToolFailure("store_failed", "Memory storage failed", error);
                 }
             },
         };
@@ -920,10 +904,7 @@ export function registerMemoryStoreSecretIndexTool(api, context) {
                     };
                 }
                 catch (error) {
-                    return {
-                        content: [{ type: "text", text: `Secret index store failed: ${error instanceof Error ? error.message : String(error)}` }],
-                        details: { error: "secret_index_store_failed", message: String(error) },
-                    };
+                    return safeToolFailure("secret_index_store_failed", "Secret index store failed", error);
                 }
             },
         };
@@ -1052,15 +1033,7 @@ export function registerMemoryForgetTool(api, context) {
                     };
                 }
                 catch (error) {
-                    return {
-                        content: [
-                            {
-                                type: "text",
-                                text: `Memory deletion failed: ${error instanceof Error ? error.message : String(error)}`,
-                            },
-                        ],
-                        details: { error: "delete_failed", message: String(error) },
-                    };
+                    return safeToolFailure("delete_failed", "Memory deletion failed", error);
                 }
             },
         };
@@ -1274,15 +1247,7 @@ export function registerMemoryUpdateTool(api, context) {
                     };
                 }
                 catch (error) {
-                    return {
-                        content: [
-                            {
-                                type: "text",
-                                text: `Memory update failed: ${error instanceof Error ? error.message : String(error)}`,
-                            },
-                        ],
-                        details: { error: "update_failed", message: String(error) },
-                    };
+                    return safeToolFailure("update_failed", "Memory update failed", error);
                 }
             },
         };
@@ -1376,15 +1341,7 @@ export function registerMemoryStatsTool(api, context) {
                     };
                 }
                 catch (error) {
-                    return {
-                        content: [
-                            {
-                                type: "text",
-                                text: `Failed to get memory stats: ${error instanceof Error ? error.message : String(error)}`,
-                            },
-                        ],
-                        details: { error: "stats_failed", message: String(error) },
-                    };
+                    return safeToolFailure("stats_failed", "Failed to get memory stats", error);
                 }
             },
         };
@@ -1481,13 +1438,7 @@ export function registerMemoryDebugTool(api, context) {
                     };
                 }
                 catch (error) {
-                    return {
-                        content: [{
-                                type: "text",
-                                text: `Memory debug failed: ${error instanceof Error ? error.message : String(error)}`,
-                            }],
-                        details: { error: "debug_failed", message: String(error) },
-                    };
+                    return safeToolFailure("debug_failed", "Memory debug failed", error);
                 }
             },
         };
@@ -1592,15 +1543,7 @@ export function registerMemoryListTool(api, context) {
                     };
                 }
                 catch (error) {
-                    return {
-                        content: [
-                            {
-                                type: "text",
-                                text: `Failed to list memories: ${error instanceof Error ? error.message : String(error)}`,
-                            },
-                        ],
-                        details: { error: "list_failed", message: String(error) },
-                    };
+                    return safeToolFailure("list_failed", "Failed to list memories", error);
                 }
             },
         };
@@ -1712,13 +1655,7 @@ export function registerMemoryContextTool(api, context) {
                     };
                 }
                 catch (error) {
-                    return {
-                        content: [{
-                                type: "text",
-                                text: `Memory context inspection failed: ${error instanceof Error ? error.message : String(error)}`,
-                            }],
-                        details: { error: "context_failed", message: String(error) },
-                    };
+                    return safeToolFailure("context_failed", "Memory context inspection failed", error);
                 }
             },
         };
@@ -1803,13 +1740,7 @@ export function registerMemoryInspectTool(api, context) {
                     };
                 }
                 catch (error) {
-                    return {
-                        content: [{
-                                type: "text",
-                                text: `Memory inspect failed: ${error instanceof Error ? error.message : String(error)}`,
-                            }],
-                        details: { error: "inspect_failed", message: String(error) },
-                    };
+                    return safeToolFailure("inspect_failed", "Memory inspect failed", error);
                 }
             },
         };

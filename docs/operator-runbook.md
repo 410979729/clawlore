@@ -10,16 +10,24 @@ ClawLore rollout.
 Run from the plugin workspace:
 
 ```bash
-npm test
-npm run typecheck
-npm run smoke:vector-repair
-npm run build
-node scripts/golden-benchmark.mjs
+npm ci --ignore-scripts --include=dev
+npm run preflight:dependencies
 npm run release:gate:source
 ```
 
+The source gate includes the full test/typecheck/build/benchmark/package scan,
+SBOM, dependency-integrity preflight, and an advisory audit pinned to the
+official npm registry. A missing dependency, advisory endpoint failure, or
+transport failure is a red gate; none may be interpreted as zero findings.
+
 Do not continue to live rollout until all source gates pass and an independent
 audit approves the exact candidate commit.
+
+If SQL truth cannot initialize because the database is corrupt, unreadable, a
+directory, or schema-incompatible, ClawLore intentionally refuses reads and
+writes with `CLAWLORE_SQL_TRUTH_UNAVAILABLE`. Do not enable vector-only recall.
+Restore or repair the SQLite authority from a verified backup, run doctor and
+the vector-repair dry run, then repeat the clean source/live gate.
 
 ## Live Rollout
 
@@ -56,7 +64,8 @@ OPENCLAW_HOME=/path/to/openclaw-state \
 
 Safe recall probes should use a non-secret query and must not force memory
 writes. If doctor is degraded, record the exact degraded field before deciding
-whether to repair or roll back.
+whether to repair or roll back. `SQL_TRUTH_UNAVAILABLE` is not a degraded mode;
+it is a fail-closed outage that requires authority-store recovery.
 
 ## Rollback
 

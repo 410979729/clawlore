@@ -9,6 +9,21 @@ import { randomUUID } from "node:crypto";
 
 // Use any to avoid TypeScript issues with experimental node:sqlite
 type DatabaseSync = any;
+let experienceTransactionSequence = 0;
+
+function withExperienceTransaction<T>(db: DatabaseSync, operation: () => T): T {
+  const savepoint = `clawlore_experience_${++experienceTransactionSequence}`;
+  db.exec(`SAVEPOINT ${savepoint}`);
+  try {
+    const result = operation();
+    db.exec(`RELEASE SAVEPOINT ${savepoint}`);
+    return result;
+  } catch (err) {
+    try { db.exec(`ROLLBACK TO SAVEPOINT ${savepoint}`); } catch {}
+    try { db.exec(`RELEASE SAVEPOINT ${savepoint}`); } catch {}
+    throw err;
+  }
+}
 
 interface ScopeClause {
   sql: string;
@@ -411,43 +426,43 @@ export function createPlaybook(db: DatabaseSync, params: CreatePlaybookParams): 
   const now = new Date().toISOString();
   const id = randomUUID();
 
-  db.prepare(`
-    INSERT INTO procedural_playbooks (
-      id, scope_id, shared_scope_id, task_class, title, trigger, goal,
-      preconditions, steps, pitfalls, verification, cleanup,
-      evidence_anchors, related_skills, environment_constraints, reuse_policy,
-      status, confidence, created_from_episode_id, created_at, updated_at, metadata
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    id,
-    params.scope_id,
-    params.shared_scope_id ?? "",
-    validated.task_class,
-    validated.title,
-    validated.trigger,
-    validated.goal,
-    JSON.stringify(validated.preconditions),
-    JSON.stringify(validated.steps),
-    JSON.stringify(validated.pitfalls),
-    JSON.stringify(validated.verification),
-    JSON.stringify(validated.cleanup),
-    JSON.stringify(params.evidence_anchors ?? []),
-    JSON.stringify(params.related_skills ?? []),
-    JSON.stringify(params.environment_constraints ?? {}),
-    JSON.stringify(validated.reuse_policy),
-    validated.status,
-    validated.confidence,
-    params.created_from_episode_id ?? "",
-    now,
-    now,
-    JSON.stringify(params.metadata ?? {}),
-  );
-
-  // Update FTS
-  updatePlaybookFts(db, id, validated);
-
-  // Create initial version
-  createPlaybookVersion(db, id, 1, "create", "Initial creation", validated);
+  withExperienceTransaction(db, () => {
+    db.prepare(`
+      INSERT INTO procedural_playbooks (
+        id, scope_id, shared_scope_id, task_class, title, trigger, goal,
+        preconditions, steps, pitfalls, verification, cleanup,
+        evidence_anchors, related_skills, environment_constraints, reuse_policy,
+        status, confidence, created_from_episode_id, created_at, updated_at, metadata
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      params.scope_id,
+      params.shared_scope_id ?? "",
+      validated.task_class,
+      validated.title,
+      validated.trigger,
+      validated.goal,
+      JSON.stringify(validated.preconditions),
+      JSON.stringify(validated.steps),
+      JSON.stringify(validated.pitfalls),
+      JSON.stringify(validated.verification),
+      JSON.stringify(validated.cleanup),
+      JSON.stringify(params.evidence_anchors ?? []),
+      JSON.stringify(params.related_skills ?? []),
+      JSON.stringify(params.environment_constraints ?? {}),
+      JSON.stringify(validated.reuse_policy),
+      validated.status,
+      validated.confidence,
+      params.created_from_episode_id ?? "",
+      now,
+      now,
+      JSON.stringify(params.metadata ?? {}),
+    );
+    updatePlaybookFts(db, id, validated);
+    const durable = getPlaybook(db, id);
+    if (!durable) throw new Error("playbook create did not produce a durable row");
+    createPlaybookVersion(db, id, 1, "create", "Initial creation", durable);
+  });
 
   return { ...validated, id, created_at: now };
 }
@@ -456,7 +471,12 @@ export function getPlaybook(
   db: DatabaseSync,
   playbookId: string,
   scopeIds?: string[],
-): (ProceduralPlaybook & { id: string }) | null {
+): (ProceduralPlaybook & {
+  id: string;
+  scope_id: string;
+  shared_scope_id: string;
+  superseded_by: string;
+}) | null {
   const scope = experienceScopeClause(scopeIds, "scope_id", "shared_scope_id");
   const row = db.prepare(`SELECT * FROM procedural_playbooks WHERE id = ? AND ${scope.sql}`)
     .get(playbookId, ...scope.params) as Record<string, unknown> | undefined;
@@ -561,17 +581,29 @@ export function updatePlaybookStatus(
     throw new ExperienceValidationError(`Playbook ${playbookId} not found`);
   }
 
-  const now = new Date().toISOString();
-  const currentVersion = getLatestVersion(db, playbookId);
-
-  const scope = experienceScopeClause(scopeIds, "scope_id", "shared_scope_id");
-  db.prepare(`
-    UPDATE procedural_playbooks
-    SET status = ?, updated_at = ?
-    WHERE id = ? AND ${scope.sql}
-  `).run(status, now, playbookId, ...scope.params);
-
-  createPlaybookVersion(db, playbookId, currentVersion + 1, "status_change", reason ?? `Status changed to ${status}`, playbook);
+  withExperienceTransaction(db, () => {
+    const now = new Date().toISOString();
+    const currentVersion = getLatestVersion(db, playbookId);
+    const scope = experienceScopeClause(scopeIds, "scope_id", "shared_scope_id");
+    const updated = db.prepare(`
+      UPDATE procedural_playbooks
+      SET status = ?, updated_at = ?
+      WHERE id = ? AND ${scope.sql}
+    `).run(status, now, playbookId, ...scope.params);
+    if (Number(updated?.changes || 0) !== 1) {
+      throw new ExperienceValidationError(`Playbook ${playbookId} not found`);
+    }
+    const durable = getPlaybook(db, playbookId, scopeIds);
+    if (!durable) throw new Error("playbook status update lost its durable row");
+    createPlaybookVersion(
+      db,
+      playbookId,
+      currentVersion + 1,
+      "status_change",
+      reason ?? `Status changed to ${status}`,
+      durable,
+    );
+  });
 }
 
 export function incrementPlaybookCounters(
@@ -636,25 +668,39 @@ export function reviewPlaybook(
     return { reviewed: false, id: playbookId, error: "not_found" };
   }
 
-  const now = new Date().toISOString();
-  const currentVersion = getLatestVersion(db, playbookId);
-  const newVersion = currentVersion + 1;
-
-  const scope = experienceScopeClause(scopeIds, "scope_id", "shared_scope_id");
-  db.prepare(`
-    UPDATE procedural_playbooks
-    SET status = ?, superseded_by = ?, updated_at = ?
-    WHERE id = ? AND ${scope.sql}
-  `).run(status, status === "superseded" ? supersededBy : "", now, playbookId, ...scope.params);
-
-  createPlaybookVersion(db, playbookId, newVersion, status, reason || `Status changed to ${status}`, playbook);
+  const newVersion = withExperienceTransaction(db, () => {
+    const now = new Date().toISOString();
+    const currentVersion = getLatestVersion(db, playbookId);
+    const nextVersion = currentVersion + 1;
+    const scope = experienceScopeClause(scopeIds, "scope_id", "shared_scope_id");
+    const updated = db.prepare(`
+      UPDATE procedural_playbooks
+      SET status = ?, superseded_by = ?, updated_at = ?
+      WHERE id = ? AND ${scope.sql}
+    `).run(status, status === "superseded" ? supersededBy : "", now, playbookId, ...scope.params);
+    if (Number(updated?.changes || 0) !== 1) {
+      throw new Error("playbook review update did not affect exactly one row");
+    }
+    const durable = getPlaybook(db, playbookId, scopeIds);
+    if (!durable) throw new Error("playbook review lost its durable row");
+    createPlaybookVersion(db, playbookId, nextVersion, status, reason || `Status changed to ${status}`, durable);
+    return nextVersion;
+  });
 
   return { reviewed: true, id: playbookId, status, version: newVersion };
 }
 
-function rowToPlaybook(row: Record<string, unknown>): ProceduralPlaybook & { id: string } {
+function rowToPlaybook(row: Record<string, unknown>): ProceduralPlaybook & {
+  id: string;
+  scope_id: string;
+  shared_scope_id: string;
+  superseded_by: string;
+} {
   return {
     id: row.id as string,
+    scope_id: row.scope_id as string,
+    shared_scope_id: (row.shared_scope_id as string) ?? "",
+    superseded_by: (row.superseded_by as string) ?? "",
     schema_version: PLAYBOOK_SCHEMA_VERSION,
     task_class: row.task_class as string,
     title: row.title as string,
@@ -709,7 +755,7 @@ function createPlaybookVersion(
   version: number,
   changeType: string,
   changeReason: string,
-  snapshot: ProceduralPlaybook | (ProceduralPlaybook & { id: string }),
+  snapshot: Record<string, unknown> | ProceduralPlaybook | (ProceduralPlaybook & { id: string }),
 ): void {
   const now = new Date().toISOString();
   const id = randomUUID();
@@ -843,6 +889,34 @@ export function finishExperienceRun(
     SET outcome = ?, outcome_reason = ?, finished_at = ?
     WHERE id = ?
   `).run(outcome, outcomeReason ?? "", now, runId);
+}
+
+export function recordPlaybookFeedbackAtomically(
+  db: DatabaseSync,
+  params: CreateRunParams & {
+    outcome: ExperienceRun["outcome"];
+    outcome_reason?: string;
+    counter: "success" | "failure" | "stale";
+    scope_ids?: string[];
+  },
+): ExperienceRun {
+  return withExperienceTransaction(db, () => {
+    const playbook = getPlaybook(db, params.playbook_id, params.scope_ids);
+    if (!playbook) {
+      throw new ExperienceValidationError(`Playbook ${params.playbook_id} not found`);
+    }
+    const run = createExperienceRun(db, params);
+    finishExperienceRun(db, run.id, params.outcome, params.outcome_reason);
+    if (!incrementPlaybookCounters(db, params.playbook_id, params.counter, params.scope_ids)) {
+      throw new ExperienceValidationError(`Playbook ${params.playbook_id} not found`);
+    }
+    return {
+      ...run,
+      outcome: params.outcome,
+      outcome_reason: params.outcome_reason ?? "",
+      finished_at: new Date().toISOString(),
+    };
+  });
 }
 
 export function listRunsForPlaybook(

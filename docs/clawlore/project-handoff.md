@@ -1,7 +1,7 @@
 # ClawLore v1 project handoff
 
 Current through Phase 9, H1-H5 production hardening, the R1 canonical identity
-transition, and both independent-audit remediation rounds on 2026-07-15.
+transition, and three independent-audit remediation rounds on 2026-07-15.
 
 ## Canonical identity candidate
 
@@ -30,6 +30,17 @@ covers 301 tests, a 124-case annotated synthetic recall matrix, a 200,000-row
 SQLite FTS baseline, SecretRef-aware CLI registration, package-lock SBOM, and
 an extracted npm-pack content scan. See
 `eval/clawlore-v1-second-independent-audit-remediation-run-2026-07-15.md`.
+
+The third independent audit then exercised authority-outage and transaction
+fault paths. The candidate now fails closed whenever an existing SQL-truth
+architecture cannot initialize; commits truth, FTS, and durable vector intent
+atomically; commits Experience playbook state, FTS, version receipts, and
+feedback counters atomically using post-change snapshots; continues bounded
+vector scans past stale companion rows; and exposes stable redacted tool errors.
+The release workflow starts from a lockfile clean install, validates dependency
+integrity, and treats advisory endpoint failures as failures. Verification now
+covers 313 tests. See
+`eval/clawlore-v1-third-independent-audit-remediation-run-2026-07-15.md`.
 
 This candidate does not authorize a live rename, V2 writes, lifecycle
 promotion, ContextEngine, prompt mutation, or final-recall cutover. Tianxuan's
@@ -65,10 +76,10 @@ not an implied approval to switch later without fresh evidence.
 
 ## Next controlled boundary
 
-1. Commit the exact second-audit remediation candidate and record its recursive
+1. Commit the exact third-audit remediation candidate and record its recursive
    runtime digest plus clean release-gate evidence.
 2. Give Tianxuan the commit, this handoff, the identity-transition runbook, and
-   both dated audit-remediation reports for independent read-only re-audit.
+   all dated audit-remediation reports for independent read-only re-audit.
 3. If the audit passes, create or rename the GitHub repository to `clawlore`,
    verify the destination, then update `origin` and push the audited commit.
 4. Treat any live identity migration as a separate backup-backed rollout with

@@ -42,6 +42,7 @@ import { promoteExperiences } from "./src/experience-promotion.js";
 import { runPromotionBatch } from "./src/experience-promotion-batch.js";
 import { listAutoRecallTraces } from "./src/auto-recall-ledger.js";
 import { evaluateRecallScopePolicy, scopeIdForContext } from "./src/scope-policy.js";
+import { diagnosticErrorSummary } from "./src/diagnostic-redaction.js";
 import {
   buildKnowledgeSkillDrafts,
   type ExistingKnowledgeDoc,
@@ -1165,8 +1166,24 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
           process.exitCode = 1;
         }
       } catch (error) {
-        console.error("Doctor failed:", error);
-        process.exit(1);
+        const diagnostics = context.store.getDiagnostics();
+        const code = diagnostics.sqlTruth.errorCode ?? "DOCTOR_FAILED";
+        const summary = {
+          ok: false,
+          issues: [code],
+          recovery: "Restore or repair memory.sqlite3, then rerun clawlore doctor before enabling memory operations.",
+          sqlTruth: diagnostics.sqlTruth,
+        };
+        console.error(`clawlore doctor ${code}: ${diagnosticErrorSummary(error)}`);
+        if (options.json || options.cleanJson || options.quiet) {
+          writeJson(summary);
+        } else {
+          console.log("ClawLore Doctor:");
+          console.log("• Status: fail-closed");
+          console.log(`• Error code: ${code}`);
+          console.log(`• Recovery: ${summary.recovery}`);
+        }
+        process.exitCode = 1;
       }
     });
 

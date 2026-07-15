@@ -26,10 +26,8 @@ import {
   createPlaybook,
   getPlaybook,
   searchPlaybooks,
-  incrementPlaybookCounters,
   getPlaybookVersions,
-  createExperienceRun,
-  finishExperienceRun,
+  recordPlaybookFeedbackAtomically,
   listRunsForPlaybook,
   getExperienceStats,
 } from "./experience-store.js";
@@ -46,6 +44,7 @@ import {
   recoverDigestChunks,
   runDigestPipeline,
 } from "./digest-pipeline.js";
+import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
 
 // Use any to avoid TypeScript issues with experimental node:sqlite
 type DatabaseSync = any;
@@ -76,6 +75,15 @@ type ToolTextResult = {
   details?: Record<string, unknown>;
   isError?: boolean;
 };
+
+export function safeExperienceToolFailure(code: string, label: string, error: unknown): ToolTextResult {
+  console.warn(`clawlore: experience tool ${code}: ${diagnosticErrorSummary(error)}`);
+  return {
+    content: [{ type: "text", text: `${label}. Reference: ${code}` }],
+    details: { error: code },
+    isError: true,
+  };
+}
 
 export const EXPERIENCE_TOOL_NAMES = [
   "scope_recall_episode_create",
@@ -290,10 +298,7 @@ export function registerEpisodeCreateTool(api: OpenClawPluginApi, context: Exper
             details: { episode_id: episode.id, status: episode.status },
           };
         } catch (error) {
-          return {
-            content: [{ type: "text", text: `Error creating episode: ${error}` }],
-            isError: true,
-          };
+          return safeExperienceToolFailure("episode_create_failed", "Error creating episode", error);
         }
       },
     };
@@ -366,10 +371,7 @@ export function registerEpisodeCompleteTool(api: OpenClawPluginApi, context: Exp
             details: { episode_id, outcome, evidence, verification, tool_names },
           };
         } catch (error) {
-          return {
-            content: [{ type: "text", text: `Error completing episode: ${error}` }],
-            isError: true,
-          };
+          return safeExperienceToolFailure("episode_complete_failed", "Error completing episode", error);
         }
       },
     };
@@ -456,10 +458,7 @@ export function registerPlaybookSearchTool(api: OpenClawPluginApi, context: Expe
             details: { count: playbooks.length, playbooks: formatted },
           };
         } catch (error) {
-          return {
-            content: [{ type: "text", text: `Error searching playbooks: ${error}` }],
-            isError: true,
-          };
+          return safeExperienceToolFailure("playbook_search_failed", "Error searching playbooks", error);
         }
       },
     };
@@ -517,10 +516,7 @@ export function registerPlaybookInspectTool(api: OpenClawPluginApi, context: Exp
             details: result,
           };
         } catch (error) {
-          return {
-            content: [{ type: "text", text: `Error inspecting playbook: ${error}` }],
-            isError: true,
-          };
+          return safeExperienceToolFailure("playbook_inspect_failed", "Error inspecting playbook", error);
         }
       },
     };
@@ -648,15 +644,9 @@ export function registerPlaybookCreateTool(api: OpenClawPluginApi, context: Expe
           };
         } catch (error) {
           if (error instanceof ExperienceValidationError) {
-            return {
-              content: [{ type: "text", text: `Validation error: ${error.message}` }],
-              isError: true,
-            };
+            return safeExperienceToolFailure("playbook_validation_failed", "Playbook validation failed", error);
           }
-          return {
-            content: [{ type: "text", text: `Error creating playbook: ${error}` }],
-            isError: true,
-          };
+          return safeExperienceToolFailure("playbook_create_failed", "Error creating playbook", error);
         }
       },
     };
@@ -710,8 +700,7 @@ export function registerPlaybookFeedbackTool(api: OpenClawPluginApi, context: Ex
             };
           }
 
-          // Create experience run record
-          const run = createExperienceRun(db, {
+          const run = recordPlaybookFeedbackAtomically(db, {
             playbook_id,
             scope_id: runtime.defaultScope,
             decision: "used",
@@ -720,22 +709,9 @@ export function registerPlaybookFeedbackTool(api: OpenClawPluginApi, context: Ex
             evidence: evidence || [],
             outcome,
             outcome_reason: outcome_reason || "",
+            counter: outcome === "partial" ? "stale" : outcome,
+            scope_ids: runtime.scopeFilter,
           });
-
-          finishExperienceRun(db, run.id, outcome, outcome_reason);
-
-          // Update playbook counters
-          if (!incrementPlaybookCounters(
-            db,
-            playbook_id,
-            outcome === "partial" ? "stale" : outcome,
-            runtime.scopeFilter,
-          )) {
-            return {
-              content: [{ type: "text", text: `Playbook not found: ${playbook_id}` }],
-              isError: true,
-            };
-          }
 
           return {
             content: [
@@ -747,10 +723,7 @@ export function registerPlaybookFeedbackTool(api: OpenClawPluginApi, context: Ex
             details: { run_id: run.id, outcome },
           };
         } catch (error) {
-          return {
-            content: [{ type: "text", text: `Error recording feedback: ${error}` }],
-            isError: true,
-          };
+          return safeExperienceToolFailure("playbook_feedback_failed", "Error recording feedback", error);
         }
       },
     };
@@ -843,10 +816,7 @@ export function registerExperiencePreflightTool(api: OpenClawPluginApi, context:
             details: { found: true, count: playbooks.length, playbooks: guidance },
           };
         } catch (error) {
-          return {
-            content: [{ type: "text", text: `Error in preflight check: ${error}` }],
-            isError: true,
-          };
+          return safeExperienceToolFailure("experience_preflight_failed", "Error in preflight check", error);
         }
       },
     };
@@ -907,10 +877,7 @@ export function registerExperienceStatsTool(api: OpenClawPluginApi, context: Exp
             details: stats,
           };
         } catch (error) {
-          return {
-            content: [{ type: "text", text: `Error getting stats: ${error}` }],
-            isError: true,
-          };
+          return safeExperienceToolFailure("experience_stats_failed", "Error getting experience stats", error);
         }
       },
     };
@@ -986,10 +953,7 @@ ${result.items.map((item: any) => {
             details: result,
           };
         } catch (error) {
-          return {
-            content: [{ type: "text", text: `Error running promotion: ${error}` }],
-            isError: true,
-          };
+          return safeExperienceToolFailure("experience_promotion_failed", "Error running promotion", error);
         }
       },
     };
@@ -1051,10 +1015,7 @@ ${result.soft_archive_candidates.items.slice(0, 10).map((item) => `- archive ${i
             details: result,
           };
         } catch (error) {
-          return {
-            content: [{ type: "text", text: `Error running forgetting loop: ${error}` }],
-            isError: true,
-          };
+          return safeExperienceToolFailure("forgetting_report_failed", "Error running forgetting report", error);
         }
       },
     };
@@ -1111,10 +1072,7 @@ function registerForgettingRunTool(api: OpenClawPluginApi, context: ExperienceTo
             details: result,
           };
         } catch (error) {
-          return {
-            content: [{ type: "text", text: `Error running forgetting: ${error}` }],
-            isError: true,
-          };
+          return safeExperienceToolFailure("forgetting_run_failed", "Error running forgetting", error);
         }
       },
     };
@@ -1165,7 +1123,7 @@ function registerGovernanceCleanupReportTool(api: OpenClawPluginApi, context: Ex
             details: result,
           };
         } catch (error) {
-          return { content: [{ type: "text", text: `Error building governance cleanup report: ${error}` }], isError: true };
+          return safeExperienceToolFailure("governance_cleanup_report_failed", "Error building governance cleanup report", error);
         }
       },
     };
@@ -1236,7 +1194,7 @@ function registerGovernanceCleanupRunTool(api: OpenClawPluginApi, context: Exper
             details: result,
           };
         } catch (error) {
-          return { content: [{ type: "text", text: `Error running governance cleanup: ${error}` }], isError: true };
+          return safeExperienceToolFailure("governance_cleanup_run_failed", "Error running governance cleanup", error);
         }
       },
     };
@@ -1645,10 +1603,7 @@ ${params.reason ? `**Reason:** ${params.reason}` : ""}`;
             details: result,
           };
         } catch (error) {
-          return {
-            content: [{ type: "text", text: `Error reviewing playbook: ${error}` }],
-            isError: true,
-          };
+          return safeExperienceToolFailure("playbook_review_failed", "Error reviewing playbook", error);
         }
       },
     };
@@ -1712,10 +1667,7 @@ ${suite.results.map((r: any) => {
             details: suite,
           };
         } catch (error) {
-          return {
-            content: [{ type: "text", text: `Error running replay: ${error}` }],
-            isError: true,
-          };
+          return safeExperienceToolFailure("experience_replay_failed", "Error running replay", error);
         }
       },
     };
