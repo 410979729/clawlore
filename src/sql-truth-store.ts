@@ -45,6 +45,21 @@ export interface SqlTruthFtsReport {
   reason?: string;
 }
 
+export interface VectorRepairDebtReport {
+  pending: number;
+  oldestCreatedAt: number | null;
+  latestUpdatedAt: number | null;
+}
+
+export interface VectorRepairDebtEntry {
+  memoryId: string;
+  action: "upsert" | "delete";
+  operation: string;
+  attempts: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
 const WORD_RE = /[a-zA-Z0-9]{2,}|[\u4e00-\u9fff]{2,}/g;
 const MAX_LIST_LIMIT = 10_000;
 
@@ -277,6 +292,100 @@ export class SqlTruthStore {
     return row ? toMemoryEntry(row) : null;
   }
 
+  getByIds(ids: string[], scopeFilter?: string[]): MemoryEntry[] {
+    const uniqueIds = [...new Set(ids.filter(Boolean))];
+    if (uniqueIds.length === 0) return [];
+    const db = this.requireDb();
+    const scope = this.scopeClause("memory_truth", scopeFilter);
+    const placeholders = uniqueIds.map(() => "?").join(", ");
+    const rows = db.prepare(
+      `
+      SELECT *
+      FROM memory_truth
+      WHERE id IN (${placeholders}) AND ${scope.sql}
+      `,
+    ).all(...uniqueIds, ...scope.params) as SqlRow[];
+    return rows.map(toMemoryEntry);
+  }
+
+  recordVectorRepairDebt(input: {
+    memoryId: string;
+    action: "upsert" | "delete";
+    operation: string;
+    error: string;
+  }): void {
+    const now = Date.now();
+    this.requireDb().prepare(
+      `
+      INSERT INTO vector_companion_repair_outbox (
+        memory_id, action, operation, last_error, attempts, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 1, ?, ?)
+      ON CONFLICT(memory_id) DO UPDATE SET
+        action = excluded.action,
+        operation = excluded.operation,
+        last_error = excluded.last_error,
+        attempts = vector_companion_repair_outbox.attempts + 1,
+        updated_at = excluded.updated_at
+      `,
+    ).run(input.memoryId, input.action, input.operation, input.error, now, now);
+    this.enforcePrivateFiles();
+  }
+
+  clearVectorRepairDebt(memoryId: string): void {
+    this.requireDb()
+      .prepare("DELETE FROM vector_companion_repair_outbox WHERE memory_id = ?")
+      .run(memoryId);
+    this.enforcePrivateFiles();
+  }
+
+  vectorRepairDebtReport(): VectorRepairDebtReport {
+    const row = this.requireDb().prepare(
+      `
+      SELECT
+        COUNT(*) AS pending,
+        MIN(created_at) AS oldest_created_at,
+        MAX(updated_at) AS latest_updated_at
+      FROM vector_companion_repair_outbox
+      `,
+    ).get() as {
+      pending: number;
+      oldest_created_at: number | null;
+      latest_updated_at: number | null;
+    };
+    return {
+      pending: Number(row?.pending || 0),
+      oldestCreatedAt: row?.oldest_created_at == null ? null : Number(row.oldest_created_at),
+      latestUpdatedAt: row?.latest_updated_at == null ? null : Number(row.latest_updated_at),
+    };
+  }
+
+  listVectorRepairDebt(limit = 100_000): VectorRepairDebtEntry[] {
+    const safeLimit = Math.max(1, Math.min(Math.trunc(limit) || 1, 1_000_000));
+    const rows = this.requireDb().prepare(
+      `
+      SELECT memory_id, action, operation, attempts, created_at, updated_at
+      FROM vector_companion_repair_outbox
+      ORDER BY updated_at ASC, memory_id ASC
+      LIMIT ?
+      `,
+    ).all(safeLimit) as Array<{
+      memory_id: string;
+      action: "upsert" | "delete";
+      operation: string;
+      attempts: number;
+      created_at: number;
+      updated_at: number;
+    }>;
+    return rows.map((row) => ({
+      memoryId: row.memory_id,
+      action: row.action,
+      operation: row.operation,
+      attempts: Number(row.attempts),
+      createdAt: Number(row.created_at),
+      updatedAt: Number(row.updated_at),
+    }));
+  }
+
   findByPrefix(prefix: string, scopeFilter?: string[]): MemoryEntry[] {
     const db = this.requireDb();
     const scope = this.scopeClause("memory_truth", scopeFilter);
@@ -507,6 +616,17 @@ export class SqlTruthStore {
         ON memory_truth(scope, timestamp DESC);
       CREATE INDEX IF NOT EXISTS idx_memory_truth_category_timestamp
         ON memory_truth(category, timestamp DESC);
+      CREATE TABLE IF NOT EXISTS vector_companion_repair_outbox (
+        memory_id TEXT PRIMARY KEY,
+        action TEXT NOT NULL CHECK(action IN ('upsert', 'delete')),
+        operation TEXT NOT NULL,
+        last_error TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 1,
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_vector_companion_repair_updated_at
+        ON vector_companion_repair_outbox(updated_at ASC);
       CREATE TRIGGER IF NOT EXISTS memory_truth_single_active_fact_insert
       BEFORE INSERT ON memory_truth
       WHEN json_extract(NEW.metadata, '$.fact_key') IS NOT NULL

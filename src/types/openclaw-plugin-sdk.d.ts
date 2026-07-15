@@ -32,6 +32,50 @@ declare module "openclaw/plugin-sdk" {
   }
 }
 
+declare module "openclaw/plugin-sdk/config-types" {
+  export type SecretRef = {
+    source: "env" | "file" | "exec";
+    provider?: string;
+    id: string;
+  };
+
+  export type OpenClawConfig = Record<string, unknown> & {
+    secrets?: {
+      defaults?: Record<string, string>;
+      providers?: Record<string, unknown>;
+    };
+  };
+
+  export function coerceSecretRef(
+    value: unknown,
+    defaults?: Record<string, string>,
+  ): SecretRef | null;
+}
+
+declare module "openclaw/plugin-sdk/core" {
+  import type { SecretRef } from "openclaw/plugin-sdk/config-types";
+  export function isSecretRef(value: unknown): value is SecretRef;
+}
+
+declare module "openclaw/plugin-sdk/runtime-secret-resolution" {
+  import type { OpenClawConfig, SecretRef } from "openclaw/plugin-sdk/config-types";
+
+  export function resolveSecretRefValues(
+    refs: SecretRef[],
+    options: { config: OpenClawConfig; env?: NodeJS.ProcessEnv },
+  ): Promise<Map<string, unknown>>;
+
+  export function applyResolvedAssignments(params: {
+    assignments: Array<{
+      ref: SecretRef;
+      path: string;
+      expected: "string" | "string-or-object";
+      apply: (value: unknown) => void;
+    }>;
+    resolved: Map<string, unknown>;
+  }): void;
+}
+
 declare module "commander" {
   export interface Command {
     command(nameAndArgs: string): Command;

@@ -1,12 +1,14 @@
-import { access, readdir, readFile, realpath } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readdir, readFile, realpath, rm } from "node:fs/promises";
 import { constants } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { relative, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import {
   compareRuntimeArtifactIdentity,
   runtimeArtifactIdentity,
 } from "./release-artifact-identity.mjs";
+import { scanReleaseDirectory } from "./release-content-scan.mjs";
 
 async function exists(path) {
   try {
@@ -328,15 +330,33 @@ for (const marker of ["freshnessHealth", "freshness_debt", "unknown_freshness_fa
 }
 
 const goldenBenchmarkSource = await readFile("scripts/golden-benchmark.mjs", "utf8");
-for (const marker of ["knownAnswerRecall", "topKAccuracy", "forbiddenViolationRate", "promptBudget", "filterCounts"]) {
+for (const marker of ["knownAnswerRecall", "topKAccuracy", "mrr", "ndcgAtK", "badRecallRate", "crossScopeLeakage", "promptBudget", "filterCounts"]) {
   if (!goldenBenchmarkSource.includes(marker)) {
     throw new Error(`release gate failed: golden benchmark missing metric ${marker}`);
+  }
+}
+const scalabilityBenchmarkSource = await readFile("scripts/scalability-benchmark.mjs", "utf8");
+for (const marker of ["200_000", "knownAnswerRecall", "crossScopeLeakage", "p95"]) {
+  if (!scalabilityBenchmarkSource.includes(marker)) {
+    throw new Error(`release gate failed: scalability benchmark missing ${marker}`);
   }
 }
 const goldenCases = await readFile("benchmarks/golden-recall-cases.json", "utf8");
 for (const marker of ["project-alpha-deploy", "project-beta-deploy", "home-ip-old", "home-ip-current", "max_prompt_chars"]) {
   if (!goldenCases.includes(marker)) {
     throw new Error(`release gate failed: golden benchmark fixture missing ${marker}`);
+  }
+}
+const goldenFixture = JSON.parse(goldenCases);
+if (!Array.isArray(goldenFixture.cases) || goldenFixture.cases.length < 100 || goldenFixture.cases.length > 300) {
+  throw new Error("release gate failed: commercial recall benchmark must contain 100-300 annotated cases");
+}
+if (goldenFixture.cases.some((item) => item?.annotated !== true || !String(item?.annotation || "").trim())) {
+  throw new Error("release gate failed: every commercial recall case must carry an explicit annotation");
+}
+for (const lane of ["fact-conflict", "preference-scope", "project-scope", "experience-forgetting", "multilingual-scope", "attack-scope"]) {
+  if (!goldenFixture.cases.some((item) => item?.lane === lane)) {
+    throw new Error(`release gate failed: commercial recall benchmark missing lane ${lane}`);
   }
 }
 
@@ -380,7 +400,8 @@ run("npm", ["test"]);
 run("npm", ["run", "typecheck"]);
 run("npm", ["run", "smoke:vector-repair"]);
 run("npm", ["run", "build"]);
-run("node", ["scripts/golden-benchmark.mjs"]);
+run("node", ["scripts/golden-benchmark.mjs", "--summary"]);
+run("node", ["scripts/scalability-benchmark.mjs", "--rows", "200000", "--queries", "64"]);
 
 const candidateIdentity = await runtimeArtifactIdentity(sourceRoot);
 const gitCommit = runCapture("git", ["rev-parse", "HEAD"]).trim();
@@ -481,6 +502,25 @@ for (const file of packFiles) {
     throw new Error(`release gate failed: forbidden runtime/sensitive artifact in npm pack: ${file}`);
   }
 }
+const packScanRoot = await mkdtemp(resolve(tmpdir(), "clawlore-release-pack-"));
+try {
+  const packedJson = runCapture("npm", ["pack", "--json", "--pack-destination", packScanRoot]);
+  const packedInfo = JSON.parse(packedJson)[0];
+  const tarball = resolve(packScanRoot, String(packedInfo.filename));
+  const extractRoot = resolve(packScanRoot, "extract");
+  await mkdir(extractRoot, { recursive: true });
+  run("tar", ["-xzf", tarball, "-C", extractRoot]);
+  const contentFindings = await scanReleaseDirectory(resolve(extractRoot, "package"));
+  if (contentFindings.length > 0) {
+    const summary = contentFindings
+      .slice(0, 20)
+      .map((finding) => `${finding.path}:${finding.line} (${finding.rule})`)
+      .join(", ");
+    throw new Error(`release gate failed: sensitive content found in npm pack: ${summary}`);
+  }
+} finally {
+  await rm(packScanRoot, { recursive: true, force: true });
+}
 const sbomRaw = runCapture("npm", ["sbom", "--package-lock-only", "--sbom-format", "cyclonedx"]);
 const sbom = JSON.parse(sbomRaw);
 if (sbom.bomFormat !== "CycloneDX" || !Array.isArray(sbom.components) || sbom.components.length === 0) {
@@ -488,4 +528,4 @@ if (sbom.bomFormat !== "CycloneDX" || !Array.isArray(sbom.components) || sbom.co
 }
 const sbomDigest = createHash("sha256").update(sbomRaw).digest("hex");
 console.log(`release gate SBOM ok: ${sbom.components.length} components sha256=${sbomDigest}`);
-console.log(`release gate pack scan ok: ${packFiles.length} files`);
+console.log(`release gate pack filename/content scan ok: ${packFiles.length} files`);

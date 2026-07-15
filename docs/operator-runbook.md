@@ -38,25 +38,20 @@ audit approves the exact candidate commit.
 Use the current OpenClaw home:
 
 ```bash
-OPENCLAW_HOME=/home/a/openclaw-tianji/home/state \
-  node /home/a/openclaw-tianji/app/node_modules/openclaw/openclaw.mjs \
-  plugins inspect clawlore --json
+OPENCLAW_HOME=/path/to/openclaw-state \
+  openclaw plugins inspect clawlore --json
 
-OPENCLAW_HOME=/home/a/openclaw-tianji/home/state \
-  node /home/a/openclaw-tianji/app/node_modules/openclaw/openclaw.mjs \
-  clawlore doctor --json --quiet
+OPENCLAW_HOME=/path/to/openclaw-state \
+  openclaw clawlore doctor --json --quiet
 
-OPENCLAW_HOME=/home/a/openclaw-tianji/home/state \
-  node /home/a/openclaw-tianji/app/node_modules/openclaw/openclaw.mjs \
-  clawlore dashboard --json
+OPENCLAW_HOME=/path/to/openclaw-state \
+  openclaw clawlore dashboard --json
 
-OPENCLAW_HOME=/home/a/openclaw-tianji/home/state \
-  node /home/a/openclaw-tianji/app/node_modules/openclaw/openclaw.mjs \
-  clawlore digest report --json
+OPENCLAW_HOME=/path/to/openclaw-state \
+  openclaw clawlore digest report --json
 
-OPENCLAW_HOME=/home/a/openclaw-tianji/home/state \
-  node /home/a/openclaw-tianji/app/node_modules/openclaw/openclaw.mjs \
-  clawlore experience stats --json
+OPENCLAW_HOME=/path/to/openclaw-state \
+  openclaw clawlore experience stats --json
 ```
 
 Safe recall probes should use a non-secret query and must not force memory

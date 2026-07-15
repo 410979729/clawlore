@@ -4,6 +4,12 @@
  */
 
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
+import { isSecretRef } from "openclaw/plugin-sdk/core";
+import type { OpenClawConfig, SecretRef } from "openclaw/plugin-sdk/config-types";
+import {
+  applyResolvedAssignments,
+  resolveSecretRefValues,
+} from "openclaw/plugin-sdk/runtime-secret-resolution";
 import { homedir, tmpdir } from "node:os";
 import { join, dirname, basename } from "node:path";
 import { readFile, readdir, writeFile, mkdir, appendFile, unlink, stat } from "node:fs/promises";
@@ -65,8 +71,22 @@ import { buildReflectionMappedMetadata } from "./src/reflection-mapped-metadata.
 import { parseReflectionMetadata } from "./src/reflection-metadata.js";
 import { isNoise } from "./src/noise-filter.js";
 import { normalizeAutoCaptureText } from "./src/auto-capture-cleanup.js";
-import { cleanUserRecallQuery, selectAutoRecallQuery } from "./src/auto-recall-query.js";
+import {
+  AutoRecallSessionCache,
+  resolveAutoRecallSessionBoundary,
+} from "./src/auto-recall-session-boundary.js";
 import { evaluateCaptureSafety } from "./src/capture-safety.js";
+import {
+  autoRecallGovernanceEligibility,
+  regexFallbackGovernance,
+} from "./src/auto-capture-governance.js";
+import {
+  diagnosticContentSummary,
+  diagnosticErrorSummary,
+  diagnosticHash,
+  diagnosticIdentifier,
+  diagnosticTextSummary,
+} from "./src/diagnostic-redaction.js";
 
 // Import smart extraction & lifecycle components
 import { SmartExtractor, createExtractionRateLimiter } from "./src/smart-extractor.js";
@@ -547,7 +567,7 @@ async function loadEmbeddedPiRunner(): Promise<EmbeddedPiRunner> {
           if (typeof runner === "function") return runner as EmbeddedPiRunner;
           importErrors.push(`${specifier}: runEmbeddedPiAgent export not found`);
         } catch (err) {
-          importErrors.push(`${specifier}: ${err instanceof Error ? err.message : String(err)}`);
+          importErrors.push(`candidate=${diagnosticIdentifier(specifier)} error=${diagnosticErrorSummary(err)}`);
         }
       }
       throw new Error(
@@ -1153,7 +1173,7 @@ async function generateReflectionText(params: {
       reflectionText = typeof firstWithText?.text === "string" ? firstWithText.text.trim() : null;
     }
   } catch (err) {
-    errors.push(`embedded: ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`);
+    errors.push(`embedded:${diagnosticErrorSummary(err)}`);
   } finally {
     await unlink(tempSessionFile).catch(() => { });
   }
@@ -1293,37 +1313,13 @@ function sanitizeForContext(text: string): string {
     .slice(0, 300);
 }
 
-function summarizeTextPreview(text: string, maxLen = 120): string {
-  return JSON.stringify(sanitizeForContext(text).slice(0, maxLen));
-}
-
 function summarizeMessageContent(content: unknown): string {
-  if (typeof content === "string") {
-    const trimmed = content.trim();
-    return `string(len=${trimmed.length}, preview=${summarizeTextPreview(trimmed)})`;
-  }
-  if (Array.isArray(content)) {
-    const textBlocks: string[] = [];
-    for (const block of content) {
-      if (
-        block &&
-        typeof block === "object" &&
-        (block as Record<string, unknown>).type === "text" &&
-        typeof (block as Record<string, unknown>).text === "string"
-      ) {
-        textBlocks.push((block as Record<string, unknown>).text as string);
-      }
-    }
-    const combined = textBlocks.join(" ").trim();
-    return `array(blocks=${content.length}, textBlocks=${textBlocks.length}, textLen=${combined.length}, preview=${summarizeTextPreview(combined)})`;
-  }
-  return `type=${Array.isArray(content) ? "array" : typeof content}`;
+  return diagnosticContentSummary(content);
 }
 
 function summarizeCaptureDecision(text: string): string {
   const trimmed = text.trim();
-  const preview = sanitizeForContext(trimmed).slice(0, 120);
-  return `len=${trimmed.length}, trigger=${shouldCapture(trimmed) ? "Y" : "N"}, noise=${isNoise(trimmed) ? "Y" : "N"}, preview=${JSON.stringify(preview)}`;
+  return `${diagnosticTextSummary(trimmed)}, trigger=${shouldCapture(trimmed) ? "Y" : "N"}, noise=${isNoise(trimmed) ? "Y" : "N"}`;
 }
 
 // ============================================================================
@@ -1487,7 +1483,7 @@ function createMdMirrorWriter(
       await mkdir(mirrorDir, { recursive: true });
       await appendFile(filePath, line, "utf8");
     } catch (err) {
-      api.logger.warn(`mdMirror: write failed: ${String(err)}`);
+      api.logger.warn(`mdMirror: write failed: ${diagnosticErrorSummary(err)}`);
     }
   };
 }
@@ -1517,7 +1513,7 @@ function createAdmissionRejectionAuditWriter(
       await mkdir(dirname(filePath), { recursive: true });
       await appendFile(filePath, `${JSON.stringify(entry)}\n`, "utf8");
     } catch (err) {
-      api.logger.warn(`clawlore: admission rejection audit write failed: ${String(err)}`);
+      api.logger.warn(`clawlore: admission rejection audit write failed: ${diagnosticErrorSummary(err)}`);
     }
   };
 }
@@ -1708,6 +1704,228 @@ const buildCompatMemoryPromptSection = ({ availableTools, citationsMode }: { ava
   return lines;
 };
 
+type CoreMemoryRuntime = {
+  config: PluginConfig;
+  resolvedDbPath: string;
+  embeddingModel: string;
+  store: MemoryStore;
+  embedder: ReturnType<typeof createEmbedder>;
+  decayEngine: ReturnType<typeof createDecayEngine>;
+  tierManager: ReturnType<typeof createTierManager>;
+  retriever: ReturnType<typeof createRetriever>;
+  scopeManager: ReturnType<typeof createScopeManager>;
+  migrator: ReturnType<typeof createMigrator>;
+  cliLlmClient: ReturnType<typeof createLlmClient> | undefined;
+};
+
+function createCoreMemoryRuntime(api: OpenClawPluginApi, config: PluginConfig): CoreMemoryRuntime {
+  const configuredDbPath = config.dbPath || getDefaultDbPath();
+  const hostResolvedDbPath = api.resolvePath(configuredDbPath);
+  const resolvedDbPath = typeof hostResolvedDbPath === "string" && hostResolvedDbPath.trim().length > 0
+    ? hostResolvedDbPath
+    : configuredDbPath;
+
+  try {
+    validateStoragePath(resolvedDbPath);
+  } catch (err) {
+    api.logger.warn(
+      `clawlore: storage path issue — ${diagnosticErrorSummary(err)}\n` +
+      "  The plugin will still attempt to start, but writes may fail.",
+    );
+  }
+
+  const defaultEmbeddingModel =
+    config.embedding.provider === "local-debug"
+      ? "debug-hash-v1"
+      : config.embedding.provider === "local-hash"
+        ? "hash-v1"
+        : config.embedding.provider === "minimax"
+          ? "embo-01"
+          : "text-embedding-3-small";
+  const embeddingModel = config.embedding.model || defaultEmbeddingModel;
+  const vectorDim = getVectorDimensions(embeddingModel, config.embedding.dimensions);
+  const store = new MemoryStore({ dbPath: resolvedDbPath, vectorDim, vectorBackend: config.vectorBackend });
+  const embedderConfig = {
+    provider: config.embedding.provider,
+    model: embeddingModel,
+    baseURL: config.embedding.baseURL,
+    dimensions: config.embedding.dimensions,
+    groupId: config.embedding.groupId,
+    omitDimensions: config.embedding.omitDimensions,
+    taskQuery: config.embedding.taskQuery,
+    taskPassage: config.embedding.taskPassage,
+    normalized: config.embedding.normalized,
+    chunking: config.embedding.chunking,
+  } as Parameters<typeof createEmbedder>[0];
+  const embedder = createEmbedder(assignOpenAiClientCredential(embedderConfig, config.embedding.apiKey));
+  const decayEngine = createDecayEngine({
+    ...DEFAULT_DECAY_CONFIG,
+    ...(config.decay || {}),
+  });
+  const tierManager = createTierManager({
+    ...DEFAULT_TIER_CONFIG,
+    ...(config.tier || {}),
+  });
+  const retriever = createRetriever(
+    store,
+    embedder,
+    {
+      ...DEFAULT_RETRIEVAL_CONFIG,
+      ...config.retrieval,
+    },
+    { decayEngine },
+  );
+  const scopeManager = createScopeManager(config.scopes);
+
+  const clawteamScopes = parseClawteamScopes(process.env.CLAWTEAM_MEMORY_SCOPE);
+  if (clawteamScopes.length > 0) {
+    applyClawteamScopes(scopeManager, clawteamScopes);
+    api.logger.info(`clawlore: CLAWTEAM_MEMORY_SCOPE added scopes: ${clawteamScopes.join(", ")}`);
+  }
+
+  const migrator = createMigrator(store);
+  const cliLlmClient = (() => {
+    try {
+      const llmAuth = config.llm?.auth || "api-key";
+      const llmApiKey = llmAuth === "oauth"
+        ? undefined
+        : config.llm?.apiKey
+          ? resolveConfigString(config.llm.apiKey)
+          : resolveFirstApiKey(config.embedding.apiKey);
+      const llmBaseURL = llmAuth === "oauth"
+        ? (config.llm?.baseURL ? resolveConfigString(config.llm.baseURL) : undefined)
+        : config.llm?.baseURL
+          ? resolveConfigString(config.llm.baseURL)
+          : config.embedding.baseURL;
+      const llmOauthPath = llmAuth === "oauth"
+        ? config.llm?.oauthPath
+          ? resolveOptionalPathWithEnv(api, config.llm.oauthPath, ".clawlore/oauth.json")
+          : resolveDefaultOauthPathWithCompatibility(api)
+        : undefined;
+      const llmOauthProvider = llmAuth === "oauth"
+        ? config.llm?.oauthProvider
+        : undefined;
+      const llmTimeoutMs = resolveLlmTimeoutMs(config);
+      const llmClientConfig = {
+        auth: llmAuth,
+        model: config.llm?.model || "openai/gpt-oss-120b",
+        baseURL: llmBaseURL,
+        oauthProvider: llmOauthProvider,
+        oauthPath: llmOauthPath,
+        timeoutMs: llmTimeoutMs,
+        log: (msg: string) => api.logger.debug(msg),
+      } as Parameters<typeof createLlmClient>[0];
+      return createLlmClient(assignOpenAiClientCredential(llmClientConfig, llmApiKey));
+    } catch {
+      return undefined;
+    }
+  })();
+
+  return {
+    config,
+    resolvedDbPath,
+    embeddingModel,
+    store,
+    embedder,
+    decayEngine,
+    tierManager,
+    retriever,
+    scopeManager,
+    migrator,
+    cliLlmClient,
+  };
+}
+
+async function resolveCliPluginConfig(api: OpenClawPluginApi): Promise<PluginConfig> {
+  const sourceConfig = structuredClone((api.config ?? {}) as OpenClawConfig);
+  const pluginConfig = structuredClone((api.pluginConfig ?? {}) as Record<string, unknown>);
+  const assignments: Array<{
+    ref: SecretRef;
+    path: string;
+    expected: "string";
+    apply: (value: unknown) => void;
+  }> = [];
+
+  const addAssignment = (
+    value: unknown,
+    path: string,
+    apply: (value: unknown) => void,
+  ) => {
+    const ref = isSecretRef(value) ? value as SecretRef : null;
+    if (ref) assignments.push({ ref, path, expected: "string", apply });
+  };
+
+  const embedding = pluginConfig.embedding as Record<string, unknown> | undefined;
+  if (embedding) {
+    if (Array.isArray(embedding.apiKey)) {
+      embedding.apiKey.forEach((value, index) => {
+        addAssignment(value, `embedding.apiKey.${index}`, (resolved) => {
+          (embedding.apiKey as unknown[])[index] = resolved;
+        });
+      });
+    } else {
+      addAssignment(embedding.apiKey, "embedding.apiKey", (resolved) => {
+        embedding.apiKey = resolved;
+      });
+    }
+  }
+
+  const retrieval = pluginConfig.retrieval as Record<string, unknown> | undefined;
+  if (retrieval) {
+    addAssignment(retrieval.rerankApiKey, "retrieval.rerankApiKey", (resolved) => {
+      retrieval.rerankApiKey = resolved;
+    });
+  }
+
+  const llm = pluginConfig.llm as Record<string, unknown> | undefined;
+  if (llm) {
+    addAssignment(llm.apiKey, "llm.apiKey", (resolved) => {
+      llm.apiKey = resolved;
+    });
+  }
+
+  if (assignments.length > 0) {
+    const resolved = await resolveSecretRefValues(
+      assignments.map((assignment) => assignment.ref),
+      { config: sourceConfig, env: process.env },
+    );
+    applyResolvedAssignments({ assignments, resolved });
+  }
+
+  return parsePluginConfig(pluginConfig);
+}
+
+function registerCliMetadata(api: OpenClawPluginApi): void {
+  let initialized = false;
+  const context = {
+    store: undefined as unknown as MemoryStore,
+    retriever: undefined as unknown as ReturnType<typeof createRetriever>,
+    scopeManager: undefined as unknown as ReturnType<typeof createScopeManager>,
+    migrator: undefined as unknown as ReturnType<typeof createMigrator>,
+    embedder: undefined as unknown as ReturnType<typeof createEmbedder>,
+    llmClient: undefined as ReturnType<typeof createLlmClient> | undefined,
+    pluginId: CLAWLORE_PLUGIN_ID,
+    pluginConfig: (api.pluginConfig ?? {}) as Record<string, unknown>,
+    beforeAction: async (commandPath: string[]) => {
+      const root = commandPath[0];
+      if (root === "version" || root === "auth" || initialized) return;
+      const runtime = createCoreMemoryRuntime(api, await resolveCliPluginConfig(api));
+      context.store = runtime.store;
+      context.retriever = runtime.retriever;
+      context.scopeManager = runtime.scopeManager;
+      context.migrator = runtime.migrator;
+      context.embedder = runtime.embedder;
+      context.llmClient = runtime.cliLlmClient;
+      context.pluginConfig = runtime.config as unknown as Record<string, unknown>;
+      initialized = true;
+    },
+  };
+
+  api.registerCli(createMemoryCLI(context), {
+    commands: [CLAWLORE_CLI_PRIMARY, ...CLAWLORE_CLI_ALIASES],
+  });
+}
+
 // ============================================================================
 // Plugin Definition
 // ============================================================================
@@ -1720,112 +1938,25 @@ const clawLorePlugin = {
   kind: "memory" as const,
 
   register(api: OpenClawPluginApi) {
+    if (isCliRegistrationMode(api)) {
+      registerCliMetadata(api);
+      return;
+    }
+
     // Parse and validate configuration
     const config = parsePluginConfig(api.pluginConfig);
-
-    const resolvedDbPath = api.resolvePath(config.dbPath || getDefaultDbPath());
-
-    // Pre-flight: validate storage path (symlink resolution, mkdir, write check).
-    // Runs synchronously and logs warnings; does NOT block gateway startup.
-    try {
-      validateStoragePath(resolvedDbPath);
-    } catch (err) {
-      api.logger.warn(
-        `clawlore: storage path issue — ${String(err)}\n` +
-        `  The plugin will still attempt to start, but writes may fail.`,
-      );
-    }
-
-    const defaultEmbeddingModel =
-      config.embedding.provider === "local-debug"
-        ? "debug-hash-v1"
-        : config.embedding.provider === "local-hash"
-          ? "hash-v1"
-          : config.embedding.provider === "minimax"
-            ? "embo-01"
-            : "text-embedding-3-small";
-    const embeddingModel = config.embedding.model || defaultEmbeddingModel;
-    const vectorDim = getVectorDimensions(embeddingModel, config.embedding.dimensions);
-
-    // Initialize core components
-    const store = new MemoryStore({ dbPath: resolvedDbPath, vectorDim, vectorBackend: config.vectorBackend });
-    const embedderConfig = {
-      provider: config.embedding.provider,
-      model: embeddingModel,
-      baseURL: config.embedding.baseURL,
-      dimensions: config.embedding.dimensions,
-      groupId: config.embedding.groupId,
-      omitDimensions: config.embedding.omitDimensions,
-      taskQuery: config.embedding.taskQuery,
-      taskPassage: config.embedding.taskPassage,
-      normalized: config.embedding.normalized,
-      chunking: config.embedding.chunking,
-    } as Parameters<typeof createEmbedder>[0];
-    const embedder = createEmbedder(assignOpenAiClientCredential(embedderConfig, config.embedding.apiKey));
-    // Initialize decay engine
-    const decayEngine = createDecayEngine({
-      ...DEFAULT_DECAY_CONFIG,
-      ...(config.decay || {}),
-    });
-    const tierManager = createTierManager({
-      ...DEFAULT_TIER_CONFIG,
-      ...(config.tier || {}),
-    });
-    const retriever = createRetriever(
+    const {
+      resolvedDbPath,
+      embeddingModel,
       store,
       embedder,
-      {
-        ...DEFAULT_RETRIEVAL_CONFIG,
-        ...config.retrieval,
-      },
-      { decayEngine },
-    );
-    const scopeManager = createScopeManager(config.scopes);
-
-    // ClawTeam integration: extend accessible scopes via env var
-    const clawteamScopes = parseClawteamScopes(process.env.CLAWTEAM_MEMORY_SCOPE);
-    if (clawteamScopes.length > 0) {
-      applyClawteamScopes(scopeManager, clawteamScopes);
-      api.logger.info(`clawlore: CLAWTEAM_MEMORY_SCOPE added scopes: ${clawteamScopes.join(", ")}`);
-    }
-
-    const migrator = createMigrator(store);
-    const cliLlmClient = (() => {
-      try {
-        const llmAuth = config.llm?.auth || "api-key";
-        const llmApiKey = llmAuth === "oauth"
-          ? undefined
-          : config.llm?.apiKey
-            ? resolveConfigString(config.llm.apiKey)
-            : resolveFirstApiKey(config.embedding.apiKey);
-        const llmBaseURL = llmAuth === "oauth"
-          ? (config.llm?.baseURL ? resolveConfigString(config.llm.baseURL) : undefined)
-          : config.llm?.baseURL
-            ? resolveConfigString(config.llm.baseURL)
-            : config.embedding.baseURL;
-        const llmOauthPath = llmAuth === "oauth"
-          ? config.llm?.oauthPath
-            ? resolveOptionalPathWithEnv(api, config.llm.oauthPath, ".clawlore/oauth.json")
-            : resolveDefaultOauthPathWithCompatibility(api)
-          : undefined;
-        const llmOauthProvider = llmAuth === "oauth"
-          ? config.llm?.oauthProvider
-          : undefined;
-        const llmTimeoutMs = resolveLlmTimeoutMs(config);
-        const llmClientConfig = {
-          auth: llmAuth,
-          model: config.llm?.model || "openai/gpt-oss-120b",
-          baseURL: llmBaseURL,
-          oauthProvider: llmOauthProvider,
-          oauthPath: llmOauthPath,
-          timeoutMs: llmTimeoutMs,
-          log: (msg: string) => api.logger.debug(msg),
-        } as Parameters<typeof createLlmClient>[0];
-        return createLlmClient(assignOpenAiClientCredential(llmClientConfig, llmApiKey));
-      } catch {
-        return undefined;
-      }
-    })();
+      decayEngine,
+      tierManager,
+      retriever,
+      scopeManager,
+      migrator,
+      cliLlmClient,
+    } = createCoreMemoryRuntime(api, config);
 
     api.registerCli(
       createMemoryCLI({
@@ -1838,10 +1969,6 @@ const clawLorePlugin = {
       }),
       { commands: [CLAWLORE_CLI_PRIMARY, ...CLAWLORE_CLI_ALIASES] },
     );
-
-    if (isCliRegistrationMode(api)) {
-      return;
-    }
 
     const registerMemoryPromptSection = (api as {
       registerMemoryPromptSection?: ((builder: typeof buildCompatMemoryPromptSection) => void);
@@ -1934,7 +2061,7 @@ const clawLorePlugin = {
           (msg: string) => api.logger.debug(msg),
         );
         noiseBank.init(embedder).catch((err) =>
-          api.logger.debug(`clawlore: noise bank init: ${String(err)}`),
+          api.logger.debug(`clawlore: noise bank init: ${diagnosticErrorSummary(err)}`),
         );
 
         const admissionRejectionAuditWriter = createAdmissionRejectionAuditWriter(
@@ -1964,7 +2091,7 @@ const clawLorePlugin = {
           + ", noise bank: ON)",
         );
       } catch (err) {
-        api.logger.warn(`clawlore: smart extraction init failed, falling back to regex: ${String(err)}`);
+        api.logger.warn(`clawlore: smart extraction init failed, falling back to regex: ${diagnosticErrorSummary(err)}`);
       }
     }
 
@@ -2011,7 +2138,7 @@ const clawLorePlugin = {
           sqlitePath: join(resolvedDbPath, "memory.sqlite3"),
         });
       } catch (error) {
-        rolloutBindingErrors.push(`release_runtime_binding_failed:${error instanceof Error ? error.message : String(error)}`);
+        rolloutBindingErrors.push(`release_runtime_binding_failed:${diagnosticErrorSummary(error)}`);
       }
     }
     const rolloutControls = clawloreRuntimeConfig.mode === "shadow" && runtimeReleaseBinding
@@ -2131,7 +2258,7 @@ const clawLorePlugin = {
           api.logger.debug(`clawlore: skipping tier maintenance preload for bypass scope filter`);
         }
       } catch (err) {
-        api.logger.warn(`clawlore: tier maintenance preload failed: ${String(err)}`);
+        api.logger.warn(`clawlore: tier maintenance preload failed: ${diagnosticErrorSummary(err)}`);
       }
 
       const candidates = Array.from(lifecycleEntries.values())
@@ -2167,7 +2294,7 @@ const clawLorePlugin = {
           );
         }
       } catch (err) {
-        api.logger.warn(`clawlore: tier maintenance failed: ${String(err)}`);
+        api.logger.warn(`clawlore: tier maintenance failed: ${diagnosticErrorSummary(err)}`);
       }
 
       return tierOverrides;
@@ -2334,7 +2461,7 @@ const clawLorePlugin = {
         pruneMapIfOver(autoCapturePendingIngressTexts, AUTO_CAPTURE_MAP_MAX_ENTRIES);
       }
       api.logger.debug(
-        `clawlore: ingress message_received channel=${ctx.channelId} account=${ctx.accountId || "unknown"} conversation=${ctx.conversationId || "unknown"} from=${event.from} len=${event.content.trim().length} preview=${summarizeTextPreview(event.content)}`,
+        `clawlore: ingress message_received channel=${diagnosticIdentifier(ctx.channelId)} account=${diagnosticIdentifier(ctx.accountId)} conversation=${diagnosticIdentifier(ctx.conversationId)} from=${diagnosticIdentifier(event.from)} ${diagnosticTextSummary(event.content)}`,
       );
     });
 
@@ -2348,7 +2475,7 @@ const clawLorePlugin = {
         return;
       }
       api.logger.debug(
-        `clawlore: ingress before_message_write agent=${ctx.agentId || event.agentId || "unknown"} sessionKey=${ctx.sessionKey || event.sessionKey || "unknown"} role=${role} ${summarizeMessageContent(message?.content)}`,
+        `clawlore: ingress before_message_write agent=${diagnosticIdentifier(ctx.agentId || event.agentId)} session=${diagnosticIdentifier(ctx.sessionKey || event.sessionKey)} role=${role} ${summarizeMessageContent(message?.content)}`,
       );
     });
 
@@ -2397,6 +2524,7 @@ const clawLorePlugin = {
           workspaceDir: getDefaultWorkspaceDir(),
           mdMirror,
           workspaceBoundary: config.workspaceBoundary,
+          principalIsolation: config.principalIsolation,
           db: () => store.getSqlTruthDb(),
         },
         {
@@ -2409,7 +2537,7 @@ const clawLorePlugin = {
           if (db) ensureExperienceSchema(db);
         })
         .catch((err) => {
-          api.logger.warn(`clawlore: Experience Kernel schema initialization failed: ${String(err)}`);
+          api.logger.warn(`clawlore: Experience Kernel schema initialization failed: ${diagnosticErrorSummary(err)}`);
         });
     }
 
@@ -2445,7 +2573,7 @@ const clawLorePlugin = {
             }
           })
           .catch((err) => {
-            api.logger.warn(`memory-compactor [auto]: failed: ${String(err)}`);
+            api.logger.warn(`memory-compactor [auto]: failed: ${diagnosticErrorSummary(err)}`);
           });
       });
     }
@@ -2463,36 +2591,31 @@ const clawLorePlugin = {
       // before_prompt_build gating can check the *user* text, not the full
       // assembled prompt (which includes system instructions and is too long
       // for the short-message skip heuristic in shouldSkipRetrieval).
-      const lastRawUserMessage = new Map<string, string>();
+      const autoRecallSessionCache = new AutoRecallSessionCache();
       api.on("message_received", (event: any, ctx: any) => {
         const { access } = runtimeMemoryAccessFor(event, ctx);
         if (access.denied) return;
-        // Both message_received and before_prompt_build have channelId in ctx,
-        // so use it as the shared cache key for raw user message gating.
-        const cacheKey = ctx?.channelId || ctx?.conversationId || "default";
-        const raw = typeof event.content === "string" ? event.content : "";
-        // Strip leading bot mentions (@BotName or <@id>) so gating sees the
-        // actual user intent, not the mention prefix.
-        const text = cleanUserRecallQuery(raw);
-        if (text) lastRawUserMessage.set(cacheKey, text);
+        autoRecallSessionCache.remember(event, ctx);
       });
 
       const AUTO_RECALL_TIMEOUT_MS = parsePositiveInt(config.autoRecallTimeoutMs) ?? 5_000; // configurable; default raised from 3s to 5s for remote embedding APIs behind proxies
       api.on("before_prompt_build", async (event: any, ctx: any) => {
         const { agentId: traceAgentId, access: memoryAccess } = runtimeMemoryAccessFor(event, ctx);
         if (memoryAccess.denied) return;
-        // Manually increment turn counter for this session
-        const sessionId = ctx?.sessionId || "default";
+        // Manually increment turn state only inside a stable session boundary.
+        // A provider-level channel ID (for example `telegram`) is not a
+        // conversation boundary and must never key cross-turn state.
+        const sessionBoundary = resolveAutoRecallSessionBoundary(event, ctx);
 
         // Use cached raw user message for gating (short-message skip, greeting
         // detection, etc.).  Fall back to event.prompt if no cached message is
         // available (e.g. first message or non-channel triggers).
-        const cacheKey = ctx?.channelId || ctx?.conversationId || sessionId;
-        const recallQuerySelection = selectAutoRecallQuery({
-          cachedUserMessage: lastRawUserMessage.get(cacheKey),
-          eventPrompt: event.prompt,
-          maxChars: config.autoRecallQueryMaxChars ?? 4_000,
-        });
+        const recallQuerySelection = autoRecallSessionCache.select(
+          event,
+          ctx,
+          event.prompt,
+          config.autoRecallQueryMaxChars ?? 4_000,
+        );
         const gatingText = recallQuerySelection.query || event.prompt || "";
         if (
           !recallQuerySelection.query ||
@@ -2500,8 +2623,8 @@ const clawLorePlugin = {
         ) {
           return;
         }
-        const currentTurn = (turnCounter.get(sessionId) || 0) + 1;
-        turnCounter.set(sessionId, currentTurn);
+        const currentTurn = sessionBoundary ? (turnCounter.get(sessionBoundary) || 0) + 1 : 1;
+        if (sessionBoundary) turnCounter.set(sessionBoundary, currentTurn);
 
         // Wrap the entire recall pipeline in a timeout so slow embedding/rerank
         // API calls cannot stall agent startup indefinitely.  Without this guard
@@ -2564,7 +2687,9 @@ const clawLorePlugin = {
               }
               recordAutoRecallTrace(db, {
                 scope_id: traceCurrentScope,
-                session_id: sessionId,
+                session_id: typeof ctx?.sessionId === "string" && ctx.sessionId.trim()
+                  ? ctx.sessionId.trim()
+                  : sessionBoundary ?? "unresolved",
                 agent_id: traceAgentId,
                 channel: String(ctx?.channelId || ctx?.conversationId || ""),
                 query_source: recallQuerySelection.source,
@@ -2582,7 +2707,7 @@ const clawLorePlugin = {
                 },
               });
             } catch (err) {
-              api.logger.warn(`clawlore: auto-recall trace ledger write failed: ${String(err)}`);
+              api.logger.warn(`clawlore: auto-recall trace ledger write failed: ${diagnosticErrorSummary(err)}`);
             }
           })();
         };
@@ -2651,7 +2776,9 @@ const clawLorePlugin = {
           let finalResults = rankedResults;
 
           if (minRepeated > 0) {
-            const sessionHistory = recallHistory.get(sessionId) || new Map<string, number>();
+            const sessionHistory = sessionBoundary
+              ? recallHistory.get(sessionBoundary) || new Map<string, number>()
+              : new Map<string, number>();
             const filteredResults = rankedResults.filter((r) => {
               const lastTurn = sessionHistory.get(r.entry.id) ?? -999;
               const diff = currentTurn - lastTurn;
@@ -2659,7 +2786,7 @@ const clawLorePlugin = {
 
               if (isRedundant) {
                 api.logger.debug?.(
-                  `clawlore: skipping redundant memory ${r.entry.id.slice(0, 8)} (last seen at turn ${lastTurn}, current turn ${currentTurn}, min ${minRepeated})`,
+                  `clawlore: skipping redundant memory hash=${diagnosticHash(r.entry.id)} (last seen at turn ${lastTurn}, current turn ${currentTurn}, min ${minRepeated})`,
                 );
                 traceStatusById.set(r.entry.id, {
                   status: "dedup_filtered",
@@ -2696,19 +2823,12 @@ const clawLorePlugin = {
           let crossScopeFilteredCount = 0;
           const governanceEligible = finalResults.filter((r) => {
             const meta = parseSmartMetadata(r.entry.metadata, r.entry);
-            if (meta.state !== "confirmed") {
+            const governance = autoRecallGovernanceEligibility(meta as unknown as Record<string, unknown>);
+            if (!governance.eligible) {
               stateFilteredCount++;
               traceStatusById.set(r.entry.id, {
                 status: "governance_filtered",
-                reason: "state_not_confirmed",
-              });
-              return false;
-            }
-            if (meta.memory_layer === "archive" || meta.memory_layer === "reflection") {
-              stateFilteredCount++;
-              traceStatusById.set(r.entry.id, {
-                status: "governance_filtered",
-                reason: `memory_layer_${meta.memory_layer}`,
+                reason: governance.reason,
               });
               return false;
             }
@@ -2865,11 +2985,13 @@ const clawLorePlugin = {
 
           throwIfRecallAborted();
           if (minRepeated > 0) {
-            const sessionHistory = recallHistory.get(sessionId) || new Map<string, number>();
+            const sessionHistory = sessionBoundary
+              ? recallHistory.get(sessionBoundary) || new Map<string, number>()
+              : new Map<string, number>();
             for (const item of selected) {
               sessionHistory.set(item.id, currentTurn);
             }
-            recallHistory.set(sessionId, sessionHistory);
+            if (sessionBoundary) recallHistory.set(sessionBoundary, sessionHistory);
           }
 
           // Do not block prompt assembly on per-memory metadata writes.
@@ -2879,7 +3001,6 @@ const clawLorePlugin = {
           throwIfRecallAborted();
           const memoryContext = selected.map((item) => item.line).join("\n");
 
-          const injectedIds = selected.map((item) => item.id).join(",") || "(none)";
           const selectedIds = new Set(selected.map((item) => item.id));
           for (const result of results) {
             const id = String(result.entry.id);
@@ -2893,7 +3014,7 @@ const clawLorePlugin = {
             }
           }
           api.logger.debug?.(
-            `clawlore: auto-recall stats hits=${results.length}, dedupFiltered=${dedupFilteredCount}, stateFiltered=${stateFilteredCount}, suppressedFiltered=${suppressedFilteredCount}, crossScopeFiltered=${crossScopeFilteredCount}, preBudgetItems=${preBudgetItems}, preBudgetChars=${preBudgetChars}, postBudgetItems=${selected.length}, postBudgetChars=${usedChars}, maxItems=${autoRecallMaxItems}, maxChars=${autoRecallMaxChars}, perItemMaxChars=${autoRecallPerItemMaxChars}, injectedIds=${injectedIds}`,
+            `clawlore: auto-recall stats hits=${results.length}, dedupFiltered=${dedupFilteredCount}, stateFiltered=${stateFilteredCount}, suppressedFiltered=${suppressedFilteredCount}, crossScopeFiltered=${crossScopeFilteredCount}, preBudgetItems=${preBudgetItems}, preBudgetChars=${preBudgetChars}, postBudgetItems=${selected.length}, postBudgetChars=${usedChars}, maxItems=${autoRecallMaxItems}, maxChars=${autoRecallMaxChars}, perItemMaxChars=${autoRecallPerItemMaxChars}`,
           );
           writeAutoRecallTrace({
             decision: "injected",
@@ -2918,7 +3039,7 @@ const clawLorePlugin = {
 
           throwIfRecallAborted();
           api.logger.info?.(
-            `clawlore: injecting ${selected.length} memories into context for agent ${agentId}`,
+            `clawlore: injecting ${selected.length} memories into context for agent=${diagnosticIdentifier(agentId)}`,
           );
 
           return {
@@ -2955,23 +3076,17 @@ const clawLorePlugin = {
           if ((err as Error)?.message === "retrieval aborted") {
             return;
           }
-          api.logger.warn(`clawlore: recall failed: ${String(err)}`);
+          api.logger.warn(`clawlore: recall failed: ${diagnosticErrorSummary(err)}`);
         }
       }, { priority: 10 });
 
       // Clean up auto-recall session state on session end to prevent unbounded
       // growth of recallHistory and turnCounter Maps (#345).
-      api.on("session_end", (_event: any, ctx: any) => {
-        const sessionId = ctx?.sessionId || "";
-        if (sessionId) {
-          recallHistory.delete(sessionId);
-          turnCounter.delete(sessionId);
-          lastRawUserMessage.delete(sessionId);
-        }
-        // Also clean by channelId/conversationId if present (shared cache key)
-        const cacheKey = ctx?.channelId || ctx?.conversationId || "";
-        if (cacheKey && cacheKey !== sessionId) {
-          lastRawUserMessage.delete(cacheKey);
+      api.on("session_end", (event: any, ctx: any) => {
+        const sessionBoundary = autoRecallSessionCache.clear(event, ctx);
+        if (sessionBoundary) {
+          recallHistory.delete(sessionBoundary);
+          turnCounter.delete(sessionBoundary);
         }
       }, { priority: 10 });
     }
@@ -3025,7 +3140,7 @@ const clawLorePlugin = {
           Object.assign(runtimeScopeMetadata, runtimeBoundaryMetadata(memoryAccess.boundary));
 
           api.logger.debug(
-            `clawlore: auto-capture agent_end payload for agent ${agentId} (sessionKey=${sessionKey}, captureAssistant=${config.captureAssistant === true}, ${summarizeAgentEndMessages(event.messages)})`,
+            `clawlore: auto-capture agent_end payload agent=${diagnosticIdentifier(agentId)} session=${diagnosticIdentifier(sessionKey)} (captureAssistant=${config.captureAssistant === true}, ${summarizeAgentEndMessages(event.messages)})`,
           );
 
           // Extract text content from messages
@@ -3116,31 +3231,31 @@ const clawLorePlugin = {
           const minMessages = config.extractMinMessages ?? 4;
           if (skippedAutoCaptureTexts > 0) {
             api.logger.debug(
-              `clawlore: auto-capture skipped ${skippedAutoCaptureTexts} injected/system text block(s) for agent ${agentId}`,
+              `clawlore: auto-capture skipped ${skippedAutoCaptureTexts} injected/system text block(s) for agent=${diagnosticIdentifier(agentId)}`,
             );
           }
           if (pendingIngressTexts.length > 0) {
             api.logger.debug(
-              `clawlore: auto-capture using ${pendingIngressTexts.length} pending ingress text(s) for agent ${agentId}`,
+              `clawlore: auto-capture using ${pendingIngressTexts.length} pending ingress text(s) for agent=${diagnosticIdentifier(agentId)}`,
             );
           }
           if (texts.length !== eligibleTexts.length) {
             api.logger.debug(
-              `clawlore: auto-capture narrowed ${eligibleTexts.length} eligible history text(s) to ${texts.length} new text(s) for agent ${agentId}`,
+              `clawlore: auto-capture narrowed ${eligibleTexts.length} eligible history text(s) to ${texts.length} new text(s) for agent=${diagnosticIdentifier(agentId)}`,
             );
           }
           api.logger.debug(
-            `clawlore: auto-capture collected ${texts.length} text(s) for agent ${agentId} (minMessages=${minMessages}, smartExtraction=${smartExtractor ? "on" : "off"})`,
+            `clawlore: auto-capture collected ${texts.length} text(s) for agent=${diagnosticIdentifier(agentId)} (minMessages=${minMessages}, smartExtraction=${smartExtractor ? "on" : "off"})`,
           );
           if (texts.length === 0) {
             api.logger.debug(
-              `clawlore: auto-capture found no eligible texts after filtering for agent ${agentId}`,
+              `clawlore: auto-capture found no eligible texts after filtering for agent=${diagnosticIdentifier(agentId)}`,
             );
             return;
           }
           if (texts.length > 0) {
             api.logger.debug(
-              `clawlore: auto-capture text diagnostics for agent ${agentId}: ${texts.map((text, idx) => `#${idx + 1}(${summarizeCaptureDecision(text)})`).join(" | ")}`,
+              `clawlore: auto-capture text diagnostics for agent=${diagnosticIdentifier(agentId)}: ${texts.map((text, idx) => `#${idx + 1}(${summarizeCaptureDecision(text)})`).join(" | ")}`,
             );
           }
 
@@ -3151,7 +3266,7 @@ const clawLorePlugin = {
             const conversationValue = estimateConversationValue(texts);
             if (conversationValue < 0.2) {
               api.logger.debug(
-                `clawlore: auto-capture skipped for agent ${agentId} (low conversation value: ${conversationValue.toFixed(2)})`,
+                `clawlore: auto-capture skipped for agent=${diagnosticIdentifier(agentId)} (low conversation value: ${conversationValue.toFixed(2)})`,
               );
               return;
             }
@@ -3167,7 +3282,7 @@ const clawLorePlugin = {
             });
             if (compressed.dropped > 0) {
               api.logger.debug(
-                `clawlore: session compression for agent ${agentId}: dropped ${compressed.dropped}/${texts.length} texts (${compressed.totalChars} chars kept)`,
+                `clawlore: session compression for agent=${diagnosticIdentifier(agentId)}: dropped ${compressed.dropped}/${texts.length} texts (${compressed.totalChars} chars kept)`,
               );
               texts = compressed.texts;
             }
@@ -3184,13 +3299,13 @@ const clawLorePlugin = {
             const cleanTexts = await smartExtractor.filterNoiseByEmbedding(texts);
             if (cleanTexts.length === 0) {
               api.logger.debug(
-                `clawlore: all texts filtered as embedding noise for agent ${agentId}`,
+                `clawlore: all texts filtered as embedding noise for agent=${diagnosticIdentifier(agentId)}`,
               );
               return;
             }
             if (cleanTexts.length >= minMessages) {
               api.logger.debug(
-                `clawlore: auto-capture running smart extraction for agent ${agentId} (${cleanTexts.length} clean texts >= ${minMessages})`,
+                `clawlore: auto-capture running smart extraction for agent=${diagnosticIdentifier(agentId)} (${cleanTexts.length} clean texts >= ${minMessages})`,
               );
               const conversationText = cleanTexts.join("\n");
               try {
@@ -3202,14 +3317,14 @@ const clawLorePlugin = {
                   // Charge rate limiter only after actual writes/merges.
                   extractionRateLimiter.recordExtraction();
                   api.logger.info(
-                    `clawlore: smart-extracted ${stats.created} created, ${stats.merged} merged, ${stats.skipped} skipped for agent ${agentId}`
+                    `clawlore: smart-extracted ${stats.created} created, ${stats.merged} merged, ${stats.skipped} skipped for agent=${diagnosticIdentifier(agentId)}`
                   );
                   return; // Smart extraction handled everything
                 }
 
                 if ((stats.boundarySkipped ?? 0) > 0) {
                   api.logger.info(
-                    `clawlore: smart extraction skipped ${stats.boundarySkipped} USER.md-exclusive candidate(s) for agent ${agentId}; continuing to regex fallback for non-boundary texts`,
+                    `clawlore: smart extraction skipped ${stats.boundarySkipped} USER.md-exclusive candidate(s) for agent=${diagnosticIdentifier(agentId)}; continuing to regex fallback for non-boundary texts`,
                   );
                 }
 
@@ -3217,23 +3332,23 @@ const clawLorePlugin = {
                   ? stats.degradedReason || "smart_extraction_degraded"
                   : "smart_extraction_no_persisted_memories";
                 api.logger.info(
-                  `clawlore: smart extraction produced no persisted memories for agent ${agentId} (created=${stats.created}, merged=${stats.merged}, skipped=${stats.skipped}); falling back to regex capture degraded_reason=${regexFallbackDegradedReason}`,
+                  `clawlore: smart extraction produced no persisted memories for agent=${diagnosticIdentifier(agentId)} (created=${stats.created}, merged=${stats.merged}, skipped=${stats.skipped}); falling back to regex capture degradedReasonHash=${diagnosticHash(regexFallbackDegradedReason)}`,
                 );
               } catch (err) {
-                regexFallbackDegradedReason = `smart_extraction_error:${err instanceof Error ? err.message : String(err)}`;
+                regexFallbackDegradedReason = `smart_extraction_error:${diagnosticHash(err instanceof Error ? err.message : String(err))}`;
                 api.logger.warn(
-                  `clawlore: smart extraction failed for agent ${agentId}; falling back to degraded regex capture: ${String(err)}`,
+                  `clawlore: smart extraction failed for agent=${diagnosticIdentifier(agentId)}; falling back to degraded regex capture: ${diagnosticErrorSummary(err)}`,
                 );
               }
             } else {
               api.logger.debug(
-                `clawlore: auto-capture skipped smart extraction for agent ${agentId} (${cleanTexts.length} < ${minMessages})`,
+                `clawlore: auto-capture skipped smart extraction for agent=${diagnosticIdentifier(agentId)} (${cleanTexts.length} < ${minMessages})`,
               );
             }
           }
 
           api.logger.debug(
-            `clawlore: auto-capture running regex fallback for agent ${agentId}`,
+            `clawlore: auto-capture running regex fallback for agent=${diagnosticIdentifier(agentId)}`,
           );
 
           // ----------------------------------------------------------------
@@ -3243,17 +3358,17 @@ const clawLorePlugin = {
           if (toCapture.length === 0) {
             if (texts.length > 0) {
               api.logger.debug(
-                `clawlore: regex fallback diagnostics for agent ${agentId}: ${texts.map((text, idx) => `#${idx + 1}(${summarizeCaptureDecision(text)})`).join(" | ")}`,
+                `clawlore: regex fallback diagnostics for agent=${diagnosticIdentifier(agentId)}: ${texts.map((text, idx) => `#${idx + 1}(${summarizeCaptureDecision(text)})`).join(" | ")}`,
               );
             }
             api.logger.info(
-              `clawlore: regex fallback found 0 capturable texts for agent ${agentId}`,
+              `clawlore: regex fallback found 0 capturable texts for agent=${diagnosticIdentifier(agentId)}`,
             );
             return;
           }
 
           api.logger.info(
-            `clawlore: regex fallback found ${toCapture.length} capturable text(s) for agent ${agentId}`,
+            `clawlore: regex fallback found ${toCapture.length} capturable text(s) for agent=${diagnosticIdentifier(agentId)}`,
           );
 
           // Store each capturable piece (limit to 2 per conversation)
@@ -3261,13 +3376,14 @@ const clawLorePlugin = {
           for (const text of toCapture.slice(0, 2)) {
             if (isUserMdExclusiveMemory({ text }, config.workspaceBoundary)) {
               api.logger.info(
-                `clawlore: skipped USER.md-exclusive auto-capture text for agent ${agentId}`,
+                `clawlore: skipped USER.md-exclusive auto-capture text for agent=${diagnosticIdentifier(agentId)}`,
               );
               continue;
             }
 
             const category = detectCategory(text);
             const vector = await embedder.embedPassage(text);
+            const fallbackGovernance = regexFallbackGovernance(regexFallbackDegradedReason);
 
             // Check for duplicates using raw vector similarity (bypasses importance/recency weighting)
             // Fail-open by design: dedup should not block auto-capture writes.
@@ -3278,7 +3394,7 @@ const clawLorePlugin = {
               ]);
             } catch (err) {
               api.logger.warn(
-                `clawlore: auto-capture duplicate pre-check failed, continue store: ${String(err)}`,
+                `clawlore: auto-capture duplicate pre-check failed, continue store: ${diagnosticErrorSummary(err)}`,
               );
             }
 
@@ -3306,16 +3422,15 @@ const clawLorePlugin = {
                     l2_content: text,
                     source_session: sessionKey,
                     source: "auto-capture",
-                    // Write "confirmed" so auto-recall governance filter accepts
-                    // these memories immediately. Previously "pending" caused a
-                    // deadlock where auto-captured memories could never be
-                    // auto-recalled (see #350).
-                    state: "confirmed",
+                    // Healthy regex capture remains immediately usable. When
+                    // the smart extractor failed/degraded, preserve the text as
+                    // an auditable candidate and require explicit promotion.
+                    state: fallbackGovernance.state,
                     memory_layer: "working",
-                    confidence: regexFallbackDegradedReason ? 0.35 : 0.7,
-                    trust: regexFallbackDegradedReason ? "degraded" : "normal",
-                    extraction_degraded: Boolean(regexFallbackDegradedReason),
-                    degraded_reason: regexFallbackDegradedReason || "",
+                    confidence: fallbackGovernance.confidence,
+                    trust: fallbackGovernance.trust,
+                    extraction_degraded: fallbackGovernance.extraction_degraded,
+                    degraded_reason: fallbackGovernance.degraded_reason,
                     injected_count: 0,
                     bad_recall_count: 0,
                     suppressed_until_turn: 0,
@@ -3336,11 +3451,11 @@ const clawLorePlugin = {
 
           if (stored > 0) {
             api.logger.info(
-              `clawlore: auto-captured ${stored} memories for agent ${agentId} in scope ${defaultScope}`,
+              `clawlore: auto-captured ${stored} memories for agent=${diagnosticIdentifier(agentId)} in scope=${diagnosticIdentifier(defaultScope)}`,
             );
           }
         } catch (err) {
-          api.logger.warn(`clawlore: capture failed: ${String(err)}`);
+          api.logger.warn(`clawlore: capture failed: ${diagnosticErrorSummary(err)}`);
         }
         })();
         agentEndAutoCaptureHook.__lastRun = backgroundRun;
@@ -3427,7 +3542,7 @@ const clawLorePlugin = {
                   });
                   taskExperienceEpisodeId = episode.id;
                   api.logger.info(
-                    `task-experience: recorded episode ${episode.id.slice(0, 8)} action=${result.action} outcome=${episode.outcome}`,
+                    `task-experience: recorded episode hash=${diagnosticHash(episode.id)} action=${result.action} outcome=${episode.outcome}`,
                   );
                 }
                 recordTaskExperienceCaptureEvent(experienceDb, {
@@ -3450,22 +3565,22 @@ const clawLorePlugin = {
                 api.logger.debug("task-experience: skipped episode/capture ledger because SQL truth DB is unavailable");
               }
             } catch (ledgerErr) {
-              api.logger.warn(`task-experience: episode/capture ledger write failed: ${String(ledgerErr)}`);
+              api.logger.warn(`task-experience: episode/capture ledger write failed: ${diagnosticErrorSummary(ledgerErr)}`);
             }
 
             if (result.action === "created") {
               api.logger.info(
-                `task-experience: stored reusable task experience ${result.id.slice(0, 8)} (${result.taskType}) for agent ${agentId}`,
+                `task-experience: stored reusable task experience hash=${diagnosticHash(result.id)} (${result.taskType}) agent=${diagnosticIdentifier(agentId)}`,
               );
             } else if (result.action === "duplicate") {
               api.logger.debug(
-                `task-experience: duplicate skipped (${result.taskType}) existing=${result.existingId.slice(0, 8)} similarity=${result.similarity.toFixed(3)}`,
+                `task-experience: duplicate skipped (${result.taskType}) existingHash=${diagnosticHash(result.existingId)} similarity=${result.similarity.toFixed(3)}`,
               );
             } else {
               api.logger.info(`task-experience: skipped (${result.reason})`);
             }
           } catch (err) {
-            api.logger.warn(`task-experience: capture failed: ${String(err)}`);
+            api.logger.warn(`task-experience: capture failed: ${diagnosticErrorSummary(err)}`);
           }
         })();
 
@@ -3519,7 +3634,7 @@ const clawLorePlugin = {
             virtual: true,
           });
         } catch (err) {
-          api.logger.warn(`self-improvement: bootstrap inject failed: ${String(err)}`);
+          api.logger.warn(`self-improvement: bootstrap inject failed: ${diagnosticErrorSummary(err)}`);
         }
       }, {
         name: "clawlore.self-improvement.agent-bootstrap",
@@ -3537,7 +3652,7 @@ const clawLorePlugin = {
             const commandSource = typeof contextForLog.commandSource === "string" ? contextForLog.commandSource : "";
             const contextKeys = Object.keys(contextForLog).slice(0, 8).join(",");
             api.logger.info(
-              `self-improvement: command:${action} hook start; sessionKey=${sessionKeyForLog || "(none)"}; source=${commandSource || "(unknown)"}; hasMessages=${Array.isArray(event?.messages)}; contextKeys=${contextKeys || "(none)"}`
+              `self-improvement: command:${action} hook start; session=${diagnosticIdentifier(sessionKeyForLog)}; source=${diagnosticIdentifier(commandSource)}; hasMessages=${Array.isArray(event?.messages)}; contextKeys=${contextKeys || "(none)"}`
             );
 
             if (!Array.isArray(event.messages)) {
@@ -3566,7 +3681,7 @@ const clawLorePlugin = {
               `self-improvement: command:${action} injected note; messages=${event.messages.length}`
             );
           } catch (err) {
-            api.logger.warn(`self-improvement: note inject failed: ${String(err)}`);
+            api.logger.warn(`self-improvement: note inject failed: ${diagnosticErrorSummary(err)}`);
           }
         };
 
@@ -3678,7 +3793,7 @@ const clawLorePlugin = {
             ].join("\n"),
           };
         } catch (err) {
-          api.logger.warn(`memory-reflection: inheritance injection failed: ${String(err)}`);
+          api.logger.warn(`memory-reflection: inheritance injection failed: ${diagnosticErrorSummary(err)}`);
         }
       }, { priority: 12 });
 
@@ -3712,7 +3827,7 @@ const clawLorePlugin = {
               );
             }
           } catch (err) {
-            api.logger.warn(`memory-reflection: derived injection failed: ${String(err)}`);
+            api.logger.warn(`memory-reflection: derived injection failed: ${diagnosticErrorSummary(err)}`);
           }
         }
 
@@ -3763,7 +3878,7 @@ const clawLorePlugin = {
           let currentSessionFile = typeof sessionEntry.sessionFile === "string" ? sessionEntry.sessionFile : undefined;
           const commandSource = typeof context.commandSource === "string" ? context.commandSource : "";
           api.logger.info(
-            `memory-reflection: command:${action} hook start; sessionKey=${sessionKey || "(none)"}; source=${commandSource || "(unknown)"}; sessionId=${currentSessionId}; sessionFile=${currentSessionFile || "(none)"}`
+            `memory-reflection: command:${action} hook start; session=${diagnosticIdentifier(sessionKey)}; source=${diagnosticIdentifier(commandSource)}; sessionId=${diagnosticIdentifier(currentSessionId)}; sessionFile=${diagnosticIdentifier(currentSessionFile)}`
           );
 
           if (!currentSessionFile || currentSessionFile.includes(".reset.")) {
@@ -3775,7 +3890,7 @@ const clawLorePlugin = {
               sourceAgentId,
             });
             api.logger.info(
-              `memory-reflection: command:${action} session recovery start for session ${currentSessionId}; initial=${currentSessionFile || "(none)"}; dirs=${searchDirs.join(" | ") || "(none)"}`
+              `memory-reflection: command:${action} session recovery start session=${diagnosticIdentifier(currentSessionId)}; initial=${diagnosticIdentifier(currentSessionFile)}; dirCount=${searchDirs.length}`
             );
             for (const sessionsDir of searchDirs) {
               const recovered = await findPreviousSessionFile(sessionsDir, currentSessionFile, currentSessionId);
@@ -3798,7 +3913,7 @@ const clawLorePlugin = {
               sourceAgentId,
             });
             api.logger.warn(
-              `memory-reflection: command:${action} missing session file after recovery for session ${currentSessionId}; dirs=${searchDirs.join(" | ") || "(none)"}`
+              `memory-reflection: command:${action} missing session file after recovery session=${diagnosticIdentifier(currentSessionId)}; dirCount=${searchDirs.length}`
             );
             return;
           }
@@ -3806,7 +3921,7 @@ const clawLorePlugin = {
           const conversation = await readSessionConversationWithResetFallback(currentSessionFile, reflectionMessageCount);
           if (!conversation) {
             api.logger.warn(
-              `memory-reflection: command:${action} conversation empty/unusable for session ${currentSessionId}; file=${currentSessionFile}`
+              `memory-reflection: command:${action} conversation empty/unusable session=${diagnosticIdentifier(currentSessionId)}; file=${diagnosticIdentifier(currentSessionFile)}`
             );
             return;
           }
@@ -3827,7 +3942,7 @@ const clawLorePlugin = {
             : [];
 
           api.logger.info(
-            `memory-reflection: command:${action} reflection generation start for session ${currentSessionId}; timeoutMs=${reflectionTimeoutMs}`
+            `memory-reflection: command:${action} reflection generation start session=${diagnosticIdentifier(currentSessionId)}; timeoutMs=${reflectionTimeoutMs}`
           );
           const reflectionGenerated = await generateReflectionText({
             conversation,
@@ -3841,17 +3956,17 @@ const clawLorePlugin = {
             logger: api.logger,
           });
           api.logger.info(
-            `memory-reflection: command:${action} reflection generation done for session ${currentSessionId}; runner=${reflectionGenerated.runner}; usedFallback=${reflectionGenerated.usedFallback ? "yes" : "no"}`
+            `memory-reflection: command:${action} reflection generation done session=${diagnosticIdentifier(currentSessionId)}; runner=${reflectionGenerated.runner}; usedFallback=${reflectionGenerated.usedFallback ? "yes" : "no"}`
           );
           const reflectionText = reflectionGenerated.text;
           if (reflectionGenerated.runner === "cli") {
             api.logger.warn(
-              `memory-reflection: embedded runner unavailable, used openclaw CLI fallback for session ${currentSessionId}` +
+              `memory-reflection: embedded runner unavailable, used openclaw CLI fallback for session=${diagnosticIdentifier(currentSessionId)}` +
               (reflectionGenerated.error ? ` (${reflectionGenerated.error})` : "")
             );
           } else if (reflectionGenerated.usedFallback) {
             api.logger.warn(
-              `memory-reflection: fallback used for session ${currentSessionId}` +
+              `memory-reflection: fallback used for session=${diagnosticIdentifier(currentSessionId)}` +
               (reflectionGenerated.error ? ` (${reflectionGenerated.error})` : "")
             );
           }
@@ -3933,7 +4048,7 @@ const clawLorePlugin = {
               existing = await store.vectorSearch(vector, 1, 0.1, [targetScope]);
             } catch (err) {
               api.logger.warn(
-                `memory-reflection: mapped memory duplicate pre-check failed, continue store: ${String(err)}`,
+                `memory-reflection: mapped memory duplicate pre-check failed, continue store: ${diagnosticErrorSummary(err)}`,
               );
             }
 
@@ -4007,9 +4122,9 @@ const clawLorePlugin = {
           await ensureDailyLogFile(dailyPath, dateStr);
           await appendFile(dailyPath, `- [${timeHms} UTC] Reflection generated: \`${relPath}\`\n`, "utf-8");
 
-          api.logger.info(`memory-reflection: wrote ${relPath} for session ${currentSessionId}`);
+          api.logger.info(`memory-reflection: wrote file=${diagnosticIdentifier(relPath)} for session=${diagnosticIdentifier(currentSessionId)}`);
         } catch (err) {
-          api.logger.warn(`memory-reflection: hook failed: ${String(err)}`);
+          api.logger.warn(`memory-reflection: hook failed: ${diagnosticErrorSummary(err)}`);
         } finally {
           if (sessionKey) {
             reflectionErrorStateBySession.delete(sessionKey);
@@ -4113,7 +4228,7 @@ const clawLorePlugin = {
         });
 
         api.logger.info(
-          `session-memory: stored session summary for ${params.sessionId} (agent: ${params.agentId}, scope: ${params.defaultScope})`
+          `session-memory: stored session summary session=${diagnosticIdentifier(params.sessionId)} (agent=${diagnosticIdentifier(params.agentId)}, scope=${diagnosticIdentifier(params.defaultScope)})`
         );
       };
 
@@ -4153,7 +4268,7 @@ const clawLorePlugin = {
             sessionContent,
           });
         } catch (err) {
-          api.logger.warn(`session-memory: failed to save: ${String(err)}`);
+          api.logger.warn(`session-memory: failed to save: ${diagnosticErrorSummary(err)}`);
         }
       });
 
@@ -4177,7 +4292,7 @@ const clawLorePlugin = {
     api.registerService({
       id: CLAWLORE_PLUGIN_ID,
       start: async () => {
-        api.logger.info(`clawlore: service start (db: ${resolvedDbPath})`);
+        api.logger.info(`clawlore: service start (db=${diagnosticIdentifier(resolvedDbPath)})`);
 
         // IMPORTANT: Do not block gateway startup on external network calls.
         // If embedding/retrieval tests hang (bad network / slow provider), the gateway
@@ -4236,7 +4351,7 @@ const clawLorePlugin = {
             }
           } catch (error) {
             api.logger.warn(
-              `clawlore: startup checks failed: ${String(error)}`,
+              `clawlore: startup checks failed: ${diagnosticErrorSummary(error)}`,
             );
           }
         };

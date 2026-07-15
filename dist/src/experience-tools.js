@@ -5,7 +5,8 @@
  * Follows the same pattern as tools.ts
  */
 import { Type } from "@sinclair/typebox";
-import { parseAgentIdFromSessionKey, resolveScopeFilter } from "./scopes.js";
+import { isSystemBypassId, parseAgentIdFromSessionKey } from "./scopes.js";
+import { resolveRuntimeMemoryAccess, } from "./runtime-memory-boundary.js";
 import { ensureExperienceSchema, createTaskEpisode, updateEpisodeOutcome, getEpisode, createPlaybook, getPlaybook, searchPlaybooks, incrementPlaybookCounters, getPlaybookVersions, createExperienceRun, finishExperienceRun, listRunsForPlaybook, getExperienceStats, } from "./experience-store.js";
 import { ExperienceValidationError, PLAYBOOK_STATUSES, CAPABILITY_CLASSES } from "./experience-models.js";
 import { buildForgettingReport, runForgettingWithVectorSync } from "./forgetting.js";
@@ -69,12 +70,34 @@ function missingAgentContextResponse(toolName) {
         isError: true,
     };
 }
-function resolveExperienceRuntime(context, toolCtx, runtimeCtx, toolName) {
+function deniedExperienceBoundaryResponse(toolName, reason) {
+    return {
+        content: [{
+                type: "text",
+                text: reason === "group_memory_denied"
+                    ? `${toolName} is disabled in group and channel conversations.`
+                    : `${toolName} requires a resolvable private or explicitly enabled conversation boundary.`,
+            }],
+        details: { error: "memory_boundary_denied", reason, tool: toolName },
+        isError: true,
+    };
+}
+export function resolveExperienceRuntime(context, toolCtx, runtimeCtx, toolName) {
     const agentId = resolveRuntimeAgentId(context.agentId, toolCtx, runtimeCtx);
     if (!agentId)
         return { ok: false, response: missingAgentContextResponse(toolName) };
-    const defaultScope = context.scopeManager.getDefaultScope(agentId);
-    const scopeFilter = resolveScopeFilter(context.scopeManager, agentId);
+    const access = resolveRuntimeMemoryAccess({
+        scopeManager: context.scopeManager,
+        agentId,
+        config: context.principalIsolation,
+        staticContext: toolCtx,
+        runtimeContext: runtimeCtx,
+    });
+    if (access.denied) {
+        return { ok: false, response: deniedExperienceBoundaryResponse(toolName, access.denyReason) };
+    }
+    const defaultScope = access.defaultScope ?? context.scopeManager.getDefaultScope(agentId);
+    const scopeFilter = access.scopeFilter;
     const sessionId = (runtimeCtx && typeof runtimeCtx === "object" && typeof runtimeCtx.sessionId === "string"
         ? String(runtimeCtx.sessionId)
         : "") ||
@@ -82,7 +105,25 @@ function resolveExperienceRuntime(context, toolCtx, runtimeCtx, toolName) {
             ? String(toolCtx.sessionId)
             : "") ||
         "unknown";
-    return { ok: true, agentId, defaultScope, scopeFilter, sessionId };
+    return {
+        ok: true,
+        agentId,
+        defaultScope,
+        scopeFilter,
+        sessionId,
+        systemBypass: isSystemBypassId(agentId),
+        isAccessible: access.isAccessible,
+    };
+}
+function globalExperienceOperatorDeniedResponse(toolName) {
+    return {
+        content: [{
+                type: "text",
+                text: `${toolName} requires an explicit system operator context because its underlying operation is not scope-local.`,
+            }],
+        details: { error: "system_operator_context_required", tool: toolName },
+        isError: true,
+    };
 }
 function registerExperienceTool(api, name, factory) {
     api.registerTool(factory, { name });
@@ -184,14 +225,19 @@ export function registerEpisodeCompleteTool(api, context) {
                         };
                     }
                     ensureExperienceSchema(db);
-                    const episode = getEpisode(db, episode_id);
+                    const episode = getEpisode(db, episode_id, runtime.scopeFilter);
                     if (!episode) {
                         return {
                             content: [{ type: "text", text: `Episode not found: ${episode_id}` }],
                             isError: true,
                         };
                     }
-                    updateEpisodeOutcome(db, episode_id, outcome);
+                    if (!updateEpisodeOutcome(db, episode_id, outcome, undefined, runtime.scopeFilter)) {
+                        return {
+                            content: [{ type: "text", text: `Episode not found: ${episode_id}` }],
+                            isError: true,
+                        };
+                    }
                     return {
                         content: [
                             {
@@ -306,15 +352,15 @@ export function registerPlaybookInspectTool(api, context) {
                         };
                     }
                     ensureExperienceSchema(db);
-                    const playbook = getPlaybook(db, playbook_id);
+                    const playbook = getPlaybook(db, playbook_id, runtime.scopeFilter);
                     if (!playbook) {
                         return {
                             content: [{ type: "text", text: `Playbook not found: ${playbook_id}` }],
                             isError: true,
                         };
                     }
-                    const versions = getPlaybookVersions(db, playbook_id);
-                    const recentRuns = listRunsForPlaybook(db, playbook_id, 5);
+                    const versions = getPlaybookVersions(db, playbook_id, runtime.scopeFilter);
+                    const recentRuns = listRunsForPlaybook(db, playbook_id, 5, runtime.scopeFilter);
                     const result = {
                         ...playbook,
                         versions_count: versions.length,
@@ -384,6 +430,12 @@ export function registerPlaybookCreateTool(api, context) {
                         };
                     }
                     ensureExperienceSchema(db);
+                    if (episode_id && !getEpisode(db, episode_id, runtime.scopeFilter)) {
+                        return {
+                            content: [{ type: "text", text: "Error: source episode is outside the current memory boundary" }],
+                            isError: true,
+                        };
+                    }
                     const playbook = createPlaybook(db, {
                         scope_id: runtime.defaultScope,
                         payload: {
@@ -456,7 +508,7 @@ export function registerPlaybookFeedbackTool(api, context) {
                         };
                     }
                     ensureExperienceSchema(db);
-                    const playbook = getPlaybook(db, playbook_id);
+                    const playbook = getPlaybook(db, playbook_id, runtime.scopeFilter);
                     if (!playbook) {
                         return {
                             content: [{ type: "text", text: `Playbook not found: ${playbook_id}` }],
@@ -476,7 +528,12 @@ export function registerPlaybookFeedbackTool(api, context) {
                     });
                     finishExperienceRun(db, run.id, outcome, outcome_reason);
                     // Update playbook counters
-                    incrementPlaybookCounters(db, playbook_id, outcome === "partial" ? "stale" : outcome);
+                    if (!incrementPlaybookCounters(db, playbook_id, outcome === "partial" ? "stale" : outcome, runtime.scopeFilter)) {
+                        return {
+                            content: [{ type: "text", text: `Playbook not found: ${playbook_id}` }],
+                            isError: true,
+                        };
+                    }
                     return {
                         content: [
                             {
@@ -603,7 +660,7 @@ export function registerExperienceStatsTool(api, context) {
                         };
                     }
                     ensureExperienceSchema(db);
-                    const stats = getExperienceStats(db, runtime.defaultScope);
+                    const stats = getExperienceStats(db, runtime.scopeFilter);
                     const summary = `Experience Kernel Statistics (scope: ${runtime.defaultScope}):
 
 **Episodes:**
@@ -666,8 +723,18 @@ function registerExperiencePromoteTool(api, context) {
                         return { content: [{ type: "text", text: "Error: SQL truth store not available" }], isError: true };
                     }
                     ensureExperienceSchema(db);
+                    const requestedScope = typeof params.scope === "string" && params.scope.trim()
+                        ? params.scope.trim()
+                        : runtime.defaultScope;
+                    if (!runtime.isAccessible(requestedScope)) {
+                        return {
+                            content: [{ type: "text", text: `Access denied to scope: ${requestedScope}` }],
+                            details: { error: "scope_access_denied", requestedScope },
+                            isError: true,
+                        };
+                    }
                     const result = promoteExperiences(db, {
-                        scope_id: typeof params.scope === "string" ? params.scope : runtime.defaultScope,
+                        scope_id: requestedScope,
                         dry_run: typeof params.dry_run === "boolean" ? params.dry_run : true,
                         config: {
                             auto_promote_low_risk: typeof params.auto_promote_low_risk === "boolean" ? params.auto_promote_low_risk : true,
@@ -725,7 +792,7 @@ function registerForgettingReportTool(api, context) {
                     let scopeFilter = runtime.scopeFilter;
                     if (typeof params.scope === "string" && params.scope.trim()) {
                         const scope = params.scope.trim();
-                        if (!context.scopeManager.isAccessible(scope, runtime.agentId)) {
+                        if (!runtime.isAccessible(scope)) {
                             return {
                                 content: [{ type: "text", text: `Access denied to scope: ${scope}` }],
                                 details: { error: "scope_access_denied", requestedScope: scope },
@@ -786,7 +853,7 @@ function registerForgettingRunTool(api, context) {
                     let scopeFilter = runtime.scopeFilter;
                     if (typeof params.scope === "string" && params.scope.trim()) {
                         const scope = params.scope.trim();
-                        if (!context.scopeManager.isAccessible(scope, runtime.agentId)) {
+                        if (!runtime.isAccessible(scope)) {
                             return {
                                 content: [{ type: "text", text: `Access denied to scope: ${scope}` }],
                                 details: { error: "scope_access_denied", requestedScope: scope },
@@ -847,7 +914,7 @@ function registerGovernanceCleanupReportTool(api, context) {
                     let scopeFilter = runtime.scopeFilter;
                     if (typeof params.scope === "string" && params.scope.trim()) {
                         const scope = params.scope.trim();
-                        if (!context.scopeManager.isAccessible(scope, runtime.agentId)) {
+                        if (!runtime.isAccessible(scope)) {
                             return {
                                 content: [{ type: "text", text: `Access denied to scope: ${scope}` }],
                                 details: { error: "scope_access_denied", requestedScope: scope },
@@ -899,6 +966,9 @@ function registerGovernanceCleanupRunTool(api, context) {
                     if (!db)
                         return { content: [{ type: "text", text: "Error: SQL truth store not available" }], isError: true };
                     if (params.rollback_batch === true) {
+                        if (!runtime.systemBypass) {
+                            return globalExperienceOperatorDeniedResponse("scope_recall_governance_cleanup_run");
+                        }
                         const batchId = typeof params.batch_id === "string" && params.batch_id.trim() ? params.batch_id.trim() : "";
                         if (!batchId) {
                             return { content: [{ type: "text", text: "batch_id is required when rollback_batch=true" }], isError: true };
@@ -916,7 +986,7 @@ function registerGovernanceCleanupRunTool(api, context) {
                     let scopeFilter = runtime.scopeFilter;
                     if (typeof params.scope === "string" && params.scope.trim()) {
                         const scope = params.scope.trim();
-                        if (!context.scopeManager.isAccessible(scope, runtime.agentId)) {
+                        if (!runtime.isAccessible(scope)) {
                             return {
                                 content: [{ type: "text", text: `Access denied to scope: ${scope}` }],
                                 details: { error: "scope_access_denied", requestedScope: scope },
@@ -958,6 +1028,8 @@ function registerMemoryCandidatePromotionReportTool(api, context) {
                 const runtime = resolveExperienceRuntime(context, toolCtx, runtimeCtx, "scope_recall_memory_candidate_promotion_report");
                 if (runtime.ok === false)
                     return runtime.response;
+                if (!runtime.systemBypass)
+                    return globalExperienceOperatorDeniedResponse("scope_recall_memory_candidate_promotion_report");
                 const db = await context.db();
                 if (!db)
                     return { content: [{ type: "text", text: "Error: SQL truth store not available" }], isError: true };
@@ -990,6 +1062,8 @@ function registerMemoryCandidatePromotionRunTool(api, context) {
                 const runtime = resolveExperienceRuntime(context, toolCtx, runtimeCtx, "scope_recall_memory_candidate_promotion_run");
                 if (runtime.ok === false)
                     return runtime.response;
+                if (!runtime.systemBypass)
+                    return globalExperienceOperatorDeniedResponse("scope_recall_memory_candidate_promotion_run");
                 const db = await context.db();
                 if (!db)
                     return { content: [{ type: "text", text: "Error: SQL truth store not available" }], isError: true };
@@ -1020,6 +1094,8 @@ function registerGraphHygieneReportTool(api, context) {
                 const runtime = resolveExperienceRuntime(context, toolCtx, runtimeCtx, "scope_recall_graph_hygiene_report");
                 if (runtime.ok === false)
                     return runtime.response;
+                if (!runtime.systemBypass)
+                    return globalExperienceOperatorDeniedResponse("scope_recall_graph_hygiene_report");
                 const db = await context.db();
                 if (!db)
                     return { content: [{ type: "text", text: "Error: SQL truth store not available" }], isError: true };
@@ -1046,6 +1122,8 @@ function registerGraphHygieneRunTool(api, context) {
                 const runtime = resolveExperienceRuntime(context, toolCtx, runtimeCtx, "scope_recall_graph_hygiene_run");
                 if (runtime.ok === false)
                     return runtime.response;
+                if (!runtime.systemBypass)
+                    return globalExperienceOperatorDeniedResponse("scope_recall_graph_hygiene_run");
                 const db = await context.db();
                 if (!db)
                     return { content: [{ type: "text", text: "Error: SQL truth store not available" }], isError: true };
@@ -1075,6 +1153,8 @@ function registerJournalRecoveryReportTool(api, context) {
                 const runtime = resolveExperienceRuntime(context, toolCtx, runtimeCtx, "scope_recall_journal_recovery_report");
                 if (runtime.ok === false)
                     return runtime.response;
+                if (!runtime.systemBypass)
+                    return globalExperienceOperatorDeniedResponse("scope_recall_journal_recovery_report");
                 const db = await context.db();
                 if (!db)
                     return { content: [{ type: "text", text: "Error: SQL truth store not available" }], isError: true };
@@ -1107,6 +1187,8 @@ function registerJournalRecoveryRunTool(api, context) {
                 const runtime = resolveExperienceRuntime(context, toolCtx, runtimeCtx, "scope_recall_journal_recovery_run");
                 if (runtime.ok === false)
                     return runtime.response;
+                if (!runtime.systemBypass)
+                    return globalExperienceOperatorDeniedResponse("scope_recall_journal_recovery_run");
                 const db = await context.db();
                 if (!db)
                     return { content: [{ type: "text", text: "Error: SQL truth store not available" }], isError: true };
@@ -1139,6 +1221,8 @@ function registerDigestReportTool(api, context) {
                 const runtime = resolveExperienceRuntime(context, toolCtx, runtimeCtx, "scope_recall_digest_report");
                 if (runtime.ok === false)
                     return runtime.response;
+                if (!runtime.systemBypass)
+                    return globalExperienceOperatorDeniedResponse("scope_recall_digest_report");
                 const db = await context.db();
                 if (!db)
                     return { content: [{ type: "text", text: "Error: SQL truth store not available" }], isError: true };
@@ -1172,10 +1256,10 @@ function registerDigestRunTool(api, context) {
                 const db = await context.db();
                 if (!db)
                     return { content: [{ type: "text", text: "Error: SQL truth store not available" }], isError: true };
-                let scope = `agent:${runtime.agentId}`;
+                let scope = runtime.defaultScope;
                 if (typeof params.scope === "string" && params.scope.trim()) {
                     scope = params.scope.trim();
-                    if (!context.scopeManager.isAccessible(scope, runtime.agentId)) {
+                    if (!runtime.isAccessible(scope)) {
                         return {
                             content: [{ type: "text", text: `Access denied to scope: ${scope}` }],
                             details: { error: "scope_access_denied", requestedScope: scope },
@@ -1217,6 +1301,8 @@ function registerDigestRecoveryTool(api, context) {
                 const runtime = resolveExperienceRuntime(context, toolCtx, runtimeCtx, "scope_recall_digest_recovery");
                 if (runtime.ok === false)
                     return runtime.response;
+                if (!runtime.systemBypass)
+                    return globalExperienceOperatorDeniedResponse("scope_recall_digest_recovery");
                 const db = await context.db();
                 if (!db)
                     return { content: [{ type: "text", text: "Error: SQL truth store not available" }], isError: true };
@@ -1247,6 +1333,8 @@ function registerOperatorDashboardTool(api, context) {
                 const runtime = resolveExperienceRuntime(context, toolCtx, runtimeCtx, "scope_recall_operator_dashboard");
                 if (runtime.ok === false)
                     return runtime.response;
+                if (!runtime.systemBypass)
+                    return globalExperienceOperatorDeniedResponse("scope_recall_operator_dashboard");
                 const db = await context.db();
                 if (!db)
                     return { content: [{ type: "text", text: "Error: SQL truth store not available" }], isError: true };
@@ -1283,19 +1371,33 @@ function registerPlaybookReviewTool(api, context) {
                 reason: Type.Optional(Type.String({ description: "Reason for the review decision" })),
                 superseded_by: Type.Optional(Type.String({ description: "If superseding, the ID of the replacement playbook" })),
             }),
-            async execute(_toolCallId, params) {
+            async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
                 try {
+                    const runtime = resolveExperienceRuntime(context, toolCtx, runtimeCtx, "scope_recall_playbook_review");
+                    if (runtime.ok === false)
+                        return runtime.response;
                     const db = await context.db();
                     if (!db) {
                         return { content: [{ type: "text", text: "Error: SQL truth store not available" }], isError: true };
                     }
                     ensureExperienceSchema(db);
+                    if (String(params.action) === "supersede") {
+                        const replacementId = typeof params.superseded_by === "string" ? params.superseded_by.trim() : "";
+                        if (!replacementId || !getPlaybook(db, replacementId, runtime.scopeFilter)) {
+                            return {
+                                content: [{ type: "text", text: "Replacement playbook is missing or outside the current memory boundary." }],
+                                details: { error: "replacement_playbook_not_accessible" },
+                                isError: true,
+                            };
+                        }
+                    }
                     const { reviewPlaybook } = await import("./experience-store.js");
                     const result = reviewPlaybook(db, {
                         playbookId: String(params.playbook_id),
                         action: String(params.action),
                         reason: params.reason ? String(params.reason) : undefined,
                         supersededBy: params.superseded_by ? String(params.superseded_by) : undefined,
+                        scopeIds: runtime.scopeFilter,
                     });
                     if (!result.reviewed) {
                         return {
@@ -1343,8 +1445,11 @@ function registerExperienceReplayTool(api, context) {
                     negative_terms: Type.Optional(Type.Array(Type.String(), { description: "Terms that must NOT be present" })),
                 }), { description: "Test cases to run" }),
             }),
-            async execute(_toolCallId, params) {
+            async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
                 try {
+                    const runtime = resolveExperienceRuntime(context, toolCtx, runtimeCtx, "scope_recall_experience_replay");
+                    if (runtime.ok === false)
+                        return runtime.response;
                     const db = await context.db();
                     if (!db) {
                         return { content: [{ type: "text", text: "Error: SQL truth store not available" }], isError: true };
@@ -1352,7 +1457,7 @@ function registerExperienceReplayTool(api, context) {
                     ensureExperienceSchema(db);
                     const { runReplaySuite, loadReplayCases } = await import("./experience-replay.js");
                     const cases = loadReplayCases(params.cases);
-                    const suite = runReplaySuite(db, String(params.playbook_id), cases);
+                    const suite = runReplaySuite(db, String(params.playbook_id), cases, runtime.scopeFilter);
                     const summary = `**Replay Test Results**
 
 **Playbook:** ${params.playbook_id}

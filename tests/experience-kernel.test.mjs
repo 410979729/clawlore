@@ -17,9 +17,13 @@ const {
   createPlaybook,
   createTaskEpisode,
   ensureExperienceSchema,
+  getEpisode,
+  getExperienceStats,
+  getPlaybook,
   recordTaskExperienceCaptureEvent,
   searchPlaybooks,
 } = jiti("../src/experience-store.ts");
+const { resolveRuntimeMemoryAccess } = jiti("../src/runtime-memory-boundary.ts");
 const { buildExperienceDebtReport } = jiti("../src/experience-governance.ts");
 const { loadReplayCases, runReplaySuite } = jiti("../src/experience-replay.ts");
 
@@ -46,7 +50,11 @@ function createExperienceToolMap(toolCtx = { agentId: "main", sessionId: "sessio
   return tools;
 }
 
-function createExperienceToolMapWithDb(db, toolCtx = { agentId: "main", sessionId: "session-1" }) {
+function createExperienceToolMapWithDb(
+  db,
+  toolCtx = { agentId: "main", sessionId: "session-1" },
+  contextOverrides = {},
+) {
   const tools = new Map();
   const api = {
     registerTool(factory, meta) {
@@ -64,6 +72,7 @@ function createExperienceToolMapWithDb(db, toolCtx = { agentId: "main", sessionI
     },
     embedder: {},
     db: async () => db,
+    ...contextOverrides,
   };
   registerExperienceTools(api, context, { enableManagementTools: true });
   return tools;
@@ -303,6 +312,194 @@ test("preflight isolates playbooks by runtime scope and feedback records a run",
   assert.equal(run.scope_id, "agent:main");
   assert.equal(run.outcome, "success");
   assert.ok(run.finished_at);
+});
+
+test("Experience tools share principal runtime access and all ID operations fail closed by scope", async () => {
+  const db = new DatabaseSync(":memory:");
+  ensureExperienceSchema(db);
+  const scopeManager = {
+    getDefaultScope: (agentId) => `agent:${agentId}`,
+    getScopeFilter: (agentId) => [`agent:${agentId}`, "global"],
+    isAccessible: (scope, agentId) => scope === `agent:${agentId}` || scope === "global",
+  };
+  const runtimeA = {
+    agentId: "main",
+    sessionKey: "agent:main:telegram:default:direct:user-a",
+    sessionId: "session-a",
+    channelId: "telegram",
+    accountId: "default",
+    conversationId: "user-a",
+    senderId: "user-a",
+    chatType: "direct",
+  };
+  const runtimeB = {
+    ...runtimeA,
+    sessionKey: "agent:main:telegram:default:direct:user-b",
+    sessionId: "session-b",
+    conversationId: "user-b",
+    senderId: "user-b",
+  };
+  const accessA = resolveRuntimeMemoryAccess({ scopeManager, agentId: "main", runtimeContext: runtimeA });
+  const accessB = resolveRuntimeMemoryAccess({ scopeManager, agentId: "main", runtimeContext: runtimeB });
+  assert.equal(accessA.denied, false);
+  assert.equal(accessB.denied, false);
+  assert.notEqual(accessA.defaultScope, accessB.defaultScope);
+
+  const playbookA = createPlaybook(db, {
+    scope_id: accessA.defaultScope,
+    payload: createPlaybookPayload({
+      title: "Principal A release checklist",
+      trigger: "principal boundary release validation",
+      status: "promoted",
+    }),
+  });
+  const playbookB = createPlaybook(db, {
+    scope_id: accessB.defaultScope,
+    payload: createPlaybookPayload({
+      title: "Principal B private checklist",
+      trigger: "principal boundary release validation",
+      status: "promoted",
+    }),
+  });
+  createPlaybook(db, {
+    scope_id: "agent:main",
+    payload: createPlaybookPayload({
+      title: "Legacy shared agent checklist",
+      trigger: "principal boundary release validation",
+      status: "promoted",
+    }),
+  });
+  const episodeA = createTaskEpisode(db, {
+    scope_id: accessA.defaultScope,
+    session_id: "session-a",
+    task_goal: "A-owned task",
+  });
+  const episodeB = createTaskEpisode(db, {
+    scope_id: accessB.defaultScope,
+    session_id: "session-b",
+    task_goal: "B-owned task",
+  });
+
+  const tools = createExperienceToolMapWithDb(db, {}, {
+    scopeManager,
+    principalIsolation: { enabled: true },
+  });
+  const searchA = await tools.get("scope_recall_playbook_search")
+    .execute("search-a", { query: "principal boundary release validation" }, undefined, undefined, runtimeA);
+  assert.deepEqual(searchA.details.playbooks.map((item) => item.id), [playbookA.id]);
+  const searchB = await tools.get("scope_recall_playbook_search")
+    .execute("search-b", { query: "principal boundary release validation" }, undefined, undefined, runtimeB);
+  assert.deepEqual(searchB.details.playbooks.map((item) => item.id), [playbookB.id]);
+
+  const inspectDenied = await tools.get("scope_recall_playbook_inspect")
+    .execute("inspect", { playbook_id: playbookB.id }, undefined, undefined, runtimeA);
+  assert.equal(inspectDenied.isError, true);
+  assert.match(inspectDenied.content[0].text, /not found/i);
+
+  const completeDenied = await tools.get("scope_recall_episode_complete")
+    .execute("complete", { episode_id: episodeB.id, outcome: "success" }, undefined, undefined, runtimeA);
+  assert.equal(completeDenied.isError, true);
+  assert.equal(getEpisode(db, episodeB.id).status, "open");
+
+  const completeOwn = await tools.get("scope_recall_episode_complete")
+    .execute("complete-own", { episode_id: episodeA.id, outcome: "success" }, undefined, undefined, runtimeA);
+  assert.equal(completeOwn.isError, undefined);
+  assert.equal(getEpisode(db, episodeA.id).status, "completed");
+
+  const feedbackDenied = await tools.get("scope_recall_playbook_feedback")
+    .execute("feedback", { playbook_id: playbookB.id, outcome: "success" }, undefined, undefined, runtimeA);
+  assert.equal(feedbackDenied.isError, true);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM experience_runs").get().count, 0);
+
+  const replayDenied = await tools.get("scope_recall_experience_replay").execute(
+    "replay",
+    {
+      playbook_id: playbookB.id,
+      cases: [{ name: "boundary", required_terms: ["principal"] }],
+    },
+    undefined,
+    undefined,
+    runtimeA,
+  );
+  assert.equal(replayDenied.details.failed, 1);
+  assert.match(replayDenied.details.results[0].details, /not found/i);
+
+  const createFromForeignEpisode = await tools.get("scope_recall_playbook_create").execute(
+    "create-from-foreign",
+    {
+      task_class: "boundary",
+      title: "Must not be created",
+      trigger: "foreign episode reference",
+      goal: "deny cross-principal lineage",
+      preconditions: [],
+      steps: [{ number: 1, capability_class: "read_only", action: "inspect", evidence_required: "evidence" }],
+      verification: ["denied"],
+      episode_id: episodeB.id,
+    },
+    undefined,
+    undefined,
+    runtimeA,
+  );
+  assert.equal(createFromForeignEpisode.isError, true);
+  assert.match(createFromForeignEpisode.content[0].text, /outside the current memory boundary/i);
+
+  const statsA = await tools.get("scope_recall_experience_stats")
+    .execute("stats", {}, undefined, undefined, runtimeA);
+  assert.equal(statsA.details.playbooks.total, 1);
+  assert.equal(statsA.details.episodes.total, 1);
+
+  const preflightA = await tools.get("scope_recall_experience_preflight")
+    .execute("preflight", { task_description: "principal boundary release validation" }, undefined, undefined, runtimeA);
+  assert.deepEqual(preflightA.details.playbooks.map((item) => item.id), [playbookA.id]);
+
+  const promoteForeignScope = await tools.get("scope_recall_experience_promote")
+    .execute("promote", { scope: accessB.defaultScope }, undefined, undefined, runtimeA);
+  assert.equal(promoteForeignScope.isError, true);
+  assert.equal(promoteForeignScope.details.error, "scope_access_denied");
+
+  const globalOperatorDenied = await tools.get("scope_recall_memory_candidate_promotion_report")
+    .execute("global-report", {}, undefined, undefined, runtimeA);
+  assert.equal(globalOperatorDenied.isError, true);
+  assert.equal(globalOperatorDenied.details.error, "system_operator_context_required");
+
+  const reviewForeignReplacement = await tools.get("scope_recall_playbook_review").execute(
+    "review",
+    { playbook_id: playbookA.id, action: "supersede", superseded_by: playbookB.id },
+    undefined,
+    undefined,
+    runtimeA,
+  );
+  assert.equal(reviewForeignReplacement.isError, true);
+  assert.equal(reviewForeignReplacement.details.error, "replacement_playbook_not_accessible");
+
+  const groupDenied = await tools.get("scope_recall_playbook_search").execute(
+    "group",
+    { query: "release" },
+    undefined,
+    undefined,
+    {
+      agentId: "main",
+      sessionKey: "agent:main:telegram:default:group:-1001",
+      channelId: "telegram",
+      accountId: "default",
+      conversationId: "-1001",
+      senderId: "member",
+      chatType: "group",
+    },
+  );
+  assert.equal(groupDenied.details.error, "memory_boundary_denied");
+  assert.equal(groupDenied.details.reason, "group_memory_denied");
+
+  const unresolvedDenied = await tools.get("scope_recall_playbook_search")
+    .execute("unknown", { query: "release" }, undefined, undefined, { agentId: "main", channelId: "telegram" });
+  assert.equal(unresolvedDenied.details.error, "memory_boundary_denied");
+  assert.equal(unresolvedDenied.details.reason, "runtime_boundary_unresolved");
+
+  assert.deepEqual(searchPlaybooks(db, { scope_ids: [] }), []);
+  assert.equal(searchPlaybooks(db, { scope_ids: undefined }).length, 3);
+  assert.equal(getPlaybook(db, playbookA.id, []), null);
+  assert.equal(getExperienceStats(db, []).playbooks.total, 0);
+  assert.equal(getExperienceStats(db, undefined).playbooks.total, 3);
 });
 
 test("Experience governance debt classifies promotion and review backlog", () => {

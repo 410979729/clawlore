@@ -9,6 +9,29 @@ import { randomUUID } from "node:crypto";
 
 // Use any to avoid TypeScript issues with experimental node:sqlite
 type DatabaseSync = any;
+
+interface ScopeClause {
+  sql: string;
+  params: string[];
+}
+
+function experienceScopeClause(
+  scopeIds: string[] | undefined,
+  scopeColumn = "scope_id",
+  sharedScopeColumn?: string,
+): ScopeClause {
+  if (scopeIds === undefined) return { sql: "1 = 1", params: [] };
+  const scopes = [...new Set(scopeIds.filter(Boolean))];
+  if (scopes.length === 0) return { sql: "0 = 1", params: [] };
+  const placeholders = scopes.map(() => "?").join(", ");
+  if (!sharedScopeColumn) {
+    return { sql: `${scopeColumn} IN (${placeholders})`, params: scopes };
+  }
+  return {
+    sql: `(${scopeColumn} IN (${placeholders}) OR ${sharedScopeColumn} IN (${placeholders}))`,
+    params: [...scopes, ...scopes],
+  };
+}
 import {
   type ProceduralPlaybook,
   type TaskEpisode,
@@ -293,19 +316,24 @@ export function updateEpisodeOutcome(
   episodeId: string,
   outcome: TaskEpisode["outcome"],
   status?: TaskEpisode["status"],
-): void {
+  scopeIds?: string[],
+): boolean {
   const now = new Date().toISOString();
   const newStatus = status ?? (outcome === "success" ? "completed" : outcome === "failure" ? "failed" : "open");
+  const scope = experienceScopeClause(scopeIds, "scope_id", "shared_scope_id");
 
-  db.prepare(`
+  const result = db.prepare(`
     UPDATE task_episodes
     SET outcome = ?, status = ?, ended_at = ?
-    WHERE id = ?
-  `).run(outcome, newStatus, now, episodeId);
+    WHERE id = ? AND ${scope.sql}
+  `).run(outcome, newStatus, now, episodeId, ...scope.params);
+  return Number(result?.changes || 0) === 1;
 }
 
-export function getEpisode(db: DatabaseSync, episodeId: string): TaskEpisode | null {
-  const row = db.prepare("SELECT * FROM task_episodes WHERE id = ?").get(episodeId) as Record<string, unknown> | undefined;
+export function getEpisode(db: DatabaseSync, episodeId: string, scopeIds?: string[]): TaskEpisode | null {
+  const scope = experienceScopeClause(scopeIds, "scope_id", "shared_scope_id");
+  const row = db.prepare(`SELECT * FROM task_episodes WHERE id = ? AND ${scope.sql}`)
+    .get(episodeId, ...scope.params) as Record<string, unknown> | undefined;
   if (!row) return null;
   return rowToEpisode(row);
 }
@@ -424,8 +452,14 @@ export function createPlaybook(db: DatabaseSync, params: CreatePlaybookParams): 
   return { ...validated, id, created_at: now };
 }
 
-export function getPlaybook(db: DatabaseSync, playbookId: string): (ProceduralPlaybook & { id: string }) | null {
-  const row = db.prepare("SELECT * FROM procedural_playbooks WHERE id = ?").get(playbookId) as Record<string, unknown> | undefined;
+export function getPlaybook(
+  db: DatabaseSync,
+  playbookId: string,
+  scopeIds?: string[],
+): (ProceduralPlaybook & { id: string }) | null {
+  const scope = experienceScopeClause(scopeIds, "scope_id", "shared_scope_id");
+  const row = db.prepare(`SELECT * FROM procedural_playbooks WHERE id = ? AND ${scope.sql}`)
+    .get(playbookId, ...scope.params) as Record<string, unknown> | undefined;
   if (!row) return null;
   return rowToPlaybook(row);
 }
@@ -440,6 +474,7 @@ export function searchPlaybooks(
     limit?: number;
   },
 ): (ProceduralPlaybook & { id: string; score?: number })[] {
+  if (Array.isArray(filters.scope_ids) && filters.scope_ids.length === 0) return [];
   const conditions: string[] = [];
   const values: unknown[] = [];
 
@@ -519,8 +554,9 @@ export function updatePlaybookStatus(
   playbookId: string,
   status: string,
   reason?: string,
+  scopeIds?: string[],
 ): void {
-  const playbook = getPlaybook(db, playbookId);
+  const playbook = getPlaybook(db, playbookId, scopeIds);
   if (!playbook) {
     throw new ExperienceValidationError(`Playbook ${playbookId} not found`);
   }
@@ -528,11 +564,12 @@ export function updatePlaybookStatus(
   const now = new Date().toISOString();
   const currentVersion = getLatestVersion(db, playbookId);
 
+  const scope = experienceScopeClause(scopeIds, "scope_id", "shared_scope_id");
   db.prepare(`
     UPDATE procedural_playbooks
     SET status = ?, updated_at = ?
-    WHERE id = ?
-  `).run(status, now, playbookId);
+    WHERE id = ? AND ${scope.sql}
+  `).run(status, now, playbookId, ...scope.params);
 
   createPlaybookVersion(db, playbookId, currentVersion + 1, "status_change", reason ?? `Status changed to ${status}`, playbook);
 }
@@ -541,15 +578,18 @@ export function incrementPlaybookCounters(
   db: DatabaseSync,
   playbookId: string,
   outcome: "success" | "failure" | "stale",
-): void {
+  scopeIds?: string[],
+): boolean {
   const column = outcome === "success" ? "success_count" : outcome === "failure" ? "failure_count" : "stale_count";
   const now = new Date().toISOString();
 
-  db.prepare(`
+  const scope = experienceScopeClause(scopeIds, "scope_id", "shared_scope_id");
+  const result = db.prepare(`
     UPDATE procedural_playbooks
     SET ${column} = ${column} + 1, updated_at = ?, last_used_at = ?
-    WHERE id = ?
-  `).run(now, now, playbookId);
+    WHERE id = ? AND ${scope.sql}
+  `).run(now, now, playbookId, ...scope.params);
+  return Number(result?.changes || 0) === 1;
 }
 
 export interface ReviewPlaybookParams {
@@ -557,6 +597,7 @@ export interface ReviewPlaybookParams {
   action: "review" | "promote" | "needs_review" | "quarantine" | "supersede";
   reason?: string;
   supersededBy?: string;
+  scopeIds?: string[];
 }
 
 export interface ReviewPlaybookResult {
@@ -571,7 +612,7 @@ export function reviewPlaybook(
   db: DatabaseSync,
   params: ReviewPlaybookParams,
 ): ReviewPlaybookResult {
-  const { playbookId, action, reason = "", supersededBy = "" } = params;
+  const { playbookId, action, reason = "", supersededBy = "", scopeIds } = params;
 
   const actionToStatus: Record<string, string> = {
     review: "reviewed",
@@ -590,7 +631,7 @@ export function reviewPlaybook(
     return { reviewed: false, id: playbookId, error: "unsupported_review_action" };
   }
 
-  const playbook = getPlaybook(db, playbookId);
+  const playbook = getPlaybook(db, playbookId, scopeIds);
   if (!playbook) {
     return { reviewed: false, id: playbookId, error: "not_found" };
   }
@@ -599,11 +640,12 @@ export function reviewPlaybook(
   const currentVersion = getLatestVersion(db, playbookId);
   const newVersion = currentVersion + 1;
 
+  const scope = experienceScopeClause(scopeIds, "scope_id", "shared_scope_id");
   db.prepare(`
     UPDATE procedural_playbooks
     SET status = ?, superseded_by = ?, updated_at = ?
-    WHERE id = ?
-  `).run(status, status === "superseded" ? supersededBy : "", now, playbookId);
+    WHERE id = ? AND ${scope.sql}
+  `).run(status, status === "superseded" ? supersededBy : "", now, playbookId, ...scope.params);
 
   createPlaybookVersion(db, playbookId, newVersion, status, reason || `Status changed to ${status}`, playbook);
 
@@ -686,7 +728,7 @@ function createPlaybookVersion(
   );
 }
 
-export function getPlaybookVersions(db: DatabaseSync, playbookId: string): {
+export function getPlaybookVersions(db: DatabaseSync, playbookId: string, scopeIds?: string[]): {
   id: string;
   playbook_id: string;
   version: number;
@@ -695,9 +737,16 @@ export function getPlaybookVersions(db: DatabaseSync, playbookId: string): {
   snapshot: Record<string, unknown>;
   created_at: string;
 }[] {
+  const scope = experienceScopeClause(scopeIds, "p.scope_id", "p.shared_scope_id");
   const rows = db.prepare(
-    "SELECT * FROM playbook_versions WHERE playbook_id = ? ORDER BY version DESC",
-  ).all(playbookId) as Record<string, unknown>[];
+    `
+    SELECT v.*
+    FROM playbook_versions v
+    JOIN procedural_playbooks p ON p.id = v.playbook_id
+    WHERE v.playbook_id = ? AND ${scope.sql}
+    ORDER BY v.version DESC
+    `,
+  ).all(playbookId, ...scope.params) as Record<string, unknown>[];
 
   return rows.map((row) => ({
     id: row.id as string,
@@ -796,10 +845,16 @@ export function finishExperienceRun(
   `).run(outcome, outcomeReason ?? "", now, runId);
 }
 
-export function listRunsForPlaybook(db: DatabaseSync, playbookId: string, limit = 20): ExperienceRun[] {
+export function listRunsForPlaybook(
+  db: DatabaseSync,
+  playbookId: string,
+  limit = 20,
+  scopeIds?: string[],
+): ExperienceRun[] {
+  const scope = experienceScopeClause(scopeIds, "scope_id");
   const rows = db.prepare(
-    "SELECT * FROM experience_runs WHERE playbook_id = ? ORDER BY started_at DESC LIMIT ?",
-  ).all(playbookId, limit) as Record<string, unknown>[];
+    `SELECT * FROM experience_runs WHERE playbook_id = ? AND ${scope.sql} ORDER BY started_at DESC LIMIT ?`,
+  ).all(playbookId, ...scope.params, limit) as Record<string, unknown>[];
 
   return rows.map((row) => ({
     id: row.id as string,
@@ -848,9 +903,11 @@ export interface ExperienceStats {
   };
 }
 
-export function getExperienceStats(db: DatabaseSync, scopeId?: string): ExperienceStats {
-  const scopeFilter = scopeId ? "WHERE scope_id = ?" : "";
-  const scopeValues = scopeId ? [scopeId] : [];
+export function getExperienceStats(db: DatabaseSync, scopeIds?: string | string[]): ExperienceStats {
+  const normalizedScopes = typeof scopeIds === "string" ? [scopeIds] : scopeIds;
+  const scope = experienceScopeClause(normalizedScopes, "scope_id");
+  const scopeFilter = `WHERE ${scope.sql}`;
+  const scopeValues = scope.params;
 
   const episodeStats = db.prepare(`
     SELECT

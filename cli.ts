@@ -86,6 +86,7 @@ interface CLIContext {
       currentProviderId: string,
     ) => string | Promise<string>;
   };
+  beforeAction?: (commandPath: string[]) => void | Promise<void>;
 }
 
 // ============================================================================
@@ -683,6 +684,27 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
     .alias(CLAWLORE_CLI_ALIASES[0])
     .alias(CLAWLORE_CLI_ALIASES[1])
     .description("ClawLore memory management commands");
+
+  if (context.beforeAction) {
+    const commandWithHook = memory as Command & {
+      hook(
+        event: "preAction",
+        listener: (thisCommand: Command, actionCommand: Command) => void | Promise<void>,
+      ): Command;
+    };
+    commandWithHook.hook("preAction", async (_thisCommand, actionCommand) => {
+      const path: string[] = [];
+      let current: (Command & { parent?: Command; name(): string }) | undefined = actionCommand as Command & {
+        parent?: Command;
+        name(): string;
+      };
+      while (current && current !== memory) {
+        path.unshift(current.name());
+        current = current.parent as typeof current;
+      }
+      await context.beforeAction?.(path);
+    });
+  }
 
   // Version
   memory

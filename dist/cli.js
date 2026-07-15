@@ -528,6 +528,18 @@ export function registerMemoryCLI(program, context) {
         .alias(CLAWLORE_CLI_ALIASES[0])
         .alias(CLAWLORE_CLI_ALIASES[1])
         .description("ClawLore memory management commands");
+    if (context.beforeAction) {
+        const commandWithHook = memory;
+        commandWithHook.hook("preAction", async (_thisCommand, actionCommand) => {
+            const path = [];
+            let current = actionCommand;
+            while (current && current !== memory) {
+                path.unshift(current.name());
+                current = current.parent;
+            }
+            await context.beforeAction?.(path);
+        });
+    }
     // Version
     memory
         .command("version")

@@ -6,6 +6,7 @@ import { computeEffectiveHalfLife, parseAccessMetadata, } from "./access-tracker
 import { filterNoise } from "./noise-filter.js";
 import { getDecayableFromEntry, isMemoryActiveAt, parseSupportInfo, parseSmartMetadata, toLifecycleMemory, } from "./smart-metadata.js";
 import { TraceCollector } from "./retrieval-trace.js";
+import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
 // ============================================================================
 // Default Configuration
 // ============================================================================
@@ -313,7 +314,19 @@ export class MemoryRetriever {
         if (signal?.aborted) {
             throw new Error("retrieval aborted");
         }
-        const queryVector = await this.embedder.embedQuery(query, signal);
+        let queryVector;
+        try {
+            queryVector = await this.embedder.embedQuery(query, signal);
+        }
+        catch (error) {
+            if (signal?.aborted || (error instanceof Error && error.name === "AbortError"))
+                throw error;
+            if (this.store.hasFtsSupport) {
+                console.warn(`Embedding failed; using BM25 fallback: ${diagnosticErrorSummary(error)}`);
+                return this.bm25OnlyRetrieval(query, [], limit, scopeFilter, category, trace);
+            }
+            throw error;
+        }
         trace?.startStage("vector_search", []);
         const results = await this.store.vectorSearch(queryVector, limit, this.config.minScore, scopeFilter, { excludeInactive: true });
         const filtered = category
@@ -413,7 +426,19 @@ export class MemoryRetriever {
         if (signal?.aborted) {
             throw new Error("retrieval aborted");
         }
-        const queryVector = await this.embedder.embedQuery(query, signal);
+        let queryVector;
+        try {
+            queryVector = await this.embedder.embedQuery(query, signal);
+        }
+        catch (error) {
+            if (signal?.aborted || (error instanceof Error && error.name === "AbortError"))
+                throw error;
+            if (this.store.hasFtsSupport) {
+                console.warn(`Embedding failed; using BM25 fallback: ${diagnosticErrorSummary(error)}`);
+                return this.bm25OnlyRetrieval(query, [], limit, scopeFilter, category, trace);
+            }
+            throw error;
+        }
         // Run vector and BM25 searches in parallel.
         // Trace as a single "parallel_search" stage since both run concurrently —
         // splitting into separate sequential stages would misrepresent timing.
@@ -590,13 +615,18 @@ export class MemoryRetriever {
                 // Timeout: 5 seconds to prevent stalling retrieval pipeline
                 const controller = new AbortController();
                 const timeout = setTimeout(() => controller.abort(), 5000);
-                const response = await fetch(endpoint, {
-                    method: "POST",
-                    headers,
-                    body: JSON.stringify(body),
-                    signal: controller.signal,
-                });
-                clearTimeout(timeout);
+                let response;
+                try {
+                    response = await fetch(endpoint, {
+                        method: "POST",
+                        headers,
+                        body: JSON.stringify(body),
+                        signal: controller.signal,
+                    });
+                }
+                finally {
+                    clearTimeout(timeout);
+                }
                 if (response.ok) {
                     const data = await response.json();
                     // Parse provider-specific response into unified format
@@ -634,8 +664,7 @@ export class MemoryRetriever {
                     }
                 }
                 else {
-                    const errText = await response.text().catch(() => "");
-                    console.warn(`Rerank API returned ${response.status}: ${errText.slice(0, 200)}, falling back to cosine`);
+                    console.warn(`Rerank API returned status=${response.status}; falling back to cosine`);
                 }
             }
             catch (error) {
@@ -643,7 +672,7 @@ export class MemoryRetriever {
                     console.warn("Rerank API timed out (5s), falling back to cosine");
                 }
                 else {
-                    console.warn("Rerank API failed, falling back to cosine:", error);
+                    console.warn(`Rerank API failed; falling back to cosine: ${diagnosticErrorSummary(error)}`);
                 }
             }
         }
@@ -674,7 +703,7 @@ export class MemoryRetriever {
             return reranked.sort((a, b) => b.score - a.score);
         }
         catch (error) {
-            console.warn("Reranking failed, returning original results:", error);
+            console.warn(`Reranking failed; returning original results: ${diagnosticErrorSummary(error)}`);
             return results;
         }
     }
@@ -995,7 +1024,7 @@ export class MemoryRetriever {
                 success: false,
                 mode: this.config.mode,
                 hasFtsSupport: this.store.hasFtsSupport,
-                error: error instanceof Error ? error.message : String(error),
+                error: diagnosticErrorSummary(error),
             };
         }
     }

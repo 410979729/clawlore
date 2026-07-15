@@ -5,6 +5,21 @@
  * Handles CRUD operations for task_episodes, procedural_playbooks, and experience_runs
  */
 import { randomUUID } from "node:crypto";
+function experienceScopeClause(scopeIds, scopeColumn = "scope_id", sharedScopeColumn) {
+    if (scopeIds === undefined)
+        return { sql: "1 = 1", params: [] };
+    const scopes = [...new Set(scopeIds.filter(Boolean))];
+    if (scopes.length === 0)
+        return { sql: "0 = 1", params: [] };
+    const placeholders = scopes.map(() => "?").join(", ");
+    if (!sharedScopeColumn) {
+        return { sql: `${scopeColumn} IN (${placeholders})`, params: scopes };
+    }
+    return {
+        sql: `(${scopeColumn} IN (${placeholders}) OR ${sharedScopeColumn} IN (${placeholders}))`,
+        params: [...scopes, ...scopes],
+    };
+}
 import { validateProceduralPlaybook, ExperienceValidationError, PLAYBOOK_SCHEMA_VERSION, } from "./experience-models.js";
 // ============================================================================
 // Schema
@@ -200,17 +215,21 @@ export function recordTaskExperienceCaptureEvent(db, params) {
         : 0, now, JSON.stringify(params.metadata ?? {}));
     return id;
 }
-export function updateEpisodeOutcome(db, episodeId, outcome, status) {
+export function updateEpisodeOutcome(db, episodeId, outcome, status, scopeIds) {
     const now = new Date().toISOString();
     const newStatus = status ?? (outcome === "success" ? "completed" : outcome === "failure" ? "failed" : "open");
-    db.prepare(`
+    const scope = experienceScopeClause(scopeIds, "scope_id", "shared_scope_id");
+    const result = db.prepare(`
     UPDATE task_episodes
     SET outcome = ?, status = ?, ended_at = ?
-    WHERE id = ?
-  `).run(outcome, newStatus, now, episodeId);
+    WHERE id = ? AND ${scope.sql}
+  `).run(outcome, newStatus, now, episodeId, ...scope.params);
+    return Number(result?.changes || 0) === 1;
 }
-export function getEpisode(db, episodeId) {
-    const row = db.prepare("SELECT * FROM task_episodes WHERE id = ?").get(episodeId);
+export function getEpisode(db, episodeId, scopeIds) {
+    const scope = experienceScopeClause(scopeIds, "scope_id", "shared_scope_id");
+    const row = db.prepare(`SELECT * FROM task_episodes WHERE id = ? AND ${scope.sql}`)
+        .get(episodeId, ...scope.params);
     if (!row)
         return null;
     return rowToEpisode(row);
@@ -275,13 +294,17 @@ export function createPlaybook(db, params) {
     createPlaybookVersion(db, id, 1, "create", "Initial creation", validated);
     return { ...validated, id, created_at: now };
 }
-export function getPlaybook(db, playbookId) {
-    const row = db.prepare("SELECT * FROM procedural_playbooks WHERE id = ?").get(playbookId);
+export function getPlaybook(db, playbookId, scopeIds) {
+    const scope = experienceScopeClause(scopeIds, "scope_id", "shared_scope_id");
+    const row = db.prepare(`SELECT * FROM procedural_playbooks WHERE id = ? AND ${scope.sql}`)
+        .get(playbookId, ...scope.params);
     if (!row)
         return null;
     return rowToPlaybook(row);
 }
 export function searchPlaybooks(db, filters) {
+    if (Array.isArray(filters.scope_ids) && filters.scope_ids.length === 0)
+        return [];
     const conditions = [];
     const values = [];
     if (filters.scope_ids && filters.scope_ids.length > 0) {
@@ -341,31 +364,34 @@ function buildSafeFtsQuery(query) {
     const unique = [...new Set(tokens)];
     return unique.map((token) => `"${token.replaceAll('"', '""')}"`).join(" OR ");
 }
-export function updatePlaybookStatus(db, playbookId, status, reason) {
-    const playbook = getPlaybook(db, playbookId);
+export function updatePlaybookStatus(db, playbookId, status, reason, scopeIds) {
+    const playbook = getPlaybook(db, playbookId, scopeIds);
     if (!playbook) {
         throw new ExperienceValidationError(`Playbook ${playbookId} not found`);
     }
     const now = new Date().toISOString();
     const currentVersion = getLatestVersion(db, playbookId);
+    const scope = experienceScopeClause(scopeIds, "scope_id", "shared_scope_id");
     db.prepare(`
     UPDATE procedural_playbooks
     SET status = ?, updated_at = ?
-    WHERE id = ?
-  `).run(status, now, playbookId);
+    WHERE id = ? AND ${scope.sql}
+  `).run(status, now, playbookId, ...scope.params);
     createPlaybookVersion(db, playbookId, currentVersion + 1, "status_change", reason ?? `Status changed to ${status}`, playbook);
 }
-export function incrementPlaybookCounters(db, playbookId, outcome) {
+export function incrementPlaybookCounters(db, playbookId, outcome, scopeIds) {
     const column = outcome === "success" ? "success_count" : outcome === "failure" ? "failure_count" : "stale_count";
     const now = new Date().toISOString();
-    db.prepare(`
+    const scope = experienceScopeClause(scopeIds, "scope_id", "shared_scope_id");
+    const result = db.prepare(`
     UPDATE procedural_playbooks
     SET ${column} = ${column} + 1, updated_at = ?, last_used_at = ?
-    WHERE id = ?
-  `).run(now, now, playbookId);
+    WHERE id = ? AND ${scope.sql}
+  `).run(now, now, playbookId, ...scope.params);
+    return Number(result?.changes || 0) === 1;
 }
 export function reviewPlaybook(db, params) {
-    const { playbookId, action, reason = "", supersededBy = "" } = params;
+    const { playbookId, action, reason = "", supersededBy = "", scopeIds } = params;
     const actionToStatus = {
         review: "reviewed",
         reviewed: "reviewed",
@@ -381,18 +407,19 @@ export function reviewPlaybook(db, params) {
     if (!status) {
         return { reviewed: false, id: playbookId, error: "unsupported_review_action" };
     }
-    const playbook = getPlaybook(db, playbookId);
+    const playbook = getPlaybook(db, playbookId, scopeIds);
     if (!playbook) {
         return { reviewed: false, id: playbookId, error: "not_found" };
     }
     const now = new Date().toISOString();
     const currentVersion = getLatestVersion(db, playbookId);
     const newVersion = currentVersion + 1;
+    const scope = experienceScopeClause(scopeIds, "scope_id", "shared_scope_id");
     db.prepare(`
     UPDATE procedural_playbooks
     SET status = ?, superseded_by = ?, updated_at = ?
-    WHERE id = ?
-  `).run(status, status === "superseded" ? supersededBy : "", now, playbookId);
+    WHERE id = ? AND ${scope.sql}
+  `).run(status, status === "superseded" ? supersededBy : "", now, playbookId, ...scope.params);
     createPlaybookVersion(db, playbookId, newVersion, status, reason || `Status changed to ${status}`, playbook);
     return { reviewed: true, id: playbookId, status, version: newVersion };
 }
@@ -439,8 +466,15 @@ function createPlaybookVersion(db, playbookId, version, changeType, changeReason
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(id, playbookId, version, changeType, changeReason, JSON.stringify(snapshot), now);
 }
-export function getPlaybookVersions(db, playbookId) {
-    const rows = db.prepare("SELECT * FROM playbook_versions WHERE playbook_id = ? ORDER BY version DESC").all(playbookId);
+export function getPlaybookVersions(db, playbookId, scopeIds) {
+    const scope = experienceScopeClause(scopeIds, "p.scope_id", "p.shared_scope_id");
+    const rows = db.prepare(`
+    SELECT v.*
+    FROM playbook_versions v
+    JOIN procedural_playbooks p ON p.id = v.playbook_id
+    WHERE v.playbook_id = ? AND ${scope.sql}
+    ORDER BY v.version DESC
+    `).all(playbookId, ...scope.params);
     return rows.map((row) => ({
         id: row.id,
         playbook_id: row.playbook_id,
@@ -489,8 +523,9 @@ export function finishExperienceRun(db, runId, outcome, outcomeReason) {
     WHERE id = ?
   `).run(outcome, outcomeReason ?? "", now, runId);
 }
-export function listRunsForPlaybook(db, playbookId, limit = 20) {
-    const rows = db.prepare("SELECT * FROM experience_runs WHERE playbook_id = ? ORDER BY started_at DESC LIMIT ?").all(playbookId, limit);
+export function listRunsForPlaybook(db, playbookId, limit = 20, scopeIds) {
+    const scope = experienceScopeClause(scopeIds, "scope_id");
+    const rows = db.prepare(`SELECT * FROM experience_runs WHERE playbook_id = ? AND ${scope.sql} ORDER BY started_at DESC LIMIT ?`).all(playbookId, ...scope.params, limit);
     return rows.map((row) => ({
         id: row.id,
         playbook_id: row.playbook_id,
@@ -511,9 +546,11 @@ export function listRunsForPlaybook(db, playbookId, limit = 20) {
         metadata: safeJsonParse(row.metadata, {}),
     }));
 }
-export function getExperienceStats(db, scopeId) {
-    const scopeFilter = scopeId ? "WHERE scope_id = ?" : "";
-    const scopeValues = scopeId ? [scopeId] : [];
+export function getExperienceStats(db, scopeIds) {
+    const normalizedScopes = typeof scopeIds === "string" ? [scopeIds] : scopeIds;
+    const scope = experienceScopeClause(normalizedScopes, "scope_id");
+    const scopeFilter = `WHERE ${scope.sql}`;
+    const scopeValues = scope.params;
     const episodeStats = db.prepare(`
     SELECT
       COUNT(*) as total,

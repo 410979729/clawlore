@@ -11,23 +11,21 @@
     "LICENSE",
     "README.md",
     "SECURITY.md",
-    "benchmarks/",
-    "cli.ts",
+    "benchmarks/experience-replay-cases.json",
     "dist/",
-    "docs/",
-    "index.ts",
+    "docs/openclaw-contract-matrix.md",
+    "docs/operator-runbook.md",
+    "docs/release-readiness-template.md",
+    "docs/response-contracts.md",
     "openclaw.plugin.json",
     "package.json",
-    "package-lock.json",
-    "scripts/",
-    "src/",
-    "tests/",
-    "tsconfig.build.json",
-    "tsconfig.json"
+    "package-lock.json"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "test": "node --test tests/*.test.mjs",
+    "benchmark:commercial": "node scripts/golden-benchmark.mjs",
+    "benchmark:scale": "node scripts/scalability-benchmark.mjs",
     "typecheck": "tsc --noEmit",
     "smoke:clawlore-address-v2": "node scripts/clawlore-memory-address-v2-smoke.mjs",
     "smoke:clawlore-context-pack-v1": "node scripts/clawlore-context-pack-v1-smoke.mjs",
@@ -150,15 +148,15 @@
     "install": {
       "npmSpec": "clawlore",
       "defaultChoice": "npm",
-      "minHostVersion": ">=2026.6.2"
+      "minHostVersion": ">=2026.7.1-beta.5"
     },
     "compat": {
-      "pluginApi": ">=2026.6.2",
-      "minGatewayVersion": "2026.6.2"
+      "pluginApi": ">=2026.7.1-beta.5",
+      "minGatewayVersion": "2026.7.1-beta.5"
     },
     "build": {
-      "openclawVersion": "2026.6.2",
-      "pluginSdkVersion": "2026.6.2"
+      "openclawVersion": "2026.7.1-beta.5",
+      "pluginSdkVersion": "2026.7.1-beta.5"
     },
     "release": {
       "publishToClawHub": true,

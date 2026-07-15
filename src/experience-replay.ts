@@ -136,8 +136,9 @@ export function runReplayCase(
   db: DatabaseSync,
   playbookId: string,
   replayCase: ReplayCase,
+  scopeIds?: string[],
 ): ReplayResult {
-  const playbook = getPlaybook(db, playbookId);
+  const playbook = getPlaybook(db, playbookId, scopeIds);
   
   if (!playbook) {
     return {
@@ -206,13 +207,14 @@ export function runReplaySuite(
   db: DatabaseSync,
   playbookId: string,
   cases: ReplayCase[],
+  scopeIds?: string[],
 ): { results: ReplayResult[]; passed: number; failed: number; total: number } {
   const results: ReplayResult[] = [];
   let passed = 0;
   let failed = 0;
   
   for (const c of cases) {
-    const result = runReplayCase(db, playbookId, c);
+    const result = runReplayCase(db, playbookId, c, scopeIds);
     results.push(result);
     if (result.passed) {
       passed++;

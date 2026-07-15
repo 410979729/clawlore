@@ -91,8 +91,8 @@ export function loadReplayCases(cases) {
 // ============================================================================
 // Replay Execution
 // ============================================================================
-export function runReplayCase(db, playbookId, replayCase) {
-    const playbook = getPlaybook(db, playbookId);
+export function runReplayCase(db, playbookId, replayCase, scopeIds) {
+    const playbook = getPlaybook(db, playbookId, scopeIds);
     if (!playbook) {
         return {
             case_id: replayCase.id,
@@ -147,12 +147,12 @@ export function runReplayCase(db, playbookId, replayCase) {
         details,
     };
 }
-export function runReplaySuite(db, playbookId, cases) {
+export function runReplaySuite(db, playbookId, cases, scopeIds) {
     const results = [];
     let passed = 0;
     let failed = 0;
     for (const c of cases) {
-        const result = runReplayCase(db, playbookId, c);
+        const result = runReplayCase(db, playbookId, c, scopeIds);
         results.push(result);
         if (result.passed) {
             passed++;

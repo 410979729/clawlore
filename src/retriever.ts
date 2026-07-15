@@ -22,6 +22,7 @@ import {
 } from "./smart-metadata.js";
 import { TraceCollector, type RetrievalTrace } from "./retrieval-trace.js";
 import { RetrievalStatsCollector } from "./retrieval-stats.js";
+import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
 
 // ============================================================================
 // Types & Configuration
@@ -507,7 +508,17 @@ export class MemoryRetriever {
     if (signal?.aborted) {
       throw new Error("retrieval aborted");
     }
-    const queryVector = await this.embedder.embedQuery(query, signal);
+    let queryVector: number[];
+    try {
+      queryVector = await this.embedder.embedQuery(query, signal);
+    } catch (error) {
+      if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) throw error;
+      if (this.store.hasFtsSupport) {
+        console.warn(`Embedding failed; using BM25 fallback: ${diagnosticErrorSummary(error)}`);
+        return this.bm25OnlyRetrieval(query, [], limit, scopeFilter, category, trace);
+      }
+      throw error;
+    }
 
     trace?.startStage("vector_search", []);
     const results = await this.store.vectorSearch(
@@ -651,7 +662,17 @@ export class MemoryRetriever {
     if (signal?.aborted) {
       throw new Error("retrieval aborted");
     }
-    const queryVector = await this.embedder.embedQuery(query, signal);
+    let queryVector: number[];
+    try {
+      queryVector = await this.embedder.embedQuery(query, signal);
+    } catch (error) {
+      if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) throw error;
+      if (this.store.hasFtsSupport) {
+        console.warn(`Embedding failed; using BM25 fallback: ${diagnosticErrorSummary(error)}`);
+        return this.bm25OnlyRetrieval(query, [], limit, scopeFilter, category, trace);
+      }
+      throw error;
+    }
 
     // Run vector and BM25 searches in parallel.
     // Trace as a single "parallel_search" stage since both run concurrently —
@@ -899,14 +920,17 @@ export class MemoryRetriever {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 5000);
 
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(body),
-          signal: controller.signal,
-        });
-
-        clearTimeout(timeout);
+        let response: Response;
+        try {
+          response = await fetch(endpoint, {
+            method: "POST",
+            headers,
+            body: JSON.stringify(body),
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timeout);
+        }
 
         if (response.ok) {
           const data: unknown = await response.json();
@@ -958,16 +982,15 @@ export class MemoryRetriever {
             );
           }
         } else {
-          const errText = await response.text().catch(() => "");
           console.warn(
-            `Rerank API returned ${response.status}: ${errText.slice(0, 200)}, falling back to cosine`,
+            `Rerank API returned status=${response.status}; falling back to cosine`,
           );
         }
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {
           console.warn("Rerank API timed out (5s), falling back to cosine");
         } else {
-          console.warn("Rerank API failed, falling back to cosine:", error);
+          console.warn(`Rerank API failed; falling back to cosine: ${diagnosticErrorSummary(error)}`);
         }
       }
     }
@@ -1000,7 +1023,7 @@ export class MemoryRetriever {
 
       return reranked.sort((a, b) => b.score - a.score);
     } catch (error) {
-      console.warn("Reranking failed, returning original results:", error);
+      console.warn(`Reranking failed; returning original results: ${diagnosticErrorSummary(error)}`);
       return results;
     }
   }
@@ -1376,7 +1399,7 @@ export class MemoryRetriever {
         success: false,
         mode: this.config.mode,
         hasFtsSupport: this.store.hasFtsSupport,
-        error: error instanceof Error ? error.message : String(error),
+        error: diagnosticErrorSummary(error),
       };
     }
   }

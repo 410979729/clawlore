@@ -536,3 +536,20 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   assert.match(indexSource, /diagnosticBuildTag = `\$\{DIAG_BUILD_TAG_PREFIX\}-\$\{pluginVersion\}`/);
   assert.doesNotMatch(indexSource, /scope-recall-openclaw-1\.0\.24/);
 });
+
+test("CLI metadata registration defers secret and database materialization until command execution", () => {
+  const entry = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
+  const cli = readFileSync(new URL("../cli.ts", import.meta.url), "utf8");
+  const registerStart = entry.indexOf("register(api: OpenClawPluginApi)");
+  const metadataBranch = entry.indexOf("if (isCliRegistrationMode(api))", registerStart);
+  const runtimeParse = entry.indexOf("const config = parsePluginConfig(api.pluginConfig)", registerStart);
+
+  assert.ok(registerStart >= 0);
+  assert.ok(metadataBranch > registerStart);
+  assert.ok(runtimeParse > metadataBranch);
+  assert.match(entry, /resolveSecretRefValues/);
+  assert.match(entry, /applyResolvedAssignments/);
+  assert.match(entry, /registerCliMetadata\(api\)/);
+  assert.match(cli, /hook\("preAction"/);
+  assert.match(cli, /await context\.beforeAction\?\.\(path\)/);
+});

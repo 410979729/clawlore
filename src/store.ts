@@ -15,8 +15,14 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { buildSmartMetadata, isMemoryActiveAt, parseSmartMetadata, stringifySmartMetadata } from "./smart-metadata.js";
-import { SqlTruthStore, type SqlTruthFtsReport } from "./sql-truth-store.js";
+import {
+  SqlTruthStore,
+  type VectorRepairDebtEntry,
+  type SqlTruthFtsReport,
+  type VectorRepairDebtReport,
+} from "./sql-truth-store.js";
 import { SqliteBruteForceVectorStore } from "./sqlite-vector-store.js";
+import { diagnosticErrorSummary, diagnosticIdentifier } from "./diagnostic-redaction.js";
 
 // ============================================================================
 // Types
@@ -78,6 +84,7 @@ export interface MemoryStoreDiagnostics {
     message: string | null;
     configuredDimension: number;
     backend: "lancedb" | "sqlite-bruteforce";
+    repairDebt: VectorRepairDebtReport | null;
   };
 }
 
@@ -375,7 +382,7 @@ export class MemoryStore {
           // Concurrent initialization race — another process already added the columns
           console.log("clawlore: migration columns already exist (concurrent init)");
         } else {
-          console.warn("clawlore: could not check/migrate table schema:", err);
+          console.warn(`clawlore: could not check/migrate table schema: ${diagnosticErrorSummary(err)}`);
         }
       }
     } catch (_openErr) {
@@ -426,8 +433,7 @@ export class MemoryStore {
       this.ftsIndexCreated = true;
     } catch (err) {
       console.warn(
-        "Failed to create FTS index, falling back to vector-only search:",
-        err,
+        `Failed to create FTS index, falling back to vector-only search: ${diagnosticErrorSummary(err)}`,
       );
       this.ftsIndexCreated = false;
     }
@@ -478,13 +484,12 @@ export class MemoryStore {
       truth.reconcile(missingEntries, { deleteMissing: false });
       this.sqlTruthStore = truth;
       console.log(
-        `clawlore: SQL truth companion ready (${truth.count()} rows -> ${truth.path})`,
+        `clawlore: SQL truth companion ready (${truth.count()} rows, path=${diagnosticIdentifier(truth.path)})`,
       );
     } catch (err) {
       this.sqlTruthStore = null;
       console.warn(
-        "clawlore: SQL truth companion unavailable; using LanceDB-only retrieval:",
-        err,
+        `clawlore: SQL truth companion unavailable; using LanceDB-only retrieval: ${diagnosticErrorSummary(err)}`,
       );
     }
   }
@@ -494,7 +499,7 @@ export class MemoryStore {
     try {
       this.sqlTruthStore.upsert(entry);
     } catch (err) {
-      console.warn("clawlore: SQL truth upsert failed; LanceDB row preserved:", err);
+      console.warn(`clawlore: SQL truth upsert failed; LanceDB row preserved: ${diagnosticErrorSummary(err)}`);
     }
   }
 
@@ -503,7 +508,7 @@ export class MemoryStore {
     try {
       this.sqlTruthStore.delete(id);
     } catch (err) {
-      console.warn("clawlore: SQL truth delete failed; LanceDB delete already applied:", err);
+      console.warn(`clawlore: SQL truth delete failed; LanceDB delete already applied: ${diagnosticErrorSummary(err)}`);
     }
   }
 
@@ -519,41 +524,124 @@ export class MemoryStore {
     return true;
   }
 
-  private markVectorCompanionNeedsRepair(operation: string, err: unknown): void {
-    const message = err instanceof Error ? err.message : String(err);
+  private markVectorCompanionNeedsRepair(
+    memoryId: string,
+    action: "upsert" | "delete",
+    operation: string,
+    err: unknown,
+  ): void {
+    const message = diagnosticErrorSummary(err);
     this.vectorCompanionError = `${operation}: ${message}`;
-    console.warn(
-      `clawlore: LanceDB companion ${operation} failed; SQL truth row preserved and vector repair is needed:`,
-      err,
-    );
+    try {
+      this.sqlTruthStore?.recordVectorRepairDebt({
+        memoryId,
+        action,
+        operation,
+        error: message,
+      });
+    } catch (debtError) {
+      this.vectorCompanionError = `${operation}: ${message}; repair debt persistence failed: ${diagnosticErrorSummary(debtError)}`;
+    }
+    console.warn(`clawlore: vector companion ${operation} failed; SQL truth preserved, repair required: ${message}`);
   }
 
-  private async addVectorCompanion(entry: MemoryEntry, operation: string): Promise<void> {
+  private clearVectorCompanionRepair(memoryId: string): void {
+    try {
+      this.sqlTruthStore?.clearVectorRepairDebt(memoryId);
+      const pending = this.sqlTruthStore?.vectorRepairDebtReport().pending ?? 0;
+      if (pending === 0) this.vectorCompanionError = null;
+    } catch (err) {
+      this.vectorCompanionError = `repair debt cleanup failed: ${diagnosticErrorSummary(err)}`;
+    }
+  }
+
+  private async addVectorCompanion(
+    entry: MemoryEntry,
+    operation: string,
+    clearDebtOnSuccess = true,
+  ): Promise<boolean> {
     try {
       if (this.sqliteVectorStore) {
         this.sqliteVectorStore.upsert(entry);
       } else {
         await this.table!.add([entry as any]);
       }
-      this.vectorCompanionError = null;
+      if (clearDebtOnSuccess) this.clearVectorCompanionRepair(entry.id);
+      return true;
     } catch (err) {
-      this.markVectorCompanionNeedsRepair(operation, err);
+      this.markVectorCompanionNeedsRepair(entry.id, "upsert", operation, err);
+      return false;
     }
   }
 
-  private async deleteVectorCompanionById(id: string, operation: string): Promise<boolean> {
+  private async deleteVectorCompanionById(
+    id: string,
+    operation: string,
+    clearDebtOnSuccess = true,
+  ): Promise<boolean> {
     try {
       if (this.sqliteVectorStore) {
         this.sqliteVectorStore.delete(id);
       } else {
         await this.table!.delete(`id = '${escapeSqlLiteral(id)}'`);
       }
-      this.vectorCompanionError = null;
+      if (clearDebtOnSuccess) this.clearVectorCompanionRepair(id);
       return true;
     } catch (err) {
-      this.markVectorCompanionNeedsRepair(operation, err);
+      this.markVectorCompanionNeedsRepair(id, "delete", operation, err);
       return false;
     }
+  }
+
+  private async replaceVectorCompanion(
+    entry: MemoryEntry,
+    deleteOperation: string,
+    addOperation: string,
+  ): Promise<boolean> {
+    const deleted = await this.deleteVectorCompanionById(entry.id, deleteOperation, false);
+    const added = await this.addVectorCompanion(entry, addOperation, false);
+    if (deleted && added) {
+      this.clearVectorCompanionRepair(entry.id);
+      return true;
+    }
+    if (added) {
+      this.markVectorCompanionNeedsRepair(
+        entry.id,
+        "upsert",
+        `${addOperation}-reconcile`,
+        new Error("vector delete phase failed before a successful companion upsert"),
+      );
+    }
+    return false;
+  }
+
+  private hydrateVectorResultsFromSql(
+    results: MemorySearchResult[],
+    scopeFilter: string[] | undefined,
+    excludeInactive: boolean,
+    limit: number,
+  ): MemorySearchResult[] {
+    if (!this.sqlTruthStore || results.length === 0) return results.slice(0, limit);
+    const truthRows = this.sqlTruthStore.getByIds(
+      results.map((result) => result.entry.id),
+      scopeFilter,
+    );
+    const truthById = new Map(truthRows.map((entry) => [entry.id, entry]));
+    const hydrated: MemorySearchResult[] = [];
+    for (const result of results) {
+      const truth = truthById.get(result.entry.id);
+      if (!truth) continue;
+      const entry: MemoryEntry = {
+        ...truth,
+        vector: result.entry.vector,
+      };
+      if (excludeInactive && !isMemoryActiveAt(parseSmartMetadata(entry.metadata, entry))) {
+        continue;
+      }
+      hydrated.push({ entry, score: result.score });
+      if (hydrated.length >= limit) break;
+    }
+    return hydrated;
   }
 
   private resolveSqlEntry(id: string, scopeFilter?: string[]): MemoryEntry | null {
@@ -757,7 +845,7 @@ export class MemoryStore {
 
   async hasId(id: string): Promise<boolean> {
     await this.ensureInitialized();
-    if (this.sqlTruthStore?.getById(id)) return true;
+    if (this.sqlTruthStore) return this.sqlTruthStore.getById(id) !== null;
     if (this.sqliteVectorStore) return false;
 
     const safeId = escapeSqlLiteral(id);
@@ -774,8 +862,9 @@ export class MemoryStore {
 
     if (isExplicitDenyAllScopeFilter(scopeFilter)) return null;
 
-    const sqlEntry = this.sqlTruthStore?.getById(id, scopeFilter);
-    if (sqlEntry) return sqlEntry;
+    if (this.sqlTruthStore) {
+      return this.sqlTruthStore.getById(id, scopeFilter);
+    }
     if (this.sqliteVectorStore) return null;
 
     const safeId = escapeSqlLiteral(id);
@@ -818,7 +907,20 @@ export class MemoryStore {
     const fetchLimit = Math.min(safeLimit * overFetchMultiplier, 200);
 
     if (this.sqliteVectorStore) {
-      const sqliteResults = this.sqliteVectorStore.search(vector, fetchLimit, minScore, scopeFilter);
+      const sqliteResults = this.sqliteVectorStore.search(
+        vector,
+        fetchLimit,
+        minScore,
+        this.sqlTruthStore ? undefined : scopeFilter,
+      );
+      if (this.sqlTruthStore) {
+        return this.hydrateVectorResultsFromSql(
+          sqliteResults,
+          scopeFilter,
+          inactiveFilter,
+          safeLimit,
+        );
+      }
       const filtered = inactiveFilter
         ? sqliteResults.filter((result) => isMemoryActiveAt(parseSmartMetadata(result.entry.metadata, result.entry)))
         : sqliteResults;
@@ -828,7 +930,7 @@ export class MemoryStore {
     let query = this.table!.vectorSearch(vector).distanceType('cosine').limit(fetchLimit);
 
     // Apply scope filter if provided
-    if (scopeFilter && scopeFilter.length > 0) {
+    if (!this.sqlTruthStore && scopeFilter && scopeFilter.length > 0) {
       const scopeConditions = scopeFilter
         .map((scope) => `scope = '${escapeSqlLiteral(scope)}'`)
         .join(" OR ");
@@ -848,6 +950,7 @@ export class MemoryStore {
 
       // Double-check scope filter in application layer
       if (
+        !this.sqlTruthStore &&
         scopeFilter &&
         scopeFilter.length > 0 &&
         !scopeFilter.includes(rowScope)
@@ -867,16 +970,18 @@ export class MemoryStore {
       };
 
       // Skip inactive (superseded) records when requested
-      if (inactiveFilter && !isMemoryActiveAt(parseSmartMetadata(entry.metadata, entry))) {
+      if (!this.sqlTruthStore && inactiveFilter && !isMemoryActiveAt(parseSmartMetadata(entry.metadata, entry))) {
         continue;
       }
 
       mapped.push({ entry, score });
 
-      if (mapped.length >= safeLimit) break;
+      if (!this.sqlTruthStore && mapped.length >= safeLimit) break;
     }
 
-    return mapped;
+    return this.sqlTruthStore
+      ? this.hydrateVectorResultsFromSql(mapped, scopeFilter, inactiveFilter, safeLimit)
+      : mapped;
   }
 
   async bm25Search(
@@ -894,8 +999,9 @@ export class MemoryStore {
     // Over-fetch when filtering inactive records to avoid crowding
     const fetchLimit = inactiveFilter ? Math.min(safeLimit * 20, 200) : safeLimit;
 
-    const sqlResults = this.searchSqlTruth(query, safeLimit, scopeFilter, options);
-    if (sqlResults.length > 0) return sqlResults;
+    if (this.sqlTruthStore) {
+      return this.searchSqlTruth(query, safeLimit, scopeFilter, options);
+    }
     if (this.sqliteVectorStore) return [];
 
     if (!this.ftsIndexCreated) {
@@ -963,7 +1069,7 @@ export class MemoryStore {
       }
       return this.lexicalFallbackSearch(query, safeLimit, scopeFilter, options);
     } catch (err) {
-      console.warn("BM25 search failed, falling back to empty results:", err);
+      console.warn(`BM25 search failed, falling back to empty results: ${diagnosticErrorSummary(err)}`);
       return this.lexicalFallbackSearch(query, safeLimit, scopeFilter, options);
     }
   }
@@ -978,7 +1084,7 @@ export class MemoryStore {
     try {
       return this.sqlTruthStore.search(query, limit, scopeFilter, options);
     } catch (err) {
-      console.warn("clawlore: SQL truth search failed; falling back to LanceDB search:", err);
+      console.warn(`clawlore: SQL truth search failed; falling back to LanceDB search: ${diagnosticErrorSummary(err)}`);
       return [];
     }
   }
@@ -1275,10 +1381,15 @@ export class MemoryStore {
         this.writeSqlTruthUpsert(updated);
 
         if (Array.isArray(updated.vector) && updated.vector.length === this.config.vectorDim) {
-          await this.deleteVectorCompanionById(updated.id, "update-delete-old-vector");
-          await this.addVectorCompanion(updated, "update-add-vector");
+          await this.replaceVectorCompanion(
+            updated,
+            "update-delete-old-vector",
+            "update-add-vector",
+          );
         } else {
           this.markVectorCompanionNeedsRepair(
+            updated.id,
+            "upsert",
             "update",
             new Error(`missing ${this.config.vectorDim}-dimension vector for ${updated.id}`),
           );
@@ -1454,10 +1565,15 @@ export class MemoryStore {
       this.sqlTruthStore!.supersedeAtomically(invalidatedOld, newEntry, metadata.factKey);
 
       if (Array.isArray(invalidatedOld.vector) && invalidatedOld.vector.length === this.config.vectorDim) {
-        await this.deleteVectorCompanionById(invalidatedOld.id, "supersede-delete-old-vector");
-        await this.addVectorCompanion(invalidatedOld, "supersede-add-invalidated-old-vector");
+        await this.replaceVectorCompanion(
+          invalidatedOld,
+          "supersede-delete-old-vector",
+          "supersede-add-invalidated-old-vector",
+        );
       } else {
         this.markVectorCompanionNeedsRepair(
+          invalidatedOld.id,
+          "upsert",
           "supersede-old",
           new Error(`missing ${this.config.vectorDim}-dimension vector for ${invalidatedOld.id}`),
         );
@@ -1620,13 +1736,19 @@ export class MemoryStore {
     message: string | null;
     configuredDimension: number;
     backend: "lancedb" | "sqlite-bruteforce";
+    repairDebt: VectorRepairDebtReport | null;
   } {
+    let repairDebt: VectorRepairDebtReport | null = null;
+    try {
+      repairDebt = this.sqlTruthStore?.vectorRepairDebtReport() ?? null;
+    } catch {}
     return {
-      ready: this.vectorCompanionError === null,
-      needsRepair: this.vectorCompanionError !== null,
+      ready: this.vectorCompanionError === null && (repairDebt?.pending ?? 0) === 0,
+      needsRepair: this.vectorCompanionError !== null || (repairDebt?.pending ?? 0) > 0,
       message: this.vectorCompanionError,
       configuredDimension: this.config.vectorDim,
       backend: this.sqliteVectorStore ? "sqlite-bruteforce" : "lancedb",
+      repairDebt,
     };
   }
 
@@ -1653,7 +1775,8 @@ export class MemoryStore {
     const missingVectorRows = truthEntries.filter((entry) => !vectorIdSet.has(entry.id)).length;
     const truncated = truthCount > truthEntries.length;
     const staleVectorRows = truncated ? 0 : vectorIds.filter((id) => !truthIds.has(id)).length;
-    const needsRepair = missingVectorRows > 0 || staleVectorRows > 0 || this.vectorCompanionError !== null;
+    const pendingRepairDebt = this.sqlTruthStore.vectorRepairDebtReport().pending;
+    const needsRepair = missingVectorRows > 0 || staleVectorRows > 0 || pendingRepairDebt > 0 || this.vectorCompanionError !== null;
 
     return {
       truthCount,
@@ -1702,11 +1825,23 @@ export class MemoryStore {
     const vectorIdsBefore = await this.listVectorIds();
     const vectorIdSet = new Set(vectorIdsBefore);
     const truthIds = new Set(truthEntries.map((entry) => entry.id));
+    const repairDebt: VectorRepairDebtEntry[] = this.sqlTruthStore.listVectorRepairDebt(
+      limit ?? 100_000,
+    );
+    const repairUpsertIds = new Set(
+      repairDebt.filter((entry) => entry.action === "upsert").map((entry) => entry.memoryId),
+    );
+    const repairDeleteIds = new Set(
+      repairDebt.filter((entry) => entry.action === "delete").map((entry) => entry.memoryId),
+    );
     const entries = fullRebuild
       ? truthEntries
-      : truthEntries.filter((entry) => !vectorIdSet.has(entry.id));
+      : truthEntries.filter((entry) => !vectorIdSet.has(entry.id) || repairUpsertIds.has(entry.id));
     const staleVectorIds = limit === undefined
-      ? vectorIdsBefore.filter((id) => !truthIds.has(id))
+      ? [...new Set([
+          ...vectorIdsBefore.filter((id) => !truthIds.has(id)),
+          ...repairDeleteIds,
+        ])]
       : [];
 
     const result: VectorCompanionRebuildResult = {
@@ -1729,8 +1864,11 @@ export class MemoryStore {
 
     return this.runWithFileLock(async () => {
       for (const id of staleVectorIds) {
-        await this.deleteVectorCompanionById(id, "repair-delete-stale-vector");
-        result.staleVectorRowsDeleted++;
+        if (await this.deleteVectorCompanionById(id, "repair-delete-stale-vector")) {
+          result.staleVectorRowsDeleted++;
+        } else {
+          result.errors.push(`${id}: vector companion delete failed; durable repair debt retained`);
+        }
       }
 
       for (let i = 0; i < entries.length; i += batchSize) {
@@ -1740,9 +1878,15 @@ export class MemoryStore {
         result.skipped += batch.length - rebuiltEntries.length;
 
         for (const entry of rebuiltEntries) {
-          await this.deleteVectorCompanionById(entry.id, "repair-delete-old-vector");
-          await this.addVectorCompanion(entry, "repair-add-vector");
-          result.rebuilt++;
+          if (await this.replaceVectorCompanion(
+            entry,
+            "repair-delete-old-vector",
+            "repair-add-vector",
+          )) {
+            result.rebuilt++;
+          } else {
+            result.errors.push(`${entry.id}: vector companion upsert failed; durable repair debt retained`);
+          }
         }
       }
 
@@ -1770,7 +1914,7 @@ export class MemoryStore {
           try {
             await this.table!.dropIndex((idx as any).name || "text");
           } catch (err) {
-            console.warn(`clawlore: dropIndex(${(idx as any).name || "text"}) failed:`, err);
+            console.warn(`clawlore: dropIndex(${(idx as any).name || "text"}) failed: ${diagnosticErrorSummary(err)}`);
           }
         }
       }

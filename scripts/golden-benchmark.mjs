@@ -8,7 +8,9 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite");
 
-const casesPath = process.argv[2] || "benchmarks/golden-recall-cases.json";
+const benchmarkArgs = process.argv.slice(2);
+const summaryOnly = benchmarkArgs.includes("--summary");
+const casesPath = benchmarkArgs.find((arg) => !arg.startsWith("--")) || "benchmarks/golden-recall-cases.json";
 
 function tokenize(text) {
   return [...String(text || "").toLowerCase().matchAll(/[a-z0-9]{2,}|[\u4e00-\u9fff]{2,}/g)]
@@ -142,6 +144,12 @@ try {
   let expectedHits = 0;
   let topKPasses = 0;
   let forbiddenViolations = 0;
+  let reciprocalRankTotal = 0;
+  let ndcgTotal = 0;
+  let totalRetrieved = 0;
+  let crossScopeLeakage = 0;
+  const promptTokenEstimates = [];
+  const laneMetrics = new Map();
   let promptBudgetCases = 0;
   let promptBudgetHits = 0;
   let promptBudgetExceeded = 0;
@@ -158,6 +166,15 @@ try {
     filterCounts.scopeFiltered += filters.scopeFiltered;
     filterCounts.inactiveFiltered += filters.inactiveFiltered;
     const ids = rows.map((row) => row.id);
+    totalRetrieved += rows.length;
+    const allowedScopes = Array.isArray(testCase.scope_filter) && testCase.scope_filter.length > 0
+      ? new Set(testCase.scope_filter)
+      : null;
+    const caseScopeLeakage = allowedScopes
+      ? rows.filter((row) => !allowedScopes.has(row.scope)).length
+      : 0;
+    crossScopeLeakage += caseScopeLeakage;
+    assert.equal(caseScopeLeakage, 0, `${testCase.name}: cross-scope result returned`);
     const expectedIds = testCase.expected_ids || [];
     expectedTotal += expectedIds.length;
     const missingExpectedIds = [];
@@ -174,6 +191,16 @@ try {
       }
       if (!ids.includes(id)) missingExpectedIds.push(id);
     }
+    const expectedRanks = expectedIds
+      .map((id) => ids.indexOf(id) + 1)
+      .filter((rank) => rank > 0)
+      .sort((a, b) => a - b);
+    const reciprocalRank = expectedRanks.length > 0 ? 1 / expectedRanks[0] : 0;
+    const dcg = expectedRanks.reduce((sum, rank) => sum + 1 / Math.log2(rank + 1), 0);
+    const idealDcg = expectedIds.reduce((sum, _id, index) => sum + 1 / Math.log2(index + 2), 0);
+    const ndcg = idealDcg > 0 ? dcg / idealDcg : 1;
+    reciprocalRankTotal += reciprocalRank;
+    ndcgTotal += ndcg;
     if (caseTopKPass) topKPasses++;
     for (const id of forbiddenIds) {
       if (ids.includes(id)) caseForbiddenViolations.push(id);
@@ -181,6 +208,8 @@ try {
     }
     forbiddenViolations += caseForbiddenViolations.length;
     const promptChars = rows.reduce((sum, row) => sum + String(row.text || "").length, 0);
+    const promptTokenEstimate = Math.ceil(promptChars / 4);
+    promptTokenEstimates.push(promptTokenEstimate);
     const maxPromptChars = Number(testCase.max_prompt_chars ?? 0);
     let promptBudgetHit = false;
     if (Number.isFinite(maxPromptChars) && maxPromptChars > 0) {
@@ -193,8 +222,27 @@ try {
       }
       assert.ok(promptBudgetHit, `${testCase.name}: prompt chars ${promptChars} > ${maxPromptChars}`);
     }
+    const lane = String(testCase.lane || "unclassified");
+    const laneMetric = laneMetrics.get(lane) || {
+      cases: 0,
+      expected: 0,
+      hits: 0,
+      reciprocalRankTotal: 0,
+      ndcgTotal: 0,
+      forbiddenViolations: 0,
+      crossScopeLeakage: 0,
+    };
+    laneMetric.cases++;
+    laneMetric.expected += expectedIds.length;
+    laneMetric.hits += expectedRanks.length;
+    laneMetric.reciprocalRankTotal += reciprocalRank;
+    laneMetric.ndcgTotal += ndcg;
+    laneMetric.forbiddenViolations += caseForbiddenViolations.length;
+    laneMetric.crossScopeLeakage += caseScopeLeakage;
+    laneMetrics.set(lane, laneMetric);
     results.push({
       name: testCase.name,
+      lane,
       ids,
       expected_ids: expectedIds,
       missing_expected_ids: missingExpectedIds,
@@ -202,6 +250,7 @@ try {
       forbidden_violations: caseForbiddenViolations,
       latency_ms: latencyMs,
       prompt_chars: promptChars,
+      prompt_token_estimate: promptTokenEstimate,
       max_prompt_chars: maxPromptChars || undefined,
       prompt_budget_hit: maxPromptChars > 0 ? promptBudgetHit : undefined,
       trace,
@@ -209,7 +258,15 @@ try {
   }
 
   const totalCases = (fixture.cases || []).length;
-  console.log(JSON.stringify({
+  const laneSummary = Object.fromEntries([...laneMetrics.entries()].map(([lane, metric]) => [lane, {
+    cases: metric.cases,
+    recall: metric.expected === 0 ? 1 : metric.hits / metric.expected,
+    mrr: metric.cases === 0 ? 1 : metric.reciprocalRankTotal / metric.cases,
+    ndcgAtK: metric.cases === 0 ? 1 : metric.ndcgTotal / metric.cases,
+    forbiddenViolations: metric.forbiddenViolations,
+    crossScopeLeakage: metric.crossScopeLeakage,
+  }]));
+  const report = {
     ok: true,
     name: fixture.name,
     summary: {
@@ -218,8 +275,12 @@ try {
       expectedHits,
       knownAnswerRecall: expectedTotal === 0 ? 1 : expectedHits / expectedTotal,
       topKAccuracy: totalCases === 0 ? 1 : topKPasses / totalCases,
+      mrr: totalCases === 0 ? 1 : reciprocalRankTotal / totalCases,
+      ndcgAtK: totalCases === 0 ? 1 : ndcgTotal / totalCases,
       forbiddenViolations,
       forbiddenViolationRate: totalCases === 0 ? 0 : forbiddenViolations / totalCases,
+      badRecallRate: totalRetrieved === 0 ? 0 : forbiddenViolations / totalRetrieved,
+      crossScopeLeakage,
       latencyMs: {
         avg: latencies.length === 0 ? 0 : Math.round(latencies.reduce((sum, n) => sum + n, 0) / latencies.length),
         p50: percentile(latencies, 0.5),
@@ -230,11 +291,15 @@ try {
         cases: promptBudgetCases,
         hitRate: promptBudgetCases === 0 ? 1 : promptBudgetHits / promptBudgetCases,
         exceeded: promptBudgetExceeded,
+        tokenEstimateP50: percentile(promptTokenEstimates, 0.5),
+        tokenEstimateP95: percentile(promptTokenEstimates, 0.95),
       },
       filterCounts,
+      lanes: laneSummary,
     },
-    cases: results,
-  }, null, 2));
+  };
+  if (!summaryOnly) report.cases = results;
+  console.log(JSON.stringify(report, null, 2));
 } finally {
   db.close();
   await rm(dbPath, { force: true });

@@ -10,10 +10,14 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { MemoryRetriever } from "./retriever.js";
 import type { MemoryStore } from "./store.js";
 import type { MemoryScopeManager } from "./scopes.js";
-import { parseAgentIdFromSessionKey, resolveScopeFilter } from "./scopes.js";
+import { isSystemBypassId, parseAgentIdFromSessionKey } from "./scopes.js";
 import type { TextEmbedder } from "./embedder.js";
 import type { WorkspaceBoundaryConfig } from "./workspace-boundary.js";
 import type { MdMirrorWriter } from "./tools.js";
+import {
+  resolveRuntimeMemoryAccess,
+  type PrincipalIsolationConfig,
+} from "./runtime-memory-boundary.js";
 import {
   ensureExperienceSchema,
   createTaskEpisode,
@@ -59,6 +63,7 @@ export interface ExperienceToolContext {
   workspaceDir?: string;
   mdMirror?: MdMirrorWriter | null;
   workspaceBoundary?: WorkspaceBoundaryConfig;
+  principalIsolation?: PrincipalIsolationConfig;
   db: () => Promise<DatabaseSync>;
 }
 
@@ -133,16 +138,47 @@ function missingAgentContextResponse(toolName: string): ToolTextResult {
   };
 }
 
-function resolveExperienceRuntime(
+function deniedExperienceBoundaryResponse(toolName: string, reason?: string): ToolTextResult {
+  return {
+    content: [{
+      type: "text",
+      text: reason === "group_memory_denied"
+        ? `${toolName} is disabled in group and channel conversations.`
+        : `${toolName} requires a resolvable private or explicitly enabled conversation boundary.`,
+    }],
+    details: { error: "memory_boundary_denied", reason, tool: toolName },
+    isError: true,
+  };
+}
+
+export function resolveExperienceRuntime(
   context: ExperienceToolContext,
   toolCtx: unknown,
   runtimeCtx: unknown,
   toolName: string,
-): { ok: true; agentId: string; defaultScope: string; scopeFilter: string[] | undefined; sessionId: string } | { ok: false; response: ToolTextResult } {
+): {
+  ok: true;
+  agentId: string;
+  defaultScope: string;
+  scopeFilter: string[] | undefined;
+  sessionId: string;
+  systemBypass: boolean;
+  isAccessible(scope: string): boolean;
+} | { ok: false; response: ToolTextResult } {
   const agentId = resolveRuntimeAgentId(context.agentId, toolCtx, runtimeCtx);
   if (!agentId) return { ok: false, response: missingAgentContextResponse(toolName) };
-  const defaultScope = context.scopeManager.getDefaultScope(agentId);
-  const scopeFilter = resolveScopeFilter(context.scopeManager, agentId);
+  const access = resolveRuntimeMemoryAccess({
+    scopeManager: context.scopeManager,
+    agentId,
+    config: context.principalIsolation,
+    staticContext: toolCtx,
+    runtimeContext: runtimeCtx,
+  });
+  if (access.denied) {
+    return { ok: false, response: deniedExperienceBoundaryResponse(toolName, access.denyReason) };
+  }
+  const defaultScope = access.defaultScope ?? context.scopeManager.getDefaultScope(agentId);
+  const scopeFilter = access.scopeFilter;
   const sessionId =
     (runtimeCtx && typeof runtimeCtx === "object" && typeof (runtimeCtx as Record<string, unknown>).sessionId === "string"
       ? String((runtimeCtx as Record<string, unknown>).sessionId)
@@ -151,7 +187,26 @@ function resolveExperienceRuntime(
       ? String((toolCtx as Record<string, unknown>).sessionId)
       : "") ||
     "unknown";
-  return { ok: true, agentId, defaultScope, scopeFilter, sessionId };
+  return {
+    ok: true,
+    agentId,
+    defaultScope,
+    scopeFilter,
+    sessionId,
+    systemBypass: isSystemBypassId(agentId),
+    isAccessible: access.isAccessible,
+  };
+}
+
+function globalExperienceOperatorDeniedResponse(toolName: string): ToolTextResult {
+  return {
+    content: [{
+      type: "text",
+      text: `${toolName} requires an explicit system operator context because its underlying operation is not scope-local.`,
+    }],
+    details: { error: "system_operator_context_required", tool: toolName },
+    isError: true,
+  };
 }
 
 function registerExperienceTool(
@@ -286,7 +341,7 @@ export function registerEpisodeCompleteTool(api: OpenClawPluginApi, context: Exp
           }
           ensureExperienceSchema(db);
 
-          const episode = getEpisode(db, episode_id);
+          const episode = getEpisode(db, episode_id, runtime.scopeFilter);
           if (!episode) {
             return {
               content: [{ type: "text", text: `Episode not found: ${episode_id}` }],
@@ -294,7 +349,12 @@ export function registerEpisodeCompleteTool(api: OpenClawPluginApi, context: Exp
             };
           }
 
-          updateEpisodeOutcome(db, episode_id, outcome);
+          if (!updateEpisodeOutcome(db, episode_id, outcome, undefined, runtime.scopeFilter)) {
+            return {
+              content: [{ type: "text", text: `Episode not found: ${episode_id}` }],
+              isError: true,
+            };
+          }
 
           return {
             content: [
@@ -431,7 +491,7 @@ export function registerPlaybookInspectTool(api: OpenClawPluginApi, context: Exp
           }
           ensureExperienceSchema(db);
 
-          const playbook = getPlaybook(db, playbook_id);
+          const playbook = getPlaybook(db, playbook_id, runtime.scopeFilter);
           if (!playbook) {
             return {
               content: [{ type: "text", text: `Playbook not found: ${playbook_id}` }],
@@ -439,8 +499,8 @@ export function registerPlaybookInspectTool(api: OpenClawPluginApi, context: Exp
             };
           }
 
-          const versions = getPlaybookVersions(db, playbook_id);
-          const recentRuns = listRunsForPlaybook(db, playbook_id, 5);
+          const versions = getPlaybookVersions(db, playbook_id, runtime.scopeFilter);
+          const recentRuns = listRunsForPlaybook(db, playbook_id, 5, runtime.scopeFilter);
 
           const result = {
             ...playbook,
@@ -550,6 +610,13 @@ export function registerPlaybookCreateTool(api: OpenClawPluginApi, context: Expe
           }
           ensureExperienceSchema(db);
 
+          if (episode_id && !getEpisode(db, episode_id, runtime.scopeFilter)) {
+            return {
+              content: [{ type: "text", text: "Error: source episode is outside the current memory boundary" }],
+              isError: true,
+            };
+          }
+
           const playbook = createPlaybook(db, {
             scope_id: runtime.defaultScope,
             payload: {
@@ -635,7 +702,7 @@ export function registerPlaybookFeedbackTool(api: OpenClawPluginApi, context: Ex
           }
           ensureExperienceSchema(db);
 
-          const playbook = getPlaybook(db, playbook_id);
+          const playbook = getPlaybook(db, playbook_id, runtime.scopeFilter);
           if (!playbook) {
             return {
               content: [{ type: "text", text: `Playbook not found: ${playbook_id}` }],
@@ -658,7 +725,17 @@ export function registerPlaybookFeedbackTool(api: OpenClawPluginApi, context: Ex
           finishExperienceRun(db, run.id, outcome, outcome_reason);
 
           // Update playbook counters
-          incrementPlaybookCounters(db, playbook_id, outcome === "partial" ? "stale" : outcome);
+          if (!incrementPlaybookCounters(
+            db,
+            playbook_id,
+            outcome === "partial" ? "stale" : outcome,
+            runtime.scopeFilter,
+          )) {
+            return {
+              content: [{ type: "text", text: `Playbook not found: ${playbook_id}` }],
+              isError: true,
+            };
+          }
 
           return {
             content: [
@@ -801,7 +878,7 @@ export function registerExperienceStatsTool(api: OpenClawPluginApi, context: Exp
           }
           ensureExperienceSchema(db);
 
-          const stats = getExperienceStats(db, runtime.defaultScope);
+          const stats = getExperienceStats(db, runtime.scopeFilter);
 
           const summary = `Experience Kernel Statistics (scope: ${runtime.defaultScope}):
 
@@ -868,8 +945,19 @@ function registerExperiencePromoteTool(api: OpenClawPluginApi, context: Experien
           }
           ensureExperienceSchema(db);
 
+          const requestedScope = typeof params.scope === "string" && params.scope.trim()
+            ? params.scope.trim()
+            : runtime.defaultScope;
+          if (!runtime.isAccessible(requestedScope)) {
+            return {
+              content: [{ type: "text", text: `Access denied to scope: ${requestedScope}` }],
+              details: { error: "scope_access_denied", requestedScope },
+              isError: true,
+            };
+          }
+
           const result = promoteExperiences(db, {
-            scope_id: typeof params.scope === "string" ? params.scope : runtime.defaultScope,
+            scope_id: requestedScope,
             dry_run: typeof params.dry_run === "boolean" ? params.dry_run : true,
             config: {
               auto_promote_low_risk: typeof params.auto_promote_low_risk === "boolean" ? params.auto_promote_low_risk : true,
@@ -930,7 +1018,7 @@ function registerForgettingReportTool(api: OpenClawPluginApi, context: Experienc
           let scopeFilter = runtime.scopeFilter;
           if (typeof params.scope === "string" && params.scope.trim()) {
             const scope = params.scope.trim();
-            if (!context.scopeManager.isAccessible(scope, runtime.agentId)) {
+            if (!runtime.isAccessible(scope)) {
               return {
                 content: [{ type: "text", text: `Access denied to scope: ${scope}` }],
                 details: { error: "scope_access_denied", requestedScope: scope },
@@ -993,7 +1081,7 @@ function registerForgettingRunTool(api: OpenClawPluginApi, context: ExperienceTo
           let scopeFilter = runtime.scopeFilter;
           if (typeof params.scope === "string" && params.scope.trim()) {
             const scope = params.scope.trim();
-            if (!context.scopeManager.isAccessible(scope, runtime.agentId)) {
+            if (!runtime.isAccessible(scope)) {
               return {
                 content: [{ type: "text", text: `Access denied to scope: ${scope}` }],
                 details: { error: "scope_access_denied", requestedScope: scope },
@@ -1055,7 +1143,7 @@ function registerGovernanceCleanupReportTool(api: OpenClawPluginApi, context: Ex
           let scopeFilter = runtime.scopeFilter;
           if (typeof params.scope === "string" && params.scope.trim()) {
             const scope = params.scope.trim();
-            if (!context.scopeManager.isAccessible(scope, runtime.agentId)) {
+            if (!runtime.isAccessible(scope)) {
               return {
                 content: [{ type: "text", text: `Access denied to scope: ${scope}` }],
                 details: { error: "scope_access_denied", requestedScope: scope },
@@ -1106,6 +1194,9 @@ function registerGovernanceCleanupRunTool(api: OpenClawPluginApi, context: Exper
           if (!db) return { content: [{ type: "text", text: "Error: SQL truth store not available" }], isError: true };
 
           if (params.rollback_batch === true) {
+            if (!runtime.systemBypass) {
+              return globalExperienceOperatorDeniedResponse("scope_recall_governance_cleanup_run");
+            }
             const batchId = typeof params.batch_id === "string" && params.batch_id.trim() ? params.batch_id.trim() : "";
             if (!batchId) {
               return { content: [{ type: "text", text: "batch_id is required when rollback_batch=true" }], isError: true };
@@ -1124,7 +1215,7 @@ function registerGovernanceCleanupRunTool(api: OpenClawPluginApi, context: Exper
           let scopeFilter = runtime.scopeFilter;
           if (typeof params.scope === "string" && params.scope.trim()) {
             const scope = params.scope.trim();
-            if (!context.scopeManager.isAccessible(scope, runtime.agentId)) {
+            if (!runtime.isAccessible(scope)) {
               return {
                 content: [{ type: "text", text: `Access denied to scope: ${scope}` }],
                 details: { error: "scope_access_denied", requestedScope: scope },
@@ -1166,6 +1257,7 @@ function registerMemoryCandidatePromotionReportTool(api: OpenClawPluginApi, cont
       async execute(_toolCallId: string, params: Record<string, unknown>, _signal?: unknown, _onUpdate?: unknown, runtimeCtx?: unknown) {
         const runtime = resolveExperienceRuntime(context, toolCtx, runtimeCtx, "scope_recall_memory_candidate_promotion_report");
         if (runtime.ok === false) return runtime.response;
+        if (!runtime.systemBypass) return globalExperienceOperatorDeniedResponse("scope_recall_memory_candidate_promotion_report");
         const db = await context.db();
         if (!db) return { content: [{ type: "text", text: "Error: SQL truth store not available" }], isError: true };
         const result = candidateDebtReport(db, {
@@ -1198,6 +1290,7 @@ function registerMemoryCandidatePromotionRunTool(api: OpenClawPluginApi, context
       async execute(_toolCallId: string, params: Record<string, unknown>, _signal?: unknown, _onUpdate?: unknown, runtimeCtx?: unknown) {
         const runtime = resolveExperienceRuntime(context, toolCtx, runtimeCtx, "scope_recall_memory_candidate_promotion_run");
         if (runtime.ok === false) return runtime.response;
+        if (!runtime.systemBypass) return globalExperienceOperatorDeniedResponse("scope_recall_memory_candidate_promotion_run");
         const db = await context.db();
         if (!db) return { content: [{ type: "text", text: "Error: SQL truth store not available" }], isError: true };
         const result = promoteMemoryCandidates(db, {
@@ -1228,6 +1321,7 @@ function registerGraphHygieneReportTool(api: OpenClawPluginApi, context: Experie
       async execute(_toolCallId: string, _params: Record<string, unknown>, _signal?: unknown, _onUpdate?: unknown, runtimeCtx?: unknown) {
         const runtime = resolveExperienceRuntime(context, toolCtx, runtimeCtx, "scope_recall_graph_hygiene_report");
         if (runtime.ok === false) return runtime.response;
+        if (!runtime.systemBypass) return globalExperienceOperatorDeniedResponse("scope_recall_graph_hygiene_report");
         const db = await context.db();
         if (!db) return { content: [{ type: "text", text: "Error: SQL truth store not available" }], isError: true };
         const result = graphHygieneReport(db);
@@ -1254,6 +1348,7 @@ function registerGraphHygieneRunTool(api: OpenClawPluginApi, context: Experience
       async execute(_toolCallId: string, params: Record<string, unknown>, _signal?: unknown, _onUpdate?: unknown, runtimeCtx?: unknown) {
         const runtime = resolveExperienceRuntime(context, toolCtx, runtimeCtx, "scope_recall_graph_hygiene_run");
         if (runtime.ok === false) return runtime.response;
+        if (!runtime.systemBypass) return globalExperienceOperatorDeniedResponse("scope_recall_graph_hygiene_run");
         const db = await context.db();
         if (!db) return { content: [{ type: "text", text: "Error: SQL truth store not available" }], isError: true };
         const result = repairGraphHygiene(db, {
@@ -1283,6 +1378,7 @@ function registerJournalRecoveryReportTool(api: OpenClawPluginApi, context: Expe
       async execute(_toolCallId: string, params: Record<string, unknown>, _signal?: unknown, _onUpdate?: unknown, runtimeCtx?: unknown) {
         const runtime = resolveExperienceRuntime(context, toolCtx, runtimeCtx, "scope_recall_journal_recovery_report");
         if (runtime.ok === false) return runtime.response;
+        if (!runtime.systemBypass) return globalExperienceOperatorDeniedResponse("scope_recall_journal_recovery_report");
         const db = await context.db();
         if (!db) return { content: [{ type: "text", text: "Error: SQL truth store not available" }], isError: true };
         const reasonPrefixes = params.include_dead_letters === true ? ["retry-exhausted:", "dead-letter:"] : ["retry-exhausted:"];
@@ -1315,6 +1411,7 @@ function registerJournalRecoveryRunTool(api: OpenClawPluginApi, context: Experie
       async execute(_toolCallId: string, params: Record<string, unknown>, _signal?: unknown, _onUpdate?: unknown, runtimeCtx?: unknown) {
         const runtime = resolveExperienceRuntime(context, toolCtx, runtimeCtx, "scope_recall_journal_recovery_run");
         if (runtime.ok === false) return runtime.response;
+        if (!runtime.systemBypass) return globalExperienceOperatorDeniedResponse("scope_recall_journal_recovery_run");
         const db = await context.db();
         if (!db) return { content: [{ type: "text", text: "Error: SQL truth store not available" }], isError: true };
         const reasonPrefixes = params.include_dead_letters === true ? ["retry-exhausted:", "dead-letter:"] : ["retry-exhausted:"];
@@ -1347,6 +1444,7 @@ function registerDigestReportTool(api: OpenClawPluginApi, context: ExperienceToo
       async execute(_toolCallId: string, params: Record<string, unknown>, _signal?: unknown, _onUpdate?: unknown, runtimeCtx?: unknown) {
         const runtime = resolveExperienceRuntime(context, toolCtx, runtimeCtx, "scope_recall_digest_report");
         if (runtime.ok === false) return runtime.response;
+        if (!runtime.systemBypass) return globalExperienceOperatorDeniedResponse("scope_recall_digest_report");
         const db = await context.db();
         if (!db) return { content: [{ type: "text", text: "Error: SQL truth store not available" }], isError: true };
         const result = digestReport(db, {
@@ -1380,10 +1478,10 @@ function registerDigestRunTool(api: OpenClawPluginApi, context: ExperienceToolCo
         const db = await context.db();
         if (!db) return { content: [{ type: "text", text: "Error: SQL truth store not available" }], isError: true };
 
-        let scope = `agent:${runtime.agentId}`;
+        let scope = runtime.defaultScope;
         if (typeof params.scope === "string" && params.scope.trim()) {
           scope = params.scope.trim();
-          if (!context.scopeManager.isAccessible(scope, runtime.agentId)) {
+          if (!runtime.isAccessible(scope)) {
             return {
               content: [{ type: "text", text: `Access denied to scope: ${scope}` }],
               details: { error: "scope_access_denied", requestedScope: scope },
@@ -1427,6 +1525,7 @@ function registerDigestRecoveryTool(api: OpenClawPluginApi, context: ExperienceT
       async execute(_toolCallId: string, params: Record<string, unknown>, _signal?: unknown, _onUpdate?: unknown, runtimeCtx?: unknown) {
         const runtime = resolveExperienceRuntime(context, toolCtx, runtimeCtx, "scope_recall_digest_recovery");
         if (runtime.ok === false) return runtime.response;
+        if (!runtime.systemBypass) return globalExperienceOperatorDeniedResponse("scope_recall_digest_recovery");
         const db = await context.db();
         if (!db) return { content: [{ type: "text", text: "Error: SQL truth store not available" }], isError: true };
         const limit = typeof params.limit === "number" ? params.limit : 100;
@@ -1457,6 +1556,7 @@ function registerOperatorDashboardTool(api: OpenClawPluginApi, context: Experien
       async execute(_toolCallId: string, _params: Record<string, unknown>, _signal?: unknown, _onUpdate?: unknown, runtimeCtx?: unknown) {
         const runtime = resolveExperienceRuntime(context, toolCtx, runtimeCtx, "scope_recall_operator_dashboard");
         if (runtime.ok === false) return runtime.response;
+        if (!runtime.systemBypass) return globalExperienceOperatorDeniedResponse("scope_recall_operator_dashboard");
         const db = await context.db();
         if (!db) return { content: [{ type: "text", text: "Error: SQL truth store not available" }], isError: true };
         const dashboard = buildOperatorDashboard(db, {
@@ -1495,13 +1595,26 @@ function registerPlaybookReviewTool(api: OpenClawPluginApi, context: ExperienceT
         reason: Type.Optional(Type.String({ description: "Reason for the review decision" })),
         superseded_by: Type.Optional(Type.String({ description: "If superseding, the ID of the replacement playbook" })),
       }),
-      async execute(_toolCallId: string, params: Record<string, unknown>) {
+      async execute(_toolCallId: string, params: Record<string, unknown>, _signal?: unknown, _onUpdate?: unknown, runtimeCtx?: unknown) {
         try {
+          const runtime = resolveExperienceRuntime(context, toolCtx, runtimeCtx, "scope_recall_playbook_review");
+          if (runtime.ok === false) return runtime.response;
           const db = await context.db();
           if (!db) {
             return { content: [{ type: "text", text: "Error: SQL truth store not available" }], isError: true };
           }
           ensureExperienceSchema(db);
+
+          if (String(params.action) === "supersede") {
+            const replacementId = typeof params.superseded_by === "string" ? params.superseded_by.trim() : "";
+            if (!replacementId || !getPlaybook(db, replacementId, runtime.scopeFilter)) {
+              return {
+                content: [{ type: "text", text: "Replacement playbook is missing or outside the current memory boundary." }],
+                details: { error: "replacement_playbook_not_accessible" },
+                isError: true,
+              };
+            }
+          }
 
           const { reviewPlaybook } = await import("./experience-store.js");
           const result = reviewPlaybook(db, {
@@ -1509,6 +1622,7 @@ function registerPlaybookReviewTool(api: OpenClawPluginApi, context: ExperienceT
             action: String(params.action) as "review" | "promote" | "needs_review" | "quarantine" | "supersede",
             reason: params.reason ? String(params.reason) : undefined,
             supersededBy: params.superseded_by ? String(params.superseded_by) : undefined,
+            scopeIds: runtime.scopeFilter,
           });
 
           if (!result.reviewed) {
@@ -1561,8 +1675,16 @@ function registerExperienceReplayTool(api: OpenClawPluginApi, context: Experienc
           negative_terms: Type.Optional(Type.Array(Type.String(), { description: "Terms that must NOT be present" })),
         }), { description: "Test cases to run" }),
       }),
-      async execute(_toolCallId: string, params: Record<string, unknown>) {
+      async execute(
+        _toolCallId: string,
+        params: Record<string, unknown>,
+        _signal?: unknown,
+        _onUpdate?: unknown,
+        runtimeCtx?: unknown,
+      ) {
         try {
+          const runtime = resolveExperienceRuntime(context, toolCtx, runtimeCtx, "scope_recall_experience_replay");
+          if (runtime.ok === false) return runtime.response;
           const db = await context.db();
           if (!db) {
             return { content: [{ type: "text", text: "Error: SQL truth store not available" }], isError: true };
@@ -1571,7 +1693,7 @@ function registerExperienceReplayTool(api: OpenClawPluginApi, context: Experienc
 
           const { runReplaySuite, loadReplayCases } = await import("./experience-replay.js");
           const cases = loadReplayCases(params.cases as any[]);
-          const suite = runReplaySuite(db, String(params.playbook_id), cases);
+          const suite = runReplaySuite(db, String(params.playbook_id), cases, runtime.scopeFilter);
 
           const summary = `**Replay Test Results**
 

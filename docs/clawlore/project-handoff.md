@@ -1,7 +1,7 @@
 # ClawLore v1 project handoff
 
-Current through Phase 9, H1-H5 production hardening, and the R1 canonical
-identity source candidate on 2026-07-15.
+Current through Phase 9, H1-H5 production hardening, the R1 canonical identity
+transition, and both independent-audit remediation rounds on 2026-07-15.
 
 ## Canonical identity candidate
 
@@ -21,17 +21,20 @@ Compatibility is explicit rather than accidental:
 Loading legacy and canonical plugin copies together is forbidden because they
 expose the same memory slot, hooks, and tool ids.
 
-Identity verification currently passes 270/270 tests, typecheck, build, vector
-repair, golden recall, package-lock SBOM (42 components), npm pack scan (569
-files), and the explicit source-only release gate. The default live gate now
-targets `extensions/clawlore` and must remain fail-closed until an independently
-audited artifact is deployed. See `identity-transition-v1.md` and
-`eval/clawlore-v1-identity-transition-run-2026-07-15.md`.
+The second independent audit found and the source candidate now closes three
+additional release blockers: SQL-truth/vector-companion read consistency,
+Experience Kernel principal isolation, and cross-session auto-recall cache
+identity. It also closes degraded-capture injection, raw diagnostic previews,
+package content scanning, and credential-at-rest findings. Verification now
+covers 301 tests, a 124-case annotated synthetic recall matrix, a 200,000-row
+SQLite FTS baseline, SecretRef-aware CLI registration, package-lock SBOM, and
+an extracted npm-pack content scan. See
+`eval/clawlore-v1-second-independent-audit-remediation-run-2026-07-15.md`.
 
 This candidate does not authorize a live rename, V2 writes, lifecycle
 promotion, ContextEngine, prompt mutation, or final-recall cutover. Tianxuan's
-audit is the next gate; repository creation/rename and push follow only after
-that audit is accepted.
+re-audit of the exact clean remediation commit is the next gate; repository
+creation/rename and push follow only after that audit is accepted.
 
 ## Current live boundary
 
@@ -41,10 +44,13 @@ post-restart probes, bounded soak, and a fresh `no_cutover` decision. Its exact
 deployed runtime digest was
 `c4e43382dbbf09379e51ba1334a8574fcf1369a496f7bb1246cdeb0c455d2251`.
 
-Live behavior remains V1 fallback plus ClawLore read-only shadow. V2 writes,
+Live behavior remains V1 fallback plus ClawLore read-only shadow. Telegram is
+sender-allowlisted, every configured group plus the wildcard group denies the
+declared memory/governance tool surface, the service uses `UMask=0077`, and
+SQLite/WAL/SHM are `0600`. Runtime model credentials are SecretRefs. V2 writes,
 lifecycle promotion, ContextEngine, prompt mutation, and final recall remain
-disabled. The R1 source candidate has intentionally not changed live config,
-extension files, database, or service.
+disabled. The 1.2 source candidate has intentionally not changed live extension
+files, database truth, memory slot, or V2 rollout controls.
 
 The H5 report is
 `eval/clawlore-v1-h5-production-deployment-run-2026-07-14.md`.
@@ -59,9 +65,10 @@ not an implied approval to switch later without fresh evidence.
 
 ## Next controlled boundary
 
-1. Commit the exact R1 candidate and record its recursive runtime digest.
+1. Commit the exact second-audit remediation candidate and record its recursive
+   runtime digest plus clean release-gate evidence.
 2. Give Tianxuan the commit, this handoff, the identity-transition runbook, and
-   the dated R1 evaluation report for independent read-only audit.
+   both dated audit-remediation reports for independent read-only re-audit.
 3. If the audit passes, create or rename the GitHub repository to `clawlore`,
    verify the destination, then update `origin` and push the audited commit.
 4. Treat any live identity migration as a separate backup-backed rollout with
