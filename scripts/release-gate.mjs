@@ -648,7 +648,7 @@ try {
   ) {
     throw new Error("release gate failed: installed tarball did not load through the real OpenClaw CLI");
   }
-  runCapture(packedOpenClawCli, ["clawlore", "experience", "stats", "--json"], { env: isolatedRuntimeEnv });
+  runCapture(packedOpenClawCli, ["clawlore", "experience", "debt", "--json"], { env: isolatedRuntimeEnv });
   const packedDoctor = parseJsonWithPreamble(
     runCapture(packedOpenClawCli, ["clawlore", "doctor", "--json", "--quiet"], { env: isolatedRuntimeEnv }),
     "installed-tarball OpenClaw doctor",
