@@ -514,13 +514,19 @@ test("operator CLI exposes Yuheng 1.6 governance function surface", () => {
 
 test("release gate includes source/live separation and OpenClaw runtime smoke", () => {
   const gate = readFileSync(new URL("../scripts/release-gate.mjs", import.meta.url), "utf8");
+  const wrapper = readFileSync(new URL("../scripts/run-release-gate.mjs", import.meta.url), "utf8");
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const indexSource = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
-  assert.match(packageJson.scripts["release:gate"], /CLAWLORE_ALLOW_NESTED_GIT_ROOT=1/);
-  assert.match(packageJson.scripts["release:gate:source"], /CLAWLORE_SOURCE_ONLY=1/);
+  assert.equal(packageJson.scripts["release:gate"], "node scripts/run-release-gate.mjs");
+  assert.equal(packageJson.scripts["release:gate:source"], "node scripts/run-release-gate.mjs --source-only");
+  assert.match(wrapper, /CLAWLORE_ALLOW_NESTED_GIT_ROOT/);
+  assert.match(wrapper, /CLAWLORE_SOURCE_ONLY/);
+  assert.match(wrapper, /shell:\s*false/);
   assert.match(packageJson.scripts["release:reproducibility"], /reproducible-install-gate/);
   assert.match(gate, /"rev-parse",\s*"--show-toplevel"/);
   assert.match(gate, /CLAWLORE_ALLOW_NESTED_GIT_ROOT/);
+  assert.match(gate, /packed-lancedb-smoke\.mjs/);
+  assert.equal(packageJson.files.includes("scripts/packed-lancedb-smoke.mjs"), true);
   assert.match(gate, /SCOPE_RECALL_ALLOW_NESTED_GIT_ROOT/);
   assert.match(gate, /CLAWLORE_SOURCE_ONLY/);
   assert.match(gate, /SCOPE_RECALL_SOURCE_ONLY/);

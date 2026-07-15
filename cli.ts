@@ -96,6 +96,10 @@ interface CLIContext {
   beforeAction?: (commandPath: string[]) => void | Promise<void>;
 }
 
+type ChooseOAuthProviderHook = NonNullable<
+  NonNullable<CLIContext["oauthTestHooks"]>["chooseProvider"]
+>;
+
 // ============================================================================
 // Utility Functions
 // ============================================================================
@@ -292,7 +296,7 @@ function pickOauthProvider(currentProvider: string | undefined, overrideProvider
 
 async function promptOauthProviderSelection(
   currentProviderId: string,
-  testHook?: CLIContext["oauthTestHooks"]["chooseProvider"],
+  testHook?: ChooseOAuthProviderHook,
 ): Promise<{ providerId: string; source: "prompt" | "default" }> {
   const providers = listOAuthProviders();
   if (providers.length === 0) {
@@ -391,7 +395,7 @@ async function promptOauthProviderSelection(
 async function resolveOauthProviderSelection(
   currentProvider: string | undefined,
   overrideProvider: string | undefined,
-  chooseProviderHook?: CLIContext["oauthTestHooks"]["chooseProvider"],
+  chooseProviderHook?: ChooseOAuthProviderHook,
 ): Promise<{ providerId: string; source: "override" | "config" | "default" | "prompt" }> {
   if (overrideProvider && overrideProvider.trim()) {
     return pickOauthProvider(currentProvider, overrideProvider);
@@ -764,7 +768,7 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
           const plan = inspectLegacyAuthorityMigration(params);
           if (options.json) writeJson({ dryRun: true, ...plan });
           else console.log(`DRY-RUN authority migration: ${plan.status} (${plan.reason})`);
-          if (plan.status !== "ready") process.exitCode = 1;
+          if (plan.status !== "ready" && plan.status !== "recoverable") process.exitCode = 1;
           return;
         }
         const receipt = await migrateLegacySqlAuthority(params);
@@ -774,6 +778,7 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
           console.log(`Migration id: ${receipt.migrationId}`);
           console.log(`Truth rows: ${receipt.sourceTruthRows}`);
           console.log(`Backup SHA-256: ${receipt.backupSha256}`);
+          console.log(`Source snapshot SHA-256: ${receipt.sourceSnapshotSha256}`);
         }
       } catch (error) {
         console.error(`Authority migration failed: ${diagnosticErrorSummary(error)}`);
@@ -1032,7 +1037,7 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
           } else {
             console.log(`Found ${results.length} memories:\n`);
             results.forEach((result, i) => {
-              const sources = [];
+              const sources: string[] = [];
               if (result.sources.vector) sources.push("vector");
               if (result.sources.bm25) sources.push("BM25");
               if (result.sources.reranked) sources.push("reranked");
@@ -1285,7 +1290,6 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
           if (result.errors.length > 0) process.exit(1);
           return;
         }
-
         console.log(`Vector Companion Repair:`);
         console.log(`• Mode: ${result.dryRun ? "dry-run" : "write"}`);
         console.log(`• Scope: ${result.fullRebuild ? "full rebuild" : "incremental missing/stale repair"}`);
@@ -2482,6 +2486,9 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
           console.error("Re-embed requires an embedder (not available in basic CLI mode).");
           return;
         }
+        const embedBatchPassage = context.embedder.embedBatchPassage
+          ? context.embedder.embedBatchPassage.bind(context.embedder)
+          : async (texts: string[]) => Promise.all(texts.map((text) => context.embedder!.embedPassage(text)));
 
         const fs = await import("node:fs/promises");
 
@@ -2543,7 +2550,7 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
         for (let i = 0; i < rows.length; i += batchSize) {
           const batch = rows.slice(i, i + batchSize);
           const texts = batch.map((r: any) => String(r.text));
-          const vectors = await context.embedder.embedBatchPassage(texts);
+          const vectors = await embedBatchPassage(texts);
 
           for (let j = 0; j < batch.length; j++) {
             processed++;

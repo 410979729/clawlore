@@ -1,6 +1,23 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, statSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, statSync } from "node:fs";
+import { dirname } from "node:path";
 let cachedWindowsCurrentUserSid = null;
+const WINDOWS_ACL_SCRIPT = [
+    "$ErrorActionPreference='Stop'",
+    "$path=$env:CLAWLORE_PRIVATE_PATH",
+    "$sidText=$env:CLAWLORE_PRIVATE_SID",
+    "$kind=$env:CLAWLORE_PRIVATE_KIND",
+    "$mode=$env:CLAWLORE_PRIVATE_MODE",
+    "if([string]::IsNullOrWhiteSpace($path)-or[string]::IsNullOrWhiteSpace($sidText)-or[string]::IsNullOrWhiteSpace($kind)){throw 'CLAWLORE_WINDOWS_ACL_INPUT_MISSING'}",
+    "$sid=New-Object -TypeName System.Security.Principal.SecurityIdentifier -ArgumentList $sidText",
+    "if($mode -eq 'enforce'){$acl=Get-Acl -LiteralPath $path;$acl.SetOwner($sid);$acl.SetAccessRuleProtection($true,$false);@($acl.Access)|ForEach-Object{[void]$acl.RemoveAccessRuleSpecific($_)};$inheritance=if($kind -eq 'directory'){[System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'}else{[System.Security.AccessControl.InheritanceFlags]::None};$rule=New-Object System.Security.AccessControl.FileSystemAccessRule($sid,[System.Security.AccessControl.FileSystemRights]::FullControl,$inheritance,[System.Security.AccessControl.PropagationFlags]::None,[System.Security.AccessControl.AccessControlType]::Allow);[void]$acl.AddAccessRule($rule);Set-Acl -LiteralPath $path -AclObject $acl}",
+    "$verified=Get-Acl -LiteralPath $path",
+    "$ownerSid=$verified.Owner",
+    "try{$ownerSid=([System.Security.Principal.NTAccount]$verified.Owner).Translate([System.Security.Principal.SecurityIdentifier]).Value}catch{try{$ownerSid=(New-Object -TypeName System.Security.Principal.SecurityIdentifier -ArgumentList $verified.Owner).Value}catch{}}",
+    "$rules=@($verified.Access|ForEach-Object{$ruleSid=$_.IdentityReference.Value;try{$ruleSid=$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value}catch{};[ordered]@{sid=$ruleSid;type=$_.AccessControlType.ToString();rights=$_.FileSystemRights.ToString();inherited=$_.IsInherited;inheritanceFlags=$_.InheritanceFlags.ToString();propagationFlags=$_.PropagationFlags.ToString()}})",
+    "[ordered]@{ownerSid=$ownerSid;protected=$verified.AreAccessRulesProtected;access=$rules}|ConvertTo-Json -Compress -Depth 5",
+].join(";");
+const WINDOWS_ACL_ENCODED_COMMAND = Buffer.from(WINDOWS_ACL_SCRIPT, "utf16le").toString("base64");
 function windowsCurrentUserSid(run) {
     if (run === execFileSync && cachedWindowsCurrentUserSid) {
         return cachedWindowsCurrentUserSid;
@@ -29,36 +46,7 @@ function parseWindowsAclReport(raw) {
         throw new Error("CLAWLORE_WINDOWS_ACL_REPORT_INVALID");
     }
 }
-export function enforceWindowsPrivateAcl(path, run = execFileSync, kind = "file") {
-    const sid = windowsCurrentUserSid(run);
-    const report = parseWindowsAclReport(String(run("powershell.exe", [
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        [
-            "$ErrorActionPreference='Stop'",
-            "$path=$args[0]",
-            "$sidText=$args[1]",
-            "$kind=$args[2]",
-            "$sid=New-Object System.Security.Principal.SecurityIdentifier($sidText)",
-            "$acl=Get-Acl -LiteralPath $path",
-            "$acl.SetOwner($sid)",
-            "$acl.SetAccessRuleProtection($true,$false)",
-            "@($acl.Access) | ForEach-Object { [void]$acl.RemoveAccessRuleSpecific($_) }",
-            "$inheritance=if($kind -eq 'directory'){[System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'}else{[System.Security.AccessControl.InheritanceFlags]::None}",
-            "$rule=New-Object System.Security.AccessControl.FileSystemAccessRule($sid,[System.Security.AccessControl.FileSystemRights]::FullControl,$inheritance,[System.Security.AccessControl.PropagationFlags]::None,[System.Security.AccessControl.AccessControlType]::Allow)",
-            "[void]$acl.AddAccessRule($rule)",
-            "Set-Acl -LiteralPath $path -AclObject $acl",
-            "$verified=Get-Acl -LiteralPath $path",
-            "$ownerSid=$verified.Owner",
-            "try{$ownerSid=([System.Security.Principal.NTAccount]$verified.Owner).Translate([System.Security.Principal.SecurityIdentifier]).Value}catch{try{$ownerSid=(New-Object System.Security.Principal.SecurityIdentifier($verified.Owner)).Value}catch{}}",
-            "$rules=@($verified.Access | ForEach-Object { $ruleSid=$_.IdentityReference.Value; try{$ruleSid=$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value}catch{}; [ordered]@{sid=$ruleSid;type=$_.AccessControlType.ToString();rights=$_.FileSystemRights.ToString();inherited=$_.IsInherited;inheritanceFlags=$_.InheritanceFlags.ToString();propagationFlags=$_.PropagationFlags.ToString()} })",
-            "[ordered]@{ownerSid=$ownerSid;protected=$verified.AreAccessRulesProtected;access=$rules} | ConvertTo-Json -Compress -Depth 5",
-        ].join(";"),
-        path,
-        sid,
-        kind,
-    ], { encoding: "utf8", windowsHide: true })).trim());
+function assertWindowsPrivateAclReport(report, sid) {
     const rules = report.access ?? [];
     const currentAllowRules = rules.filter((rule) => rule.sid?.toUpperCase() === sid.toUpperCase() && rule.type?.toLowerCase() === "allow");
     const unexpectedRule = rules.some((rule) => rule.sid?.toUpperCase() !== sid.toUpperCase() ||
@@ -72,6 +60,32 @@ export function enforceWindowsPrivateAcl(path, run = execFileSync, kind = "file"
         !hasFullControl) {
         throw new Error("CLAWLORE_WINDOWS_ACL_VERIFICATION_FAILED");
     }
+}
+function windowsPrivateAcl(path, run, kind, mode) {
+    const sid = windowsCurrentUserSid(run);
+    const report = parseWindowsAclReport(String(run("powershell.exe", [
+        "-NoProfile",
+        "-NonInteractive",
+        "-EncodedCommand",
+        WINDOWS_ACL_ENCODED_COMMAND,
+    ], {
+        encoding: "utf8",
+        windowsHide: true,
+        env: {
+            ...process.env,
+            CLAWLORE_PRIVATE_PATH: path,
+            CLAWLORE_PRIVATE_SID: sid,
+            CLAWLORE_PRIVATE_KIND: kind,
+            CLAWLORE_PRIVATE_MODE: mode,
+        },
+    })).trim());
+    assertWindowsPrivateAclReport(report, sid);
+}
+export function enforceWindowsPrivateAcl(path, run = execFileSync, kind = "file") {
+    windowsPrivateAcl(path, run, kind, "enforce");
+}
+export function verifyWindowsPrivateAcl(path, run = execFileSync, kind = "file") {
+    windowsPrivateAcl(path, run, kind, "verify");
 }
 export function enforcePrivatePath(path, options = {}) {
     if (!existsSync(path))
@@ -94,5 +108,52 @@ export function enforcePrivatePath(path, options = {}) {
     }
     if (typeof process.getuid === "function" && statusAfter.uid !== process.getuid()) {
         throw new Error("CLAWLORE_PRIVATE_PATH_OWNER_INVALID");
+    }
+}
+export function verifyPrivatePath(path, options = {}) {
+    if (!existsSync(path)) {
+        throw new Error("CLAWLORE_PRIVATE_PATH_MISSING");
+    }
+    const status = lstatSync(path);
+    if (status.isSymbolicLink()) {
+        throw new Error("CLAWLORE_PRIVATE_PATH_SYMLINK_REJECTED");
+    }
+    const kind = options.kind ?? "file";
+    if (kind === "directory" ? !status.isDirectory() : !status.isFile()) {
+        throw new Error("CLAWLORE_PRIVATE_PATH_KIND_INVALID");
+    }
+    const platform = options.platform ?? process.platform;
+    if (platform === "win32") {
+        verifyWindowsPrivateAcl(path, options.execFile ?? execFileSync, kind);
+        return;
+    }
+    const expectedMode = kind === "directory" ? 0o700 : 0o600;
+    const mode = status.mode & 0o777;
+    if (mode !== expectedMode) {
+        throw new Error(`CLAWLORE_PRIVATE_PATH_MODE_INVALID:${mode.toString(8)}`);
+    }
+    if (typeof process.getuid === "function" && status.uid !== process.getuid()) {
+        throw new Error("CLAWLORE_PRIVATE_PATH_OWNER_INVALID");
+    }
+}
+export function ensurePrivateDirectory(path, options = {}) {
+    if (existsSync(path)) {
+        verifyPrivatePath(path, { ...options, kind: "directory" });
+        return;
+    }
+    const missing = [];
+    let existingAncestor = path;
+    while (!existsSync(existingAncestor)) {
+        missing.push(existingAncestor);
+        const parent = dirname(existingAncestor);
+        if (parent === existingAncestor) {
+            throw new Error("CLAWLORE_PRIVATE_PATH_PARENT_MISSING");
+        }
+        existingAncestor = parent;
+    }
+    verifyPrivatePath(existingAncestor, { ...options, kind: "directory" });
+    for (const directory of missing.reverse()) {
+        mkdirSync(directory, { recursive: false, mode: 0o700 });
+        enforcePrivatePath(directory, { ...options, kind: "directory" });
     }
 }

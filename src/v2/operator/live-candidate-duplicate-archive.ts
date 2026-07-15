@@ -671,7 +671,6 @@ export function createLiveCandidateDuplicateArchivePlanV1(input: {
     schemaVersion: 1,
     phase: "clawlore-candidate-duplicate-soft-archive-plan",
     createdAt: (input.now ?? (() => new Date()))().toISOString(),
-    proposedArchiveId: input.proposedArchiveId,
     readOnly: true,
     queryOnly: true,
     emitsMemoryContent: false,

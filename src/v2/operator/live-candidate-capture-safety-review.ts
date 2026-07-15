@@ -292,7 +292,6 @@ export function createLiveCandidateCaptureSafetyReviewPlanV1(input: {
       schemaVersion: 1,
       phase: "clawlore-candidate-capture-safety-review-plan",
       createdAt: (input.now ?? (() => new Date()))().toISOString(),
-      proposedReviewId: input.proposedReviewId,
       readOnly: true,
       queryOnly: true,
       emitsMemoryContent: false,

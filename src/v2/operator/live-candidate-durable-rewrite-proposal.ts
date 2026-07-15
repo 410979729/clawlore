@@ -374,7 +374,6 @@ export function createLiveCandidateDurableRewriteProposalPlanV1(input: {
       schemaVersion: 1,
       phase: "clawlore-candidate-durable-rewrite-proposal-plan",
       createdAt: (input.now ?? (() => new Date()))().toISOString(),
-      proposedRewriteId: input.proposedRewriteId,
       readOnly: true,
       queryOnly: true,
       containsProposedMemoryContent: false,

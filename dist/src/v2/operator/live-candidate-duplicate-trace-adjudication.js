@@ -220,7 +220,6 @@ export function createLiveCandidateDuplicateTraceAdjudicationPlanV1(input) {
             schemaVersion: 1,
             phase: "clawlore-candidate-duplicate-trace-adjudication-plan",
             createdAt: (input.now ?? (() => new Date()))().toISOString(),
-            proposedAdjudicationId: input.proposedAdjudicationId,
             readOnly: true,
             queryOnly: true,
             emitsMemoryContent: false,

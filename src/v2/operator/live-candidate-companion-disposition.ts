@@ -788,7 +788,6 @@ export function createLiveCandidateCompanionDispositionPlanV1(input: {
       schemaVersion: 1,
       phase: "clawlore-candidate-companion-disposition-plan",
       createdAt: (input.now ?? (() => new Date()))().toISOString(),
-      proposedDispositionId: input.proposedDispositionId,
       readOnly: true,
       queryOnly: true,
       emitsMemoryContent: false,

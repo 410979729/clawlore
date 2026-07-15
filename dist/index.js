@@ -1334,7 +1334,9 @@ function createCoreMemoryRuntime(api, config) {
                 ? undefined
                 : config.llm?.apiKey
                     ? resolveConfigString(config.llm.apiKey)
-                    : resolveFirstApiKey(config.embedding.apiKey);
+                    : config.embedding.apiKey
+                        ? resolveFirstApiKey(config.embedding.apiKey)
+                        : undefined;
             const llmBaseURL = llmAuth === "oauth"
                 ? (config.llm?.baseURL ? resolveConfigString(config.llm.baseURL) : undefined)
                 : config.llm?.baseURL
@@ -1517,7 +1519,9 @@ const clawLorePlugin = {
                     ? undefined
                     : config.llm?.apiKey
                         ? resolveConfigString(config.llm.apiKey)
-                        : resolveFirstApiKey(config.embedding.apiKey);
+                        : config.embedding.apiKey
+                            ? resolveFirstApiKey(config.embedding.apiKey)
+                            : undefined;
                 const llmBaseURL = llmAuth === "oauth"
                     ? (config.llm?.baseURL ? resolveConfigString(config.llm.baseURL) : undefined)
                     : config.llm?.baseURL

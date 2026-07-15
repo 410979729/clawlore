@@ -261,7 +261,7 @@ export function registerEpisodeCreateTool(api: OpenClawPluginApi, context: Exper
         ),
         user_intent: Type.Optional(Type.String({ description: "What the user asked for" })),
       }),
-      async execute(_toolCallId, params, _signal?: unknown, _onUpdate?: unknown, runtimeCtx?: unknown) {
+      async execute(_toolCallId: string, params: unknown, _signal?: unknown, _onUpdate?: unknown, runtimeCtx?: unknown) {
         const { task_goal, task_class, user_intent } = params as {
           task_goal: string;
           task_class?: string;
@@ -325,7 +325,7 @@ export function registerEpisodeCompleteTool(api: OpenClawPluginApi, context: Exp
           Type.Array(Type.String(), { description: "Tools used during the task" }),
         ),
       }),
-      async execute(_toolCallId, params, _signal?: unknown, _onUpdate?: unknown, runtimeCtx?: unknown) {
+      async execute(_toolCallId: string, params: unknown, _signal?: unknown, _onUpdate?: unknown, runtimeCtx?: unknown) {
         const { episode_id, outcome, evidence, verification, tool_names } = params as {
           episode_id: string;
           outcome: "success" | "failure" | "partial";
@@ -403,7 +403,7 @@ export function registerPlaybookSearchTool(api: OpenClawPluginApi, context: Expe
           Type.Number({ description: "Maximum number of results to return (default: 20)" }),
         ),
       }),
-      async execute(_toolCallId, params, _signal?: unknown, _onUpdate?: unknown, runtimeCtx?: unknown) {
+      async execute(_toolCallId: string, params: unknown, _signal?: unknown, _onUpdate?: unknown, runtimeCtx?: unknown) {
         const { query, task_class, status, limit } = params as {
           query?: string;
           task_class?: string;
@@ -475,7 +475,7 @@ export function registerPlaybookInspectTool(api: OpenClawPluginApi, context: Exp
       parameters: Type.Object({
         playbook_id: Type.String({ description: "The ID of the playbook to inspect" }),
       }),
-      async execute(_toolCallId, params, _signal?: unknown, _onUpdate?: unknown, runtimeCtx?: unknown) {
+      async execute(_toolCallId: string, params: unknown, _signal?: unknown, _onUpdate?: unknown, runtimeCtx?: unknown) {
         const { playbook_id } = params as { playbook_id: string };
 
         try {
@@ -562,7 +562,7 @@ export function registerPlaybookCreateTool(api: OpenClawPluginApi, context: Expe
           Type.String({ description: "Episode this playbook was derived from" }),
         ),
       }),
-      async execute(_toolCallId, params, _signal?: unknown, _onUpdate?: unknown, runtimeCtx?: unknown) {
+      async execute(_toolCallId: string, params: unknown, _signal?: unknown, _onUpdate?: unknown, runtimeCtx?: unknown) {
         const {
           task_class,
           title,
@@ -671,7 +671,7 @@ export function registerPlaybookFeedbackTool(api: OpenClawPluginApi, context: Ex
           Type.Array(Type.String(), { description: "Evidence collected during execution" }),
         ),
       }),
-      async execute(_toolCallId, params, _signal?: unknown, _onUpdate?: unknown, runtimeCtx?: unknown) {
+      async execute(_toolCallId: string, params: unknown, _signal?: unknown, _onUpdate?: unknown, runtimeCtx?: unknown) {
         const { playbook_id, outcome, outcome_reason, steps_completed, evidence } = params as {
           playbook_id: string;
           outcome: "success" | "failure" | "partial";
@@ -745,7 +745,7 @@ export function registerExperiencePreflightTool(api: OpenClawPluginApi, context:
         task_description: Type.String({ description: "Description of the task you're about to perform" }),
         task_class: Type.Optional(Type.String({ description: "Optional task class filter" })),
       }),
-      async execute(_toolCallId, params, _signal?: unknown, _onUpdate?: unknown, runtimeCtx?: unknown) {
+      async execute(_toolCallId: string, params: unknown, _signal?: unknown, _onUpdate?: unknown, runtimeCtx?: unknown) {
         const { task_description, task_class } = params as {
           task_description: string;
           task_class?: string;

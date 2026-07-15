@@ -1,8 +1,8 @@
 import { createRequire } from "node:module";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { MemoryEntry, MemorySearchResult } from "./store.js";
-import { enforcePrivatePath } from "./file-privacy.js";
+import { enforcePrivatePath, ensurePrivateDirectory } from "./file-privacy.js";
 
 const require = createRequire(import.meta.url);
 
@@ -79,7 +79,7 @@ export class SqliteBruteForceVectorStore {
   open(): void {
     if (this.db) return;
     const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: new (path: string) => DatabaseSync };
-    mkdirSync(dirname(this.sqlitePath), { recursive: true });
+    ensurePrivateDirectory(dirname(this.sqlitePath));
     this.db = new DatabaseSync(this.sqlitePath);
     this.enforcePrivateFiles();
     runSql(this.db, "PRAGMA busy_timeout = 10000");

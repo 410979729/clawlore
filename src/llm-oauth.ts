@@ -1,10 +1,10 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
-import { lstat, mkdir, open, rename, rm } from "node:fs/promises";
+import { lstat, open, rename, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { readOAuthSessionFile } from "./oauth-session-storage.js";
 import { diagnosticErrorSummary, diagnosticIdentifier } from "./diagnostic-redaction.js";
-import { enforcePrivatePath } from "./file-privacy.js";
+import { enforcePrivatePath, ensurePrivateDirectory } from "./file-privacy.js";
 
 export interface OAuthLoginOptions {
   authPath: string;
@@ -536,8 +536,7 @@ export async function saveOAuthSession(
   hooks: OAuthSessionWriteHooks = {},
 ): Promise<void> {
   const directory = dirname(authPath);
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  enforcePrivatePath(directory, { kind: "directory" });
+  ensurePrivateDirectory(directory);
   await assertOAuthTargetIsNotSymlink(authPath);
   const payload: Record<string, unknown> = {
     provider: session.providerId,

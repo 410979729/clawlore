@@ -498,7 +498,6 @@ export function createLiveCandidatePostRewriteAdjudicationPlanV1(input: {
       schemaVersion: 1,
       phase: "clawlore-candidate-post-rewrite-adjudication-plan",
       createdAt: (input.now ?? (() => new Date()))().toISOString(),
-      proposedAdjudicationId: input.proposedAdjudicationId,
       readOnly: true,
       queryOnly: true,
       emitsMemoryContent: false,

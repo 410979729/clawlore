@@ -1,9 +1,10 @@
 import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import type { MemoryEntry, MemorySearchResult } from "./store.js";
 import { parseSmartMetadata, isMemoryActiveAt } from "./smart-metadata.js";
-import { enforcePrivatePath } from "./file-privacy.js";
+import { enforcePrivatePath, ensurePrivateDirectory } from "./file-privacy.js";
 
 const require = createRequire(import.meta.url);
 
@@ -77,6 +78,7 @@ export interface SqlTruthOpenOptions {
 export interface SqlTruthLegacyUpgradeEvidence {
   migrationId: string;
   backupSha256: string;
+  sourceSnapshotSha256: string;
   sourceTruthRows: number;
   completedAt: number;
 }
@@ -84,7 +86,7 @@ export interface SqlTruthLegacyUpgradeEvidence {
 const SQL_TRUTH_AUTHORITY_TABLE = "clawlore_sql_truth_authority";
 const SQL_TRUTH_MIGRATION_TABLE = "clawlore_sql_truth_migrations";
 const SQL_TRUTH_AUTHORITY_ID = "clawlore-sql-truth";
-const SQL_TRUTH_AUTHORITY_SCHEMA_VERSION = 2;
+const SQL_TRUTH_AUTHORITY_SCHEMA_VERSION = 3;
 const REQUIRED_TRUTH_COLUMNS = [
   "id",
   "text",
@@ -104,6 +106,7 @@ const REQUIRED_AUTHORITY_COLUMNS = [
   "origin",
   "migration_id",
   "backup_sha256",
+  "schema_fingerprint",
   "created_at",
   "updated_at",
 ] as const;
@@ -111,8 +114,154 @@ const REQUIRED_MIGRATION_COLUMNS = [
   "migration_id",
   "source_truth_rows",
   "backup_sha256",
+  "source_snapshot_sha256",
   "completed_at",
 ] as const;
+
+const TRUTH_TABLE_SQL = `CREATE TABLE IF NOT EXISTS memory_truth (
+  id TEXT PRIMARY KEY,
+  text TEXT NOT NULL,
+  category TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  importance REAL NOT NULL DEFAULT 0,
+  timestamp REAL NOT NULL DEFAULT 0,
+  metadata TEXT NOT NULL DEFAULT '{}',
+  metadata_text TEXT NOT NULL DEFAULT '',
+  updated_at REAL NOT NULL DEFAULT 0
+)`;
+const FTS_TABLE_SQL = `CREATE VIRTUAL TABLE IF NOT EXISTS memory_truth_fts USING fts5(
+  memory_id UNINDEXED,
+  text,
+  metadata_text
+)`;
+const SCOPE_INDEX_SQL = `CREATE INDEX IF NOT EXISTS idx_memory_truth_scope_timestamp
+  ON memory_truth(scope, timestamp DESC)`;
+const CATEGORY_INDEX_SQL = `CREATE INDEX IF NOT EXISTS idx_memory_truth_category_timestamp
+  ON memory_truth(category, timestamp DESC)`;
+const REPAIR_TABLE_SQL = `CREATE TABLE IF NOT EXISTS vector_companion_repair_outbox (
+  memory_id TEXT PRIMARY KEY,
+  action TEXT NOT NULL CHECK(action IN ('upsert', 'delete')),
+  operation TEXT NOT NULL,
+  last_error TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 1,
+  created_at REAL NOT NULL,
+  updated_at REAL NOT NULL
+)`;
+const REPAIR_INDEX_SQL = `CREATE INDEX IF NOT EXISTS idx_vector_companion_repair_updated_at
+  ON vector_companion_repair_outbox(updated_at ASC)`;
+const AUTHORITY_TABLE_SQL = `CREATE TABLE IF NOT EXISTS ${SQL_TRUTH_AUTHORITY_TABLE} (
+  singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+  authority_id TEXT NOT NULL,
+  schema_version INTEGER NOT NULL,
+  origin TEXT NOT NULL CHECK(origin IN ('fresh', 'legacy-upgrade')),
+  migration_id TEXT,
+  backup_sha256 TEXT,
+  schema_fingerprint TEXT NOT NULL,
+  created_at REAL NOT NULL,
+  updated_at REAL NOT NULL
+)`;
+const MIGRATION_TABLE_SQL = `CREATE TABLE IF NOT EXISTS ${SQL_TRUTH_MIGRATION_TABLE} (
+  migration_id TEXT PRIMARY KEY,
+  source_truth_rows INTEGER NOT NULL,
+  backup_sha256 TEXT NOT NULL,
+  source_snapshot_sha256 TEXT NOT NULL,
+  completed_at REAL NOT NULL
+)`;
+const ACTIVE_FACT_INSERT_TRIGGER_SQL = `CREATE TRIGGER IF NOT EXISTS memory_truth_single_active_fact_insert
+  BEFORE INSERT ON memory_truth
+  WHEN json_extract(NEW.metadata, '$.fact_key') IS NOT NULL
+    AND COALESCE(json_extract(NEW.metadata, '$.invalidated_at'), 0) = 0
+    AND COALESCE(json_extract(NEW.metadata, '$.superseded_by'), '') = ''
+    AND EXISTS (
+      SELECT 1 FROM memory_truth AS current
+      WHERE current.scope = NEW.scope
+        AND current.id != NEW.id
+        AND json_extract(current.metadata, '$.fact_key') = json_extract(NEW.metadata, '$.fact_key')
+        AND COALESCE(json_extract(current.metadata, '$.invalidated_at'), 0) = 0
+        AND COALESCE(json_extract(current.metadata, '$.superseded_by'), '') = ''
+    )
+  BEGIN
+    SELECT RAISE(ABORT, 'active fact_key uniqueness violation');
+  END`;
+const ACTIVE_FACT_UPDATE_TRIGGER_SQL = `CREATE TRIGGER IF NOT EXISTS memory_truth_single_active_fact_update
+  BEFORE UPDATE OF scope, metadata ON memory_truth
+  WHEN json_extract(NEW.metadata, '$.fact_key') IS NOT NULL
+    AND COALESCE(json_extract(NEW.metadata, '$.invalidated_at'), 0) = 0
+    AND COALESCE(json_extract(NEW.metadata, '$.superseded_by'), '') = ''
+    AND EXISTS (
+      SELECT 1 FROM memory_truth AS current
+      WHERE current.scope = NEW.scope
+        AND current.id != NEW.id
+        AND json_extract(current.metadata, '$.fact_key') = json_extract(NEW.metadata, '$.fact_key')
+        AND COALESCE(json_extract(current.metadata, '$.invalidated_at'), 0) = 0
+        AND COALESCE(json_extract(current.metadata, '$.superseded_by'), '') = ''
+    )
+  BEGIN
+    SELECT RAISE(ABORT, 'active fact_key uniqueness violation');
+  END`;
+
+const EXPECTED_SCHEMA_OBJECTS = [
+  ["memory_truth", "table", TRUTH_TABLE_SQL],
+  ["memory_truth_fts", "table", FTS_TABLE_SQL],
+  ["idx_memory_truth_scope_timestamp", "index", SCOPE_INDEX_SQL],
+  ["idx_memory_truth_category_timestamp", "index", CATEGORY_INDEX_SQL],
+  ["vector_companion_repair_outbox", "table", REPAIR_TABLE_SQL],
+  ["idx_vector_companion_repair_updated_at", "index", REPAIR_INDEX_SQL],
+  [SQL_TRUTH_AUTHORITY_TABLE, "table", AUTHORITY_TABLE_SQL],
+  [SQL_TRUTH_MIGRATION_TABLE, "table", MIGRATION_TABLE_SQL],
+  ["memory_truth_single_active_fact_insert", "trigger", ACTIVE_FACT_INSERT_TRIGGER_SQL],
+  ["memory_truth_single_active_fact_update", "trigger", ACTIVE_FACT_UPDATE_TRIGGER_SQL],
+] as const;
+
+function normalizeSchemaSql(sql: string): string {
+  return sql
+    .toLowerCase()
+    .replace(/\bif\s+not\s+exists\b/g, "")
+    .replace(/[\"`\[\]]/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/\s*([(),;=])\s*/g, "$1")
+    .trim()
+    .replace(/;$/, "");
+}
+
+function schemaFingerprintFromObjects(objects: Array<readonly [string, string, string]>): string {
+  const hash = createHash("sha256");
+  for (const [name, type, sql] of [...objects].sort((a, b) => a[0].localeCompare(b[0]))) {
+    hash.update(`${name}\u0000${type}\u0000${normalizeSchemaSql(sql)}\n`);
+  }
+  return hash.digest("hex");
+}
+
+const SQL_TRUTH_SCHEMA_FINGERPRINT = schemaFingerprintFromObjects([...EXPECTED_SCHEMA_OBJECTS]);
+
+function actualSchemaFingerprint(db: DatabaseSync): string | null {
+  const names = EXPECTED_SCHEMA_OBJECTS.map(([name]) => name);
+  const placeholders = names.map(() => "?").join(",");
+  const rows = db.prepare(
+    `SELECT name, type, sql FROM sqlite_master WHERE name IN (${placeholders})`,
+  ).all(...names) as Array<{ name: string; type: string; sql?: string | null }>;
+  if (rows.length !== EXPECTED_SCHEMA_OBJECTS.length || rows.some((row) => !row.sql)) return null;
+  return schemaFingerprintFromObjects(rows.map((row) => [row.name, row.type, String(row.sql)] as const));
+}
+
+function legacySnapshotDigestFromDb(db: DatabaseSync): string {
+  const hash = createHash("sha256");
+  const coreObjects = db.prepare(
+    "SELECT name, type, sql FROM sqlite_master WHERE name IN ('memory_truth','memory_truth_fts') ORDER BY name",
+  ).all() as Array<{ name: string; type: string; sql?: string | null }>;
+  for (const row of coreObjects) {
+    hash.update(`${row.name}\u0000${row.type}\u0000${normalizeSchemaSql(String(row.sql || ""))}\n`);
+  }
+  for (const row of db.prepare(`SELECT id,text,category,scope,importance,timestamp,metadata,metadata_text,updated_at
+    FROM memory_truth ORDER BY id`).iterate() as Iterable<Record<string, unknown>>) {
+    hash.update(`${JSON.stringify(row)}\n`);
+  }
+  for (const row of db.prepare(`SELECT memory_id,text,metadata_text
+    FROM memory_truth_fts ORDER BY memory_id,text,metadata_text`).iterate() as Iterable<Record<string, unknown>>) {
+    hash.update(`${JSON.stringify(row)}\n`);
+  }
+  return hash.digest("hex");
+}
 
 const WORD_RE = /[a-zA-Z0-9]{2,}|[\u4e00-\u9fff]{2,}/g;
 const MAX_LIST_LIMIT = 10_000;
@@ -215,6 +364,7 @@ export class SqlTruthStore {
   private db: DatabaseSync | null = null;
   private savepointSequence = 0;
   private privacyEstablished = false;
+  private skipWindowsPrivacyCheckInTransaction = false;
 
   constructor(
     private readonly sqlitePath: string,
@@ -263,16 +413,28 @@ export class SqlTruthStore {
         };
       }
 
-      const columns = new Set(
-        (db.prepare("PRAGMA table_info(memory_truth)").all() as Array<{ name: string }>).map((row) => row.name),
-      );
-      const missingColumns = REQUIRED_TRUTH_COLUMNS.filter((column) => !columns.has(column));
-      if (missingColumns.length > 0) {
+      const truthColumns = db.prepare("PRAGMA table_info(memory_truth)").all() as Array<{
+        name: string;
+        type: string;
+        notnull: number;
+        dflt_value?: string | null;
+        pk: number;
+      }>;
+      const expectedTruthTypes = ["TEXT", "TEXT", "TEXT", "TEXT", "REAL", "REAL", "TEXT", "TEXT", "REAL"];
+      const truthContractInvalid =
+        truthColumns.length !== REQUIRED_TRUTH_COLUMNS.length ||
+        REQUIRED_TRUTH_COLUMNS.some((column, index) => {
+          const actual = truthColumns[index];
+          if (!actual || actual.name !== column || actual.type.toUpperCase() !== expectedTruthTypes[index]) return true;
+          if (index === 0) return actual.pk !== 1;
+          return actual.notnull !== 1 || actual.pk !== 0;
+        });
+      if (truthContractInvalid) {
         return {
           status: "untrusted",
           schemaVersion: null,
           truthRows: null,
-          reason: "authority_truth_schema_incompatible",
+          reason: "authority_truth_contract_incompatible",
         };
       }
 
@@ -280,7 +442,8 @@ export class SqlTruthStore {
         .map((row) => row.name);
       if (
         ftsColumns.length !== REQUIRED_FTS_COLUMNS.length ||
-        REQUIRED_FTS_COLUMNS.some((column, index) => ftsColumns[index] !== column)
+        REQUIRED_FTS_COLUMNS.some((column, index) => ftsColumns[index] !== column) ||
+        normalizeSchemaSql(String(ftsObject?.sql || "")) !== normalizeSchemaSql(FTS_TABLE_SQL)
       ) {
         return {
           status: "untrusted",
@@ -344,8 +507,18 @@ export class SqlTruthStore {
         };
       }
 
+      const schemaFingerprint = actualSchemaFingerprint(db);
+      if (schemaFingerprint !== SQL_TRUTH_SCHEMA_FINGERPRINT) {
+        return {
+          status: "untrusted",
+          schemaVersion: null,
+          truthRows,
+          reason: "authority_schema_fingerprint_mismatch",
+        };
+      }
+
       const marker = db.prepare(
-        `SELECT authority_id, schema_version, origin, migration_id, backup_sha256
+        `SELECT authority_id, schema_version, origin, migration_id, backup_sha256, schema_fingerprint
          FROM ${SQL_TRUTH_AUTHORITY_TABLE} WHERE singleton = 1`,
       ).get() as {
         authority_id?: string;
@@ -353,6 +526,7 @@ export class SqlTruthStore {
         origin?: string;
         migration_id?: string | null;
         backup_sha256?: string | null;
+        schema_fingerprint?: string | null;
       } | undefined;
       const schemaVersion = Number(marker?.schema_version || 0);
       if (marker?.authority_id !== SQL_TRUTH_AUTHORITY_ID || schemaVersion !== SQL_TRUTH_AUTHORITY_SCHEMA_VERSION) {
@@ -369,6 +543,14 @@ export class SqlTruthStore {
           schemaVersion,
           truthRows,
           reason: "authority_marker_origin_invalid",
+        };
+      }
+      if (marker.schema_fingerprint !== SQL_TRUTH_SCHEMA_FINGERPRINT) {
+        return {
+          status: "untrusted",
+          schemaVersion,
+          truthRows,
+          reason: "authority_marker_schema_fingerprint_invalid",
         };
       }
       if (marker.origin === "legacy-upgrade") {
@@ -435,8 +617,7 @@ export class SqlTruthStore {
     }
     const creating = inspection.status === "missing";
     const directory = dirname(this.sqlitePath);
-    mkdirSync(directory, { recursive: true, mode: 0o700 });
-    enforcePrivatePath(directory, { kind: "directory" });
+    ensurePrivateDirectory(directory);
     if (!creating) enforcePrivatePath(this.sqlitePath, { kind: "file" });
     try {
       this.db = new DatabaseSync(this.sqlitePath);
@@ -469,14 +650,17 @@ export class SqlTruthStore {
     if (inspection.status !== "legacy" || inspection.truthRows !== evidence.sourceTruthRows) {
       throw new Error("CLAWLORE_SQL_TRUTH_LEGACY_UPGRADE_REFUSED: source is not the inspected legacy authority");
     }
-    if (!/^[a-f0-9-]{16,}$/i.test(evidence.migrationId) || !/^[a-f0-9]{64}$/i.test(evidence.backupSha256)) {
+    if (
+      !/^[a-f0-9-]{16,}$/i.test(evidence.migrationId) ||
+      !/^[a-f0-9]{64}$/i.test(evidence.backupSha256) ||
+      !/^[a-f0-9]{64}$/i.test(evidence.sourceSnapshotSha256)
+    ) {
       throw new Error("CLAWLORE_SQL_TRUTH_LEGACY_UPGRADE_REFUSED: backup evidence is invalid");
     }
     const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: new (path: string) => DatabaseSync };
     const store = new SqlTruthStore(sqlitePath, faultInjector);
     const directory = dirname(sqlitePath);
-    mkdirSync(directory, { recursive: true, mode: 0o700 });
-    enforcePrivatePath(directory, { kind: "directory" });
+    ensurePrivateDirectory(directory);
     enforcePrivatePath(sqlitePath, { kind: "file" });
     try {
       store.db = new DatabaseSync(sqlitePath);
@@ -485,8 +669,28 @@ export class SqlTruthStore {
       runSql(store.db, "PRAGMA journal_mode = WAL");
       runSql(store.db, "PRAGMA synchronous = FULL");
       store.privacyEstablished = true;
-      store.ensureSchema({ origin: "legacy-upgrade", evidence });
       store.enforcePrivateFiles();
+      store.skipWindowsPrivacyCheckInTransaction = true;
+      runSql(store.db, "BEGIN IMMEDIATE");
+      try {
+        const lockedSnapshot = legacySnapshotDigestFromDb(store.db);
+        if (lockedSnapshot !== evidence.sourceSnapshotSha256) {
+          throw new Error("CLAWLORE_SQL_TRUTH_LEGACY_UPGRADE_REFUSED: source changed after backup snapshot");
+        }
+        store.injectFault("migration_after_source_snapshot_lock");
+        store.canonicalizeLegacySchema();
+        store.injectFault("migration_after_schema_canonicalization");
+        store.ensureSchema({ origin: "legacy-upgrade", evidence });
+        store.enforcePrivateFiles();
+        store.injectFault("migration_before_commit");
+        runSql(store.db, "COMMIT");
+        store.injectFault("migration_after_commit");
+      } catch (error) {
+        try { runSql(store.db, "ROLLBACK"); } catch {}
+        throw error;
+      } finally {
+        store.skipWindowsPrivacyCheckInTransaction = false;
+      }
     } finally {
       store.close();
     }
@@ -495,6 +699,22 @@ export class SqlTruthStore {
       throw new Error("CLAWLORE_SQL_TRUTH_LEGACY_UPGRADE_FAILED: post-upgrade authority validation failed");
     }
     return upgraded;
+  }
+
+  static legacySnapshotDigest(sqlitePath: string): string {
+    const inspection = SqlTruthStore.inspectAuthority(sqlitePath);
+    if (inspection.status !== "legacy") {
+      throw new Error(`CLAWLORE_SQL_TRUTH_LEGACY_SNAPSHOT_REFUSED: source_authority_${inspection.status}`);
+    }
+    const { DatabaseSync } = require("node:sqlite") as {
+      DatabaseSync: new (path: string, options?: Record<string, unknown>) => DatabaseSync;
+    };
+    const db = new DatabaseSync(sqlitePath, { readOnly: true });
+    try {
+      return legacySnapshotDigestFromDb(db);
+    } finally {
+      db.close();
+    }
   }
 
   close(): void {
@@ -961,95 +1181,37 @@ export class SqlTruthStore {
     return Number(this.requireDb().prepare("SELECT COUNT(*) AS count FROM memory_truth").get()?.count || 0);
   }
 
+  private canonicalizeLegacySchema(): void {
+    const db = this.requireDb();
+    runSql(db, `
+      DROP TRIGGER IF EXISTS memory_truth_single_active_fact_insert;
+      DROP TRIGGER IF EXISTS memory_truth_single_active_fact_update;
+      DROP INDEX IF EXISTS idx_memory_truth_scope_timestamp;
+      DROP INDEX IF EXISTS idx_memory_truth_category_timestamp;
+      DROP INDEX IF EXISTS idx_vector_companion_repair_updated_at;
+      DROP TABLE IF EXISTS vector_companion_repair_outbox;
+      DROP TABLE IF EXISTS ${SQL_TRUTH_AUTHORITY_TABLE};
+      DROP TABLE IF EXISTS ${SQL_TRUTH_MIGRATION_TABLE};
+      DROP TABLE memory_truth_fts;
+      ALTER TABLE memory_truth RENAME TO memory_truth_legacy_upgrade_source;
+      ${TRUTH_TABLE_SQL};
+      INSERT INTO memory_truth (
+        id, text, category, scope, importance, timestamp, metadata, metadata_text, updated_at
+      )
+      SELECT id, text, category, scope, importance, timestamp, metadata, metadata_text, updated_at
+      FROM memory_truth_legacy_upgrade_source;
+      DROP TABLE memory_truth_legacy_upgrade_source;
+      ${FTS_TABLE_SQL};
+    `);
+  }
+
   private ensureSchema(marker?: {
     origin: "fresh" | "legacy-upgrade";
     evidence?: SqlTruthLegacyUpgradeEvidence;
   }): void {
     const db = this.requireDb();
     this.withTransaction(() => {
-      runSql(db,
-        `
-      CREATE TABLE IF NOT EXISTS memory_truth (
-        id TEXT PRIMARY KEY,
-        text TEXT NOT NULL,
-        category TEXT NOT NULL,
-        scope TEXT NOT NULL,
-        importance REAL NOT NULL DEFAULT 0,
-        timestamp REAL NOT NULL DEFAULT 0,
-        metadata TEXT NOT NULL DEFAULT '{}',
-        metadata_text TEXT NOT NULL DEFAULT '',
-        updated_at REAL NOT NULL DEFAULT 0
-      );
-      CREATE VIRTUAL TABLE IF NOT EXISTS memory_truth_fts USING fts5(
-        memory_id UNINDEXED,
-        text,
-        metadata_text
-      );
-      CREATE INDEX IF NOT EXISTS idx_memory_truth_scope_timestamp
-        ON memory_truth(scope, timestamp DESC);
-      CREATE INDEX IF NOT EXISTS idx_memory_truth_category_timestamp
-        ON memory_truth(category, timestamp DESC);
-      CREATE TABLE IF NOT EXISTS vector_companion_repair_outbox (
-        memory_id TEXT PRIMARY KEY,
-        action TEXT NOT NULL CHECK(action IN ('upsert', 'delete')),
-        operation TEXT NOT NULL,
-        last_error TEXT NOT NULL,
-        attempts INTEGER NOT NULL DEFAULT 1,
-        created_at REAL NOT NULL,
-        updated_at REAL NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_vector_companion_repair_updated_at
-        ON vector_companion_repair_outbox(updated_at ASC);
-      CREATE TABLE IF NOT EXISTS ${SQL_TRUTH_AUTHORITY_TABLE} (
-        singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
-        authority_id TEXT NOT NULL,
-        schema_version INTEGER NOT NULL,
-        origin TEXT NOT NULL CHECK(origin IN ('fresh', 'legacy-upgrade')),
-        migration_id TEXT,
-        backup_sha256 TEXT,
-        created_at REAL NOT NULL,
-        updated_at REAL NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS ${SQL_TRUTH_MIGRATION_TABLE} (
-        migration_id TEXT PRIMARY KEY,
-        source_truth_rows INTEGER NOT NULL,
-        backup_sha256 TEXT NOT NULL,
-        completed_at REAL NOT NULL
-      );
-      CREATE TRIGGER IF NOT EXISTS memory_truth_single_active_fact_insert
-      BEFORE INSERT ON memory_truth
-      WHEN json_extract(NEW.metadata, '$.fact_key') IS NOT NULL
-        AND COALESCE(json_extract(NEW.metadata, '$.invalidated_at'), 0) = 0
-        AND COALESCE(json_extract(NEW.metadata, '$.superseded_by'), '') = ''
-        AND EXISTS (
-          SELECT 1 FROM memory_truth AS current
-          WHERE current.scope = NEW.scope
-            AND current.id != NEW.id
-            AND json_extract(current.metadata, '$.fact_key') = json_extract(NEW.metadata, '$.fact_key')
-            AND COALESCE(json_extract(current.metadata, '$.invalidated_at'), 0) = 0
-            AND COALESCE(json_extract(current.metadata, '$.superseded_by'), '') = ''
-        )
-      BEGIN
-        SELECT RAISE(ABORT, 'active fact_key uniqueness violation');
-      END;
-      CREATE TRIGGER IF NOT EXISTS memory_truth_single_active_fact_update
-      BEFORE UPDATE OF scope, metadata ON memory_truth
-      WHEN json_extract(NEW.metadata, '$.fact_key') IS NOT NULL
-        AND COALESCE(json_extract(NEW.metadata, '$.invalidated_at'), 0) = 0
-        AND COALESCE(json_extract(NEW.metadata, '$.superseded_by'), '') = ''
-        AND EXISTS (
-          SELECT 1 FROM memory_truth AS current
-          WHERE current.scope = NEW.scope
-            AND current.id != NEW.id
-            AND json_extract(current.metadata, '$.fact_key') = json_extract(NEW.metadata, '$.fact_key')
-            AND COALESCE(json_extract(current.metadata, '$.invalidated_at'), 0) = 0
-            AND COALESCE(json_extract(current.metadata, '$.superseded_by'), '') = ''
-        )
-      BEGIN
-        SELECT RAISE(ABORT, 'active fact_key uniqueness violation');
-      END;
-      `,
-      );
+      runSql(db, `${EXPECTED_SCHEMA_OBJECTS.map(([, , sql]) => sql).join(";\n")};`);
       this.injectFault("schema_after_ddl");
       this.reconcileFts();
       this.injectFault("schema_after_fts_reconcile");
@@ -1063,17 +1225,23 @@ export class SqlTruthStore {
         }
         db.prepare(
           `INSERT INTO ${SQL_TRUTH_MIGRATION_TABLE} (
-             migration_id, source_truth_rows, backup_sha256, completed_at
-           ) VALUES (?, ?, ?, ?)`,
-        ).run(evidence.migrationId, evidence.sourceTruthRows, evidence.backupSha256, evidence.completedAt);
+             migration_id, source_truth_rows, backup_sha256, source_snapshot_sha256, completed_at
+           ) VALUES (?, ?, ?, ?, ?)`,
+        ).run(
+          evidence.migrationId,
+          evidence.sourceTruthRows,
+          evidence.backupSha256,
+          evidence.sourceSnapshotSha256,
+          evidence.completedAt,
+        );
       }
       this.injectFault("schema_before_authority_marker");
       db.prepare(
         `
         INSERT INTO ${SQL_TRUTH_AUTHORITY_TABLE} (
           singleton, authority_id, schema_version, origin, migration_id,
-          backup_sha256, created_at, updated_at
-        ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+          backup_sha256, schema_fingerprint, created_at, updated_at
+        ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
       ).run(
         SQL_TRUTH_AUTHORITY_ID,
@@ -1081,6 +1249,7 @@ export class SqlTruthStore {
         marker.origin,
         marker.evidence?.migrationId ?? null,
         marker.evidence?.backupSha256 ?? null,
+        SQL_TRUTH_SCHEMA_FINGERPRINT,
         now,
         now,
       );
@@ -1166,7 +1335,7 @@ export class SqlTruthStore {
     // Windows ACL enforcement invokes external system tools. Verify before
     // taking the SQLite write lock; the protected parent DACL makes newly
     // created WAL/SHM files inherit the owner-only policy.
-    if (process.platform === "win32") {
+    if (process.platform === "win32" && !this.skipWindowsPrivacyCheckInTransaction) {
       this.enforcePrivateFiles();
     }
     const savepoint = `clawlore_truth_${++this.savepointSequence}`;

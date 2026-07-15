@@ -669,10 +669,11 @@ export class Embedder {
             payload.normalized = this._normalized;
         }
         // Task hint: field name and optional value translation are provider-defined.
-        if (this._capabilities.taskField && task) {
+        const taskField = this._capabilities.taskField;
+        if (taskField && task) {
             const cap = this._capabilities;
             const value = cap.taskValueMap?.[task] ?? task;
-            payload[cap.taskField] = value;
+            payload[taskField] = value;
         }
         // Output dimension: field name is provider-defined.
         // Only sent when explicitly configured, unless omitDimensions is enabled for

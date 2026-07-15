@@ -38,6 +38,17 @@
 - Added a final packed-tarball installation/runtime smoke, a machine-readable
   source-only script policy, and generated release evidence covering the exact
   commit, runtime digest, SBOM component count, and package file count.
+- Bound SQL authority validity to an exact schema fingerprint, including
+  primary keys, constraints, indexes, triggers, outbox tables, marker tables,
+  and FTS5 definition, followed by executable CRUD contract checks.
+- Hardened explicit authority migration with canonical path identity, separate
+  dedicated backup/receipt directories, durable backup fsync checkpoints,
+  locked logical-snapshot comparison, and idempotent receipt reconstruction.
+- Replaced string-form PowerShell ACL argument passing with an encoded script
+  and structured environment input, while keeping owner-only, default-deny ACL
+  verification and paths containing spaces or non-ASCII text.
+- Made release-gate scripts cross-platform Node entry points, added a packed
+  native LanceDB reopen/delete smoke, and enabled strict TypeScript checking.
 
 ## Unreleased
 

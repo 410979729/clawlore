@@ -357,7 +357,6 @@ export function createLiveCandidateUnsafeTraceRewriteProposalPlanV1(input) {
         schemaVersion: 1,
         phase: "clawlore-candidate-unsafe-trace-rewrite-proposal-plan",
         createdAt: (input.now ?? (() => new Date()))().toISOString(),
-        proposedRewriteId: input.proposedRewriteId,
         readOnly: true,
         queryOnly: true,
         containsProposedMemoryContent: false,

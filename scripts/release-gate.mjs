@@ -171,6 +171,7 @@ const requiredFiles = [
   "benchmarks/experience-replay-cases.json",
   "scripts/golden-benchmark.mjs",
   "scripts/packed-runtime-smoke.mjs",
+  "scripts/packed-lancedb-smoke.mjs",
   "scripts/smoke-vector-repair.mjs",
 ];
 
@@ -516,6 +517,7 @@ const packFiles = (packInfo.files || []).map((file) => file.path);
 for (const required of [
   "dist/index.js",
   "scripts/packed-runtime-smoke.mjs",
+  "scripts/packed-lancedb-smoke.mjs",
   "docs/operator-runbook.md",
   "docs/release-readiness-template.md",
   "benchmarks/experience-replay-cases.json",
@@ -596,6 +598,9 @@ try {
   await rm(installedOpenClaw, { recursive: true, force: true });
   await symlink(await realpath(openClawPackage), installedOpenClaw, "dir");
   run("node", [resolve(installedRoot, "scripts/packed-runtime-smoke.mjs")], {
+    cwd: installedRoot,
+  });
+  run("node", [resolve(installedRoot, "scripts/packed-lancedb-smoke.mjs")], {
     cwd: installedRoot,
   });
 
@@ -686,6 +691,7 @@ const releaseEvidence = {
   sbomSha256: sbomDigest,
   supplyChainRegistry: "https://registry.npmjs.org",
   packedRuntimeSmoke: true,
+  packedLanceDbSmoke: true,
   packedOpenClawCliSmoke: true,
 };
 const evidenceJson = `${JSON.stringify(releaseEvidence, null, 2)}\n`;

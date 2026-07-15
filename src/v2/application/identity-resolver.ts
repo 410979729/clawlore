@@ -168,8 +168,8 @@ export function resolveMemoryIdentity(input: IdentityResolverInput): IdentityRes
   const address: MemoryAddressV2 = {
     schemaVersion: 2,
     tenantId,
-    principalId,
-    agentId,
+    principalId: principalId!,
+    agentId: agentId!,
     ...(workspaceId ? { workspaceId } : {}),
     ...(projectId ? { projectId } : {}),
     ...(platform ? { platform } : {}),

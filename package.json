@@ -20,7 +20,8 @@
     "openclaw.plugin.json",
     "package.json",
     "package-lock.json",
-    "scripts/packed-runtime-smoke.mjs"
+    "scripts/packed-runtime-smoke.mjs",
+    "scripts/packed-lancedb-smoke.mjs"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -103,8 +104,8 @@
     "smoke:packed-runtime": "node scripts/packed-runtime-smoke.mjs",
     "preflight:dependencies": "node scripts/dependency-preflight.mjs",
     "audit:release": "node scripts/supply-chain-audit.mjs",
-    "release:gate": "CLAWLORE_ALLOW_NESTED_GIT_ROOT=1 node scripts/release-gate.mjs",
-    "release:gate:source": "CLAWLORE_ALLOW_NESTED_GIT_ROOT=1 CLAWLORE_SOURCE_ONLY=1 node scripts/release-gate.mjs",
+    "release:gate": "node scripts/run-release-gate.mjs",
+    "release:gate:source": "node scripts/run-release-gate.mjs --source-only",
     "release:reproducibility": "node scripts/reproducible-install-gate.mjs"
   },
   "keywords": [

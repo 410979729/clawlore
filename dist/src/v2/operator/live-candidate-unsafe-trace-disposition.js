@@ -170,7 +170,6 @@ export function createLiveCandidateUnsafeTraceDispositionPlanV1(input) {
             schemaVersion: 1,
             phase: "clawlore-candidate-unsafe-trace-disposition-plan",
             createdAt: (input.now?.() ?? new Date()).toISOString(),
-            proposedDispositionId: input.proposedDispositionId,
             readOnly: true,
             queryOnly: true,
             emitsMemoryContent: false,

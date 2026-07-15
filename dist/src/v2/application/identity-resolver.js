@@ -125,8 +125,8 @@ export function resolveMemoryIdentity(input) {
     const address = {
         schemaVersion: 2,
         tenantId,
-        principalId,
-        agentId,
+        principalId: principalId,
+        agentId: agentId,
         ...(workspaceId ? { workspaceId } : {}),
         ...(projectId ? { projectId } : {}),
         ...(platform ? { platform } : {}),

@@ -1148,7 +1148,7 @@ export function registerMemoryUpdateTool(api, context) {
                         if (existing) {
                             const meta = parseSmartMetadata(existing.metadata, existing);
                             if (TEMPORAL_VERSIONED_CATEGORIES.has(meta.memory_category)) {
-                                const factKey = meta.fact_key ?? deriveFactKey(meta.memory_category, text);
+                                const factKey = meta.fact_key ?? deriveFactKey(meta.memory_category, text) ?? existing.id;
                                 const newEntry = await context.store.supersede(resolvedId, {
                                     text,
                                     vector: newVector,
@@ -1314,7 +1314,7 @@ export function registerMemoryStatsTool(api, context) {
                     ];
                     // Include retrieval quality metrics if stats collector is available
                     const statsCollector = context.retriever.getStatsCollector();
-                    let retrievalStats = undefined;
+                    let retrievalStats;
                     if (statsCollector && statsCollector.count > 0) {
                         retrievalStats = statsCollector.getStats();
                         textLines.push(``, `Retrieval Quality (last ${retrievalStats.totalQueries} queries):`, `  \u2022 Zero-result queries: ${retrievalStats.zeroResultQueries}`, `  \u2022 Avg latency: ${retrievalStats.avgLatencyMs}ms`, `  \u2022 P95 latency: ${retrievalStats.p95LatencyMs}ms`, `  \u2022 Avg result count: ${retrievalStats.avgResultCount}`, `  \u2022 Rerank used: ${retrievalStats.rerankUsed}`, `  \u2022 Noise filtered: ${retrievalStats.noiseFiltered}`);
@@ -1370,7 +1370,7 @@ export function registerMemoryDebugTool(api, context) {
                     if (accessResolution.ok === false)
                         return accessResolution.response;
                     const safeLimit = clampInt(limit, 1, 20);
-                    let scopeFilter = accessResolution.access.scopeFilter;
+                    let scopeFilter = accessResolution.access.scopeFilter ?? [];
                     if (scope) {
                         if (accessResolution.access.isAccessible(scope)) {
                             scopeFilter = [scope];
@@ -1474,7 +1474,7 @@ export function registerMemoryListTool(api, context) {
                     if (accessResolution.ok === false)
                         return accessResolution.response;
                     // Determine accessible scopes
-                    let scopeFilter = accessResolution.access.scopeFilter;
+                    let scopeFilter = accessResolution.access.scopeFilter ?? [];
                     if (scope) {
                         if (accessResolution.access.isAccessible(scope)) {
                             scopeFilter = [scope];
@@ -1595,7 +1595,7 @@ export function registerMemoryContextTool(api, context) {
                     const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_context");
                     if (accessResolution.ok === false)
                         return accessResolution.response;
-                    let scopeFilter = accessResolution.access.scopeFilter;
+                    let scopeFilter = accessResolution.access.scopeFilter ?? [];
                     if (scope) {
                         if (!accessResolution.access.isAccessible(scope)) {
                             return {
@@ -1690,7 +1690,7 @@ export function registerMemoryInspectTool(api, context) {
                     const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_inspect");
                     if (accessResolution.ok === false)
                         return accessResolution.response;
-                    let scopeFilter = accessResolution.access.scopeFilter;
+                    let scopeFilter = accessResolution.access.scopeFilter ?? [];
                     if (scope) {
                         if (!accessResolution.access.isAccessible(scope)) {
                             return {
@@ -1768,7 +1768,7 @@ export function registerMemoryGovernTool(api, context) {
                 const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_govern");
                 if (accessResolution.ok === false)
                     return accessResolution.response;
-                let scopeFilter = accessResolution.access.scopeFilter;
+                let scopeFilter = accessResolution.access.scopeFilter ?? [];
                 if (scope) {
                     if (!accessResolution.access.isAccessible(scope)) {
                         return {
@@ -1845,7 +1845,7 @@ export function registerMemoryPromoteTool(api, context) {
                 const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_promote");
                 if (accessResolution.ok === false)
                     return accessResolution.response;
-                let scopeFilter = accessResolution.access.scopeFilter;
+                let scopeFilter = accessResolution.access.scopeFilter ?? [];
                 if (scope) {
                     if (!accessResolution.access.isAccessible(scope)) {
                         return {
@@ -1928,7 +1928,7 @@ export function registerMemoryArchiveTool(api, context) {
                 const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_archive");
                 if (accessResolution.ok === false)
                     return accessResolution.response;
-                let scopeFilter = accessResolution.access.scopeFilter;
+                let scopeFilter = accessResolution.access.scopeFilter ?? [];
                 if (scope) {
                     if (!accessResolution.access.isAccessible(scope)) {
                         return {

@@ -25,6 +25,7 @@ import { TEMPORAL_VERSIONED_CATEGORIES } from "./memory-categories.js";
 import { appendSelfImprovementEntry, ensureSelfImprovementLearningFiles } from "./self-improvement-files.js";
 import { getDisplayCategoryTag } from "./reflection-metadata.js";
 import type { RetrievalTrace } from "./retrieval-trace.js";
+import type { AggregateStats } from "./retrieval-stats.js";
 import {
   filterUserMdExclusiveRecallResults,
   isUserMdExclusiveMemory,
@@ -420,7 +421,7 @@ export function registerSelfImprovementLogTool(api: OpenClawPluginApi, context: 
         area: Type.Optional(Type.String({ description: "frontend|backend|infra|tests|docs|config or custom area" })),
         priority: Type.Optional(Type.String({ description: "low|medium|high|critical" })),
       }),
-      async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
+      async execute(_toolCallId: string, params: unknown, _signal: AbortSignal, _onUpdate: unknown, runtimeCtx: unknown) {
         const {
           type,
           summary,
@@ -478,7 +479,7 @@ export function registerSelfImprovementExtractSkillTool(api: OpenClawPluginApi, 
         sourceFile: Type.Optional(stringEnum(["LEARNINGS.md", "ERRORS.md"])),
         outputDir: Type.Optional(Type.String({ description: "Relative output dir under workspace (default: skills)" })),
       }),
-      async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
+      async execute(_toolCallId: string, params: unknown, _signal: AbortSignal, _onUpdate: unknown, runtimeCtx: unknown) {
         const { learningId, skillName, sourceFile = "LEARNINGS.md", outputDir = "skills" } = params as {
           learningId: string;
           skillName: string;
@@ -673,7 +674,7 @@ export function registerMemoryRecallTool(
         ),
         category: Type.Optional(stringEnum(MEMORY_CATEGORIES)),
       }),
-      async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
+      async execute(_toolCallId: string, params: unknown, _signal: AbortSignal, _onUpdate: unknown, runtimeCtx: unknown) {
         const {
           query,
           limit = 3,
@@ -828,7 +829,7 @@ export function registerMemoryStoreTool(
           }),
         ),
       }),
-      async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
+      async execute(_toolCallId: string, params: unknown, _signal: AbortSignal, _onUpdate: unknown, runtimeCtx: unknown) {
         const {
           text,
           importance = 0.7,
@@ -1090,7 +1091,7 @@ export function registerMemoryStoreSecretIndexTool(
           })),
           scope: Type.Optional(Type.String({ description: "Memory scope (optional, defaults to agent scope)" })),
         }),
-        async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
+        async execute(_toolCallId: string, params: unknown, _signal: AbortSignal, _onUpdate: unknown, runtimeCtx: unknown) {
           try {
             const agentResolution = requireRuntimeAgentId(runtimeContext.agentId, runtimeCtx, "memory_store_secret_index");
             if (agentResolution.ok === false) return agentResolution.response;
@@ -1205,7 +1206,7 @@ export function registerMemoryForgetTool(
           }),
         ),
       }),
-      async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
+      async execute(_toolCallId: string, params: unknown, _signal: AbortSignal, _onUpdate: unknown, runtimeCtx: unknown) {
         const { query, memoryId, scope, confirm } = params as {
           query?: string;
           memoryId?: string;
@@ -1363,7 +1364,7 @@ export function registerMemoryUpdateTool(
         ),
         category: Type.Optional(stringEnum(MEMORY_CATEGORIES)),
       }),
-      async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
+      async execute(_toolCallId: string, params: unknown, _signal: AbortSignal, _onUpdate: unknown, runtimeCtx: unknown) {
         const { memoryId, text, importance, category } = params as {
           memoryId: string;
           text?: string;
@@ -1465,7 +1466,7 @@ export function registerMemoryUpdateTool(
               const meta = parseSmartMetadata(existing.metadata, existing);
               if (TEMPORAL_VERSIONED_CATEGORIES.has(meta.memory_category)) {
                 const factKey =
-                  meta.fact_key ?? deriveFactKey(meta.memory_category, text);
+                  meta.fact_key ?? deriveFactKey(meta.memory_category, text) ?? existing.id;
                 const newEntry = await context.store.supersede(resolvedId, {
                   text,
                   vector: newVector,
@@ -1604,7 +1605,7 @@ export function registerMemoryStatsTool(
           }),
         ),
       }),
-      async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
+      async execute(_toolCallId: string, params: unknown, _signal: AbortSignal, _onUpdate: unknown, runtimeCtx: unknown) {
         const { scope } = params as { scope?: string };
 
         try {
@@ -1655,7 +1656,7 @@ export function registerMemoryStatsTool(
 
           // Include retrieval quality metrics if stats collector is available
           const statsCollector = context.retriever.getStatsCollector();
-          let retrievalStats = undefined;
+          let retrievalStats: AggregateStats | undefined;
           if (statsCollector && statsCollector.count > 0) {
             retrievalStats = statsCollector.getStats();
             textLines.push(
@@ -1722,7 +1723,7 @@ export function registerMemoryDebugTool(
             Type.String({ description: "Specific memory scope to search in (optional)" }),
           ),
         }),
-        async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
+        async execute(_toolCallId: string, params: unknown, _signal: AbortSignal, _onUpdate: unknown, runtimeCtx: unknown) {
           const { query, limit = 5, scope } = params as {
             query: string; limit?: number; scope?: string;
           };
@@ -1733,7 +1734,7 @@ export function registerMemoryDebugTool(
             const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_debug");
             if (accessResolution.ok === false) return accessResolution.response;
             const safeLimit = clampInt(limit, 1, 20);
-            let scopeFilter = accessResolution.access.scopeFilter;
+            let scopeFilter = accessResolution.access.scopeFilter ?? [];
             if (scope) {
               if (accessResolution.access.isAccessible(scope)) {
                 scopeFilter = [scope];
@@ -1841,7 +1842,7 @@ export function registerMemoryListTool(
           }),
         ),
       }),
-      async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
+      async execute(_toolCallId: string, params: unknown, _signal: AbortSignal, _onUpdate: unknown, runtimeCtx: unknown) {
         const {
           limit = 10,
           scope,
@@ -1864,7 +1865,7 @@ export function registerMemoryListTool(
           if (accessResolution.ok === false) return accessResolution.response;
 
           // Determine accessible scopes
-          let scopeFilter = accessResolution.access.scopeFilter;
+          let scopeFilter = accessResolution.access.scopeFilter ?? [];
           if (scope) {
             if (accessResolution.access.isAccessible(scope)) {
               scopeFilter = [scope];
@@ -1988,7 +1989,7 @@ export function registerMemoryContextTool(
           ])),
           includeFullText: Type.Optional(Type.Boolean({ description: "Return full memory text in details and rendered output." })),
         }),
-        async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
+      async execute(_toolCallId: string, params: unknown, _signal: AbortSignal, _onUpdate: unknown, runtimeCtx: unknown) {
           const {
             query,
             limit = 10,
@@ -2019,7 +2020,7 @@ export function registerMemoryContextTool(
             const agentId = agentResolution.agentId;
             const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_context");
             if (accessResolution.ok === false) return accessResolution.response;
-            let scopeFilter = accessResolution.access.scopeFilter;
+            let scopeFilter = accessResolution.access.scopeFilter ?? [];
             if (scope) {
               if (!accessResolution.access.isAccessible(scope)) {
                 return {
@@ -2107,7 +2108,7 @@ export function registerMemoryInspectTool(
           scope: Type.Optional(Type.String({ description: "Optional scope filter." })),
           includeFullText: Type.Optional(Type.Boolean({ description: "Return L0/L1/L2 content fields." })),
         }),
-        async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
+      async execute(_toolCallId: string, params: unknown, _signal: AbortSignal, _onUpdate: unknown, runtimeCtx: unknown) {
           const {
             memoryId,
             query,
@@ -2133,7 +2134,7 @@ export function registerMemoryInspectTool(
             const agentId = agentResolution.agentId;
             const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_inspect");
             if (accessResolution.ok === false) return accessResolution.response;
-            let scopeFilter = accessResolution.access.scopeFilter;
+            let scopeFilter = accessResolution.access.scopeFilter ?? [];
             if (scope) {
               if (!accessResolution.access.isAccessible(scope)) {
                 return {
@@ -2212,7 +2213,7 @@ export function registerMemoryGovernTool(
           limit: Type.Optional(Type.Number({ description: "Max candidates to return (default: 20, max: 100)." })),
           includeText: Type.Optional(Type.Boolean({ description: "Include full memory text in details." })),
         }),
-        async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
+      async execute(_toolCallId: string, params: unknown, _signal: AbortSignal, _onUpdate: unknown, runtimeCtx: unknown) {
           const { scope, limit = 20, includeText = false } = params as {
             scope?: string;
             limit?: number;
@@ -2224,7 +2225,7 @@ export function registerMemoryGovernTool(
           const agentId = agentResolution.agentId;
           const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_govern");
           if (accessResolution.ok === false) return accessResolution.response;
-          let scopeFilter = accessResolution.access.scopeFilter;
+          let scopeFilter = accessResolution.access.scopeFilter ?? [];
           if (scope) {
             if (!accessResolution.access.isAccessible(scope)) {
               return {
@@ -2300,7 +2301,7 @@ export function registerMemoryPromoteTool(
             Type.Literal("archive"),
           ])),
         }),
-        async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
+      async execute(_toolCallId: string, params: unknown, _signal: AbortSignal, _onUpdate: unknown, runtimeCtx: unknown) {
           const {
             memoryId,
             query,
@@ -2328,7 +2329,7 @@ export function registerMemoryPromoteTool(
           const agentId = agentResolution.agentId;
           const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_promote");
           if (accessResolution.ok === false) return accessResolution.response;
-          let scopeFilter = accessResolution.access.scopeFilter;
+          let scopeFilter = accessResolution.access.scopeFilter ?? [];
           if (scope) {
             if (!accessResolution.access.isAccessible(scope)) {
               return {
@@ -2416,7 +2417,7 @@ export function registerMemoryArchiveTool(
           scope: Type.Optional(Type.String({ description: "Optional scope filter." })),
           reason: Type.Optional(Type.String({ description: "Archive reason for audit trail." })),
         }),
-        async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
+      async execute(_toolCallId: string, params: unknown, _signal: AbortSignal, _onUpdate: unknown, runtimeCtx: unknown) {
           const { memoryId, query, scope, reason = "manual_archive" } = params as {
             memoryId?: string;
             query?: string;
@@ -2435,7 +2436,7 @@ export function registerMemoryArchiveTool(
           const agentId = agentResolution.agentId;
           const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_archive");
           if (accessResolution.ok === false) return accessResolution.response;
-          let scopeFilter = accessResolution.access.scopeFilter;
+          let scopeFilter = accessResolution.access.scopeFilter ?? [];
           if (scope) {
             if (!accessResolution.access.isAccessible(scope)) {
               return {
@@ -2500,7 +2501,7 @@ export function registerMemoryCompactTool(
           dryRun: Type.Optional(Type.Boolean({ description: "Preview compaction only (default true)." })),
           limit: Type.Optional(Type.Number({ description: "Max entries to scan (default 200)." })),
         }),
-        async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
+      async execute(_toolCallId: string, params: unknown, _signal: AbortSignal, _onUpdate: unknown, runtimeCtx: unknown) {
           const { scope, dryRun = true, limit = 200 } = params as {
             scope?: string;
             dryRun?: boolean;
@@ -2602,7 +2603,7 @@ export function registerMemoryExplainRankTool(
           limit: Type.Optional(Type.Number({ description: "How many items to explain (default 5)." })),
           scope: Type.Optional(Type.String({ description: "Optional scope filter." })),
         }),
-        async execute(_toolCallId, params, _signal, _onUpdate, runtimeCtx) {
+      async execute(_toolCallId: string, params: unknown, _signal: AbortSignal, _onUpdate: unknown, runtimeCtx: unknown) {
           const { query, limit = 5, scope } = params as {
             query: string;
             limit?: number;
@@ -2641,7 +2642,7 @@ export function registerMemoryExplainRankTool(
 
           const lines = results.map((r, idx) => {
             const meta = parseSmartMetadata(r.entry.metadata, r.entry);
-            const sourceBreakdown = [];
+            const sourceBreakdown: string[] = [];
             if (r.sources.vector) sourceBreakdown.push(`vec=${r.sources.vector.score.toFixed(3)}`);
             if (r.sources.bm25) sourceBreakdown.push(`bm25=${r.sources.bm25.score.toFixed(3)}`);
             if (r.sources.reranked) sourceBreakdown.push(`rerank=${r.sources.reranked.score.toFixed(3)}`);

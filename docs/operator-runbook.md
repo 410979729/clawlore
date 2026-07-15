@@ -71,8 +71,24 @@ openclaw clawlore authority migrate \
 ```
 
 Ordinary plugin startup never performs the legacy upgrade. The apply command
-creates and verifies the backup before changing the source, writes a durable
-receipt, and refuses a second migration after the authority is valid.
+requires the backup and receipt to use different, dedicated owner-only leaf
+directories. Existing directories are verified but never chmod'd or have their
+ACL rewritten; a shared, non-private, non-empty, root, home, temp-root, or live
+database directory is rejected before any output is created. Relative paths,
+symlinked parents, case aliases, the source DB, and its WAL/SHM companions are
+resolved before the three paths are required to be pairwise distinct.
+
+Before changing the source, apply creates the SQLite backup, fsyncs the backup
+and its parent directory, verifies its hash and logical snapshot, and writes a
+prepared receipt. The schema upgrade then takes a SQLite `BEGIN IMMEDIATE`
+writer lock and compares the locked source snapshot to the durable backup;
+concurrent UPDATE/INSERT/DELETE activity aborts the migration before the
+authority marker is written. Quiescing the gateway is still recommended to
+avoid an expected abort under traffic, but row counts alone are never accepted
+as consistency evidence. The internal SQLite migration receipt is the commit
+truth. If writing the external completed JSON is interrupted after commit,
+re-running the same command reconstructs that receipt idempotently instead of
+reapplying the migration. A completed authority refuses a second migration.
 
 Doctor/dashboard diagnostics expose `scanBudgetExhaustions` and
 `lastScanBudgetExhaustedAt`. A new exhaustion means stale companion rows

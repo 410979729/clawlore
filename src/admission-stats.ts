@@ -195,8 +195,8 @@ export function buildAdmissionCategoryBreakdown(
   const admittedCounts: Record<string, number> | null = admittedCategories ? {} : null;
   const rejectedCounts: Record<string, number> = {};
 
-  if (admittedCategories) {
-    for (const category of admittedCategories) {
+  if (admittedCounts) {
+    for (const category of admittedCategories ?? []) {
       admittedCounts[category] = (admittedCounts[category] ?? 0) + 1;
     }
   }

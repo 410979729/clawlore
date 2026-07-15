@@ -274,7 +274,6 @@ export function createLiveCandidateContentQualityReviewPlanV1(input: {
       schemaVersion: 1,
       phase: "clawlore-candidate-content-quality-review-plan",
       createdAt: (input.now ?? (() => new Date()))().toISOString(),
-      proposedReviewId: input.proposedReviewId,
       readOnly: true,
       queryOnly: true,
       emitsMemoryContent: false,

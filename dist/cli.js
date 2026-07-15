@@ -597,7 +597,7 @@ export function registerMemoryCLI(program, context) {
                     writeJson({ dryRun: true, ...plan });
                 else
                     console.log(`DRY-RUN authority migration: ${plan.status} (${plan.reason})`);
-                if (plan.status !== "ready")
+                if (plan.status !== "ready" && plan.status !== "recoverable")
                     process.exitCode = 1;
                 return;
             }
@@ -609,6 +609,7 @@ export function registerMemoryCLI(program, context) {
                 console.log(`Migration id: ${receipt.migrationId}`);
                 console.log(`Truth rows: ${receipt.sourceTruthRows}`);
                 console.log(`Backup SHA-256: ${receipt.backupSha256}`);
+                console.log(`Source snapshot SHA-256: ${receipt.sourceSnapshotSha256}`);
             }
         }
         catch (error) {
@@ -2254,6 +2255,9 @@ export function registerMemoryCLI(program, context) {
                 console.error("Re-embed requires an embedder (not available in basic CLI mode).");
                 return;
             }
+            const embedBatchPassage = context.embedder.embedBatchPassage
+                ? context.embedder.embedBatchPassage.bind(context.embedder)
+                : async (texts) => Promise.all(texts.map((text) => context.embedder.embedPassage(text)));
             const fs = await import("node:fs/promises");
             const sourceDbPath = options.sourceDb;
             const batchSize = clampInt(parseInt(options.batchSize, 10) || 32, 1, 128);
@@ -2303,7 +2307,7 @@ export function registerMemoryCLI(program, context) {
             for (let i = 0; i < rows.length; i += batchSize) {
                 const batch = rows.slice(i, i + batchSize);
                 const texts = batch.map((r) => String(r.text));
-                const vectors = await context.embedder.embedBatchPassage(texts);
+                const vectors = await embedBatchPassage(texts);
                 for (let j = 0; j < batch.length; j++) {
                     processed++;
                     const row = batch[j];

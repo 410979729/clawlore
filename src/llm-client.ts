@@ -182,7 +182,7 @@ function createApiKeyClient(config: LlmClientConfig, log: (msg: string) => void)
   const clientOptions = {
     baseURL: config.baseURL,
     timeout: config.timeoutMs ?? 30000,
-  } as ConstructorParameters<typeof OpenAI>[0];
+  } as NonNullable<ConstructorParameters<typeof OpenAI>[0]>;
   const client = new OpenAI(assignOpenAiClientCredential(clientOptions, config.apiKey));
   let lastError: string | null = null;
 

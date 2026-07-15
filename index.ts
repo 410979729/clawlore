@@ -1791,7 +1791,9 @@ function createCoreMemoryRuntime(api: OpenClawPluginApi, config: PluginConfig): 
         ? undefined
         : config.llm?.apiKey
           ? resolveConfigString(config.llm.apiKey)
-          : resolveFirstApiKey(config.embedding.apiKey);
+          : config.embedding.apiKey
+            ? resolveFirstApiKey(config.embedding.apiKey)
+            : undefined;
       const llmBaseURL = llmAuth === "oauth"
         ? (config.llm?.baseURL ? resolveConfigString(config.llm.baseURL) : undefined)
         : config.llm?.baseURL
@@ -2027,7 +2029,9 @@ const clawLorePlugin = {
           ? undefined
           : config.llm?.apiKey
             ? resolveConfigString(config.llm.apiKey)
-            : resolveFirstApiKey(config.embedding.apiKey);
+            : config.embedding.apiKey
+              ? resolveFirstApiKey(config.embedding.apiKey)
+              : undefined;
         const llmBaseURL = llmAuth === "oauth"
           ? (config.llm?.baseURL ? resolveConfigString(config.llm.baseURL) : undefined)
           : config.llm?.baseURL
@@ -2921,7 +2925,12 @@ const clawLorePlugin = {
 
           const preBudgetItems = preBudgetCandidates.length;
           const preBudgetChars = preBudgetCandidates.reduce((sum, item) => sum + item.chars, 0);
-          const selected = [];
+          const selected: Array<{
+            id: string;
+            line: string;
+            chars: number;
+            meta: (typeof preBudgetCandidates)[number]["meta"];
+          }> = [];
           let usedChars = 0;
 
           for (const candidate of preBudgetCandidates) {

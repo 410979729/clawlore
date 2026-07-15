@@ -9,6 +9,7 @@ import { buildSmartMetadata, isMemoryActiveAt, parseSmartMetadata, stringifySmar
 import { SqlTruthStore, } from "./sql-truth-store.js";
 import { SqliteBruteForceVectorStore } from "./sqlite-vector-store.js";
 import { diagnosticErrorSummary, diagnosticIdentifier } from "./diagnostic-redaction.js";
+import { ensurePrivateDirectory } from "./file-privacy.js";
 // ============================================================================
 // LanceDB Dynamic Import
 // ============================================================================
@@ -104,13 +105,11 @@ export function validateStoragePath(dbPath) {
         }
     }
     // Create directory if it doesn't exist
-    if (!existsSync(resolvedPath)) {
-        try {
-            mkdirSync(resolvedPath, { recursive: true });
-        }
-        catch (err) {
-            throw new Error(`CLAWLORE_STORAGE_CREATE_FAILED: path=${diagnosticIdentifier(resolvedPath)} parent=${diagnosticIdentifier(dirname(resolvedPath))} ${diagnosticErrorSummary(err)}`);
-        }
+    try {
+        ensurePrivateDirectory(resolvedPath);
+    }
+    catch (err) {
+        throw new Error(`CLAWLORE_STORAGE_PRIVATE_DIRECTORY_REQUIRED: path=${diagnosticIdentifier(resolvedPath)} parent=${diagnosticIdentifier(dirname(resolvedPath))} ${diagnosticErrorSummary(err)}`);
     }
     // Check write permissions
     try {
@@ -419,14 +418,12 @@ export class MemoryStore {
             throw new Error("CLAWLORE_SQL_TRUTH_UNAVAILABLE: write denied because SQL truth is unavailable");
         }
         this.sqlTruthStore.upsertWithVectorIntent(entry, operation);
-        return true;
     }
     writeSqlTruthDelete(id, operation) {
         if (!this.sqlTruthStore) {
             throw new Error("CLAWLORE_SQL_TRUTH_UNAVAILABLE: delete denied because SQL truth is unavailable");
         }
         this.sqlTruthStore.deleteWithVectorIntent(id, operation);
-        return true;
     }
     markVectorCompanionNeedsRepair(memoryId, action, operation, err) {
         const message = diagnosticErrorSummary(err);
@@ -644,17 +641,8 @@ export class MemoryStore {
             metadata: entry.metadata || "{}",
         };
         return this.runWithFileLock(async () => {
-            if (this.writeSqlTruthUpsert(fullEntry, "store")) {
-                await this.addVectorCompanion(fullEntry, "store");
-                return fullEntry;
-            }
-            try {
-                await this.table.add([fullEntry]);
-                this.syncSqlTruthUpsert(fullEntry);
-            }
-            catch (err) {
-                throw new Error(`CLAWLORE_MEMORY_STORE_FAILED: path=${diagnosticIdentifier(this.config.dbPath)} ${diagnosticErrorSummary(err)}`);
-            }
+            this.writeSqlTruthUpsert(fullEntry, "store");
+            await this.addVectorCompanion(fullEntry, "store");
             return fullEntry;
         });
     }
@@ -682,12 +670,8 @@ export class MemoryStore {
             metadata: entry.metadata || "{}",
         };
         return this.runWithFileLock(async () => {
-            if (this.writeSqlTruthUpsert(full, "import")) {
-                await this.addVectorCompanion(full, "import");
-                return full;
-            }
-            await this.table.add([full]);
-            this.syncSqlTruthUpsert(full);
+            this.writeSqlTruthUpsert(full, "import");
+            await this.addVectorCompanion(full, "import");
             return full;
         });
     }

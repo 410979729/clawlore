@@ -190,7 +190,6 @@ export function createLiveCandidateUnsafeTraceAdjudicationPlanV1(input: {
       schemaVersion: 1,
       phase: "clawlore-candidate-unsafe-trace-adjudication-plan",
       createdAt: (input.now?.() ?? new Date()).toISOString(),
-      proposedReviewId: input.proposedReviewId,
       readOnly: true,
       queryOnly: true,
       emitsMemoryContent: false,

@@ -111,8 +111,8 @@ export function getObservedAdmissionCategory(entry) {
 export function buildAdmissionCategoryBreakdown(admittedCategories, rejectedEntries) {
     const admittedCounts = admittedCategories ? {} : null;
     const rejectedCounts = {};
-    if (admittedCategories) {
-        for (const category of admittedCategories) {
+    if (admittedCounts) {
+        for (const category of admittedCategories ?? []) {
             admittedCounts[category] = (admittedCounts[category] ?? 0) + 1;
         }
     }
