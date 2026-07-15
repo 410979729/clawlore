@@ -1,7 +1,7 @@
 # ClawLore v1 project handoff
 
 Current through Phase 9, H1-H5 production hardening, the R1 canonical identity
-transition, and four independent-audit remediation rounds on 2026-07-15.
+transition, and five independent-audit remediation rounds on 2026-07-15.
 
 ## Canonical identity candidate
 
@@ -56,19 +56,36 @@ internal tool errors are fully redacted, and source-only gates reject
 post-build dirty trees. Verification covers 321 tests. See
 `eval/clawlore-v1-fourth-independent-audit-remediation-run-2026-07-15.md`.
 
-The exact clean code commit `d83036e9d05f4ea509b232039cab3ef28e01608a`
-repeated the full lockfile-clean source gate: 321/321 tests, typecheck, build,
+The fifth remediation round closes the remaining authority-provenance and OAuth
+persistence gaps. Existing SQL files are inspected read-only before any schema
+mutation and must carry a versioned authority marker; zero-byte, empty,
+schema-less, partial, corrupt, or unreadable files fail closed instead of being
+auto-healed into empty truth. Fresh marker creation is limited to a genuinely
+empty install, while a complete non-empty legacy truth has one controlled
+upgrade path. OAuth refresh now uses same-directory exclusive temporary writes,
+fsync, private-mode/ACL enforcement, symlink refusal, atomic rename, and parent
+directory sync. Callback state is checked before provider errors and HTML is
+escaped. Diagnostics, recovery documentation, sqlite companion startup probes,
+and Windows/POSIX privacy policy are aligned. Verification now covers 335 tests.
+See `eval/clawlore-v1-fifth-independent-audit-remediation-run-2026-07-15.md`.
+
+The exact clean code commit `06a7d4bb5c343b7bacc920fcc0e5ca3b82103404`
+repeated the full lockfile-clean source gate: 335/335 tests, typecheck, build,
 vector repair, 124/124 deterministic recall with zero cross-scope leakage,
 the 200,000-row SQLite FTS baseline, official-registry audit with zero known
-production vulnerabilities, a 42-component SBOM, and an 182-file extracted
+production vulnerabilities, a 42-component SBOM, and a 183-file extracted
 pack scan. Its recursive runtime digest was
-`72675fa14301e6017e758a057fbffa048a73beb8ac2d5eaf834ce51ba2321831`.
+`965540c5fb665d0ad4b351800459ef652c963612547d0426327516aefedc334a`.
 Isolated OpenClaw `2026.7.1-beta.5` loaded and activated the package, exposed
 all three command identities, and returned `doctor ok=true` after isolated
 Experience schema initialization.
 The final documentation-only descendant repeated the same clean source gate;
 the delivered commit is the repository HEAD named in the handoff message, and
 the recursive runtime digest remains unchanged.
+
+The live Gateway port source was separately aligned from stale config `19421`
+to the service/listener truth `19021` under a controlled backup. That config
+restart did not deploy the candidate or alter the memory data plane.
 
 This candidate does not authorize a live rename, V2 writes, lifecycle
 promotion, ContextEngine, prompt mutation, or final-recall cutover. Tianxuan's

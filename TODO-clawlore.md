@@ -21,6 +21,26 @@ Updated: 2026-07-15
 - [ ] Deploy the canonical extension/config identity only under a separately
       authorized, backup-backed rollout. Current live remains legacy-id + shadow.
 
+### Fifth independent-audit remediation
+
+- [x] Require a read-only validated SQL authority marker before any existing
+      database schema mutation; reject zero-byte, empty, partial, corrupt, and
+      marker-less zero-row files.
+- [x] Make OAuth persistence same-directory atomic, fsync-backed, owner-private,
+      symlink-safe, and concurrency-safe.
+- [x] Validate OAuth callback state before errors, escape callback HTML, and add
+      no-store/CSP/nosniff headers.
+- [x] Route remaining production diagnostics through redacted summaries; make
+      backup restoration the only documented migration-required recovery in
+      this release.
+- [x] Use bounded `hasRows()` companion probes and one POSIX/Windows file privacy
+      adapter with verified ACL/mode behavior.
+- [x] Pass the fresh-install exact-commit gate: 335/335 tests, typecheck/build,
+      vector repair, 124-case recall, 200k FTS, official audit 0, SBOM, pack scan,
+      and isolated OpenClaw inspect/doctor/three-command smoke.
+- [ ] Obtain Tianxuan's acceptance of the exact fifth-remediation candidate
+      before repository publication or any live identity rollout.
+
 ## ClawLore v1 production hardening — active after Phase 9
 
 The original migration roadmap closed with `no_cutover`. Independent audit
