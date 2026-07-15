@@ -538,6 +538,8 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   assert.match(gate, /scripts\/packed-runtime-smoke\.mjs/);
   assert.match(gate, /"npm", \[\s*"install"/);
   assert.match(gate, /packedRuntimeSmoke: true/);
+  assert.match(gate, /installed-tarball OpenClaw inspect/);
+  assert.match(gate, /packedOpenClawCliSmoke: true/);
   assert.equal(
     packageJson.clawloreRelease.scriptPolicy,
     "all-except-published-runtime-scripts-are-source-checkout-only",

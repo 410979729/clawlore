@@ -598,6 +598,70 @@ try {
   run("node", [resolve(installedRoot, "scripts/packed-runtime-smoke.mjs")], {
     cwd: installedRoot,
   });
+
+  const configuredOpenClawCli = String(process.env.OPENCLAW_CLI || "").trim();
+  const packedOpenClawCli = configuredOpenClawCli && !["1", "true", "yes"].includes(configuredOpenClawCli.toLowerCase())
+    ? configuredOpenClawCli
+    : resolve(openClawPackage, "../.bin/openclaw");
+  if (!(await exists(packedOpenClawCli))) {
+    throw new Error(`release gate failed: OpenClaw CLI missing for installed-tarball smoke: ${packedOpenClawCli}`);
+  }
+  const isolatedState = resolve(packScanRoot, "openclaw-state");
+  await mkdir(isolatedState, { recursive: true });
+  const isolatedConfig = resolve(isolatedState, "openclaw.json");
+  const isolatedRuntimeEnv = {
+    ...process.env,
+    OPENCLAW_HOME: isolatedState,
+    OPENCLAW_STATE_DIR: isolatedState,
+    OPENCLAW_CONFIG_PATH: isolatedConfig,
+    npm_config_registry: "https://registry.npmjs.org",
+  };
+  runCapture(packedOpenClawCli, ["config", "set", "gateway.mode", "local"], { env: isolatedRuntimeEnv });
+  runCapture(packedOpenClawCli, ["config", "set", "gateway.port", "29999", "--strict-json"], { env: isolatedRuntimeEnv });
+  const isolatedPluginEntry = JSON.stringify({
+    enabled: true,
+    config: {
+      embedding: { provider: "local-hash", dimensions: 64 },
+      vectorBackend: "sqlite-bruteforce",
+      dbPath: resolve(isolatedState, "memory/clawlore"),
+      enableManagementTools: true,
+    },
+  });
+  runCapture(
+    packedOpenClawCli,
+    ["config", "set", "plugins.entries.clawlore", isolatedPluginEntry, "--strict-json"],
+    { env: isolatedRuntimeEnv },
+  );
+  runCapture(packedOpenClawCli, ["plugins", "install", tarball], { env: isolatedRuntimeEnv });
+  runCapture(packedOpenClawCli, ["config", "set", "plugins.slots.memory", "clawlore"], { env: isolatedRuntimeEnv });
+  const packedInspect = parseJsonWithPreamble(
+    runCapture(packedOpenClawCli, ["plugins", "inspect", "clawlore", "--json"], { env: isolatedRuntimeEnv }),
+    "installed-tarball OpenClaw inspect",
+  );
+  if (
+    packedInspect.plugin?.id !== "clawlore" ||
+    packedInspect.plugin?.status !== "loaded" ||
+    packedInspect.plugin?.version !== packageJson.version ||
+    packedInspect.plugin?.enabled !== true ||
+    packedInspect.plugin?.activated !== true ||
+    !["clawlore", "scope-recall", "memory-pro"].every((command) => packedInspect.commands?.includes(command))
+  ) {
+    throw new Error("release gate failed: installed tarball did not load through the real OpenClaw CLI");
+  }
+  runCapture(packedOpenClawCli, ["clawlore", "experience", "stats", "--json"], { env: isolatedRuntimeEnv });
+  const packedDoctor = parseJsonWithPreamble(
+    runCapture(packedOpenClawCli, ["clawlore", "doctor", "--json", "--quiet"], { env: isolatedRuntimeEnv }),
+    "installed-tarball OpenClaw doctor",
+  );
+  if (packedDoctor.ok !== true) {
+    throw new Error("release gate failed: installed-tarball OpenClaw doctor did not report ok=true");
+  }
+  for (const command of ["clawlore", "scope-recall", "memory-pro"]) {
+    const versionOutput = runCapture(packedOpenClawCli, [command, "version"], { env: isolatedRuntimeEnv });
+    if (!versionOutput.includes(packageJson.version)) {
+      throw new Error(`release gate failed: installed-tarball ${command} version smoke failed`);
+    }
+  }
 } finally {
   await rm(packScanRoot, { recursive: true, force: true });
 }
@@ -622,6 +686,7 @@ const releaseEvidence = {
   sbomSha256: sbomDigest,
   supplyChainRegistry: "https://registry.npmjs.org",
   packedRuntimeSmoke: true,
+  packedOpenClawCliSmoke: true,
 };
 const evidenceJson = `${JSON.stringify(releaseEvidence, null, 2)}\n`;
 const evidencePath = String(process.env.CLAWLORE_RELEASE_EVIDENCE_PATH || "").trim();
