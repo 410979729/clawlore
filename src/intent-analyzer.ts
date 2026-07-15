@@ -5,7 +5,7 @@
  * are most relevant for a given query and what recall depth to use.
  *
  * Inspired by OpenViking's hierarchical retrieval intent routing, adapted for
- * scope-recall-openclaw's flat category model. No LLM calls — pure pattern matching
+ * clawlore's flat category model. No LLM calls — pure pattern matching
  * for minimal latency impact on auto-recall.
  *
  * @see https://github.com/volcengine/OpenViking — hierarchical_retriever.py intent analysis

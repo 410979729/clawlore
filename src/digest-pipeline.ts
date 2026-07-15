@@ -180,7 +180,7 @@ export function ensureDigestSchema(db: DatabaseSync): void {
       skipped_count INTEGER NOT NULL DEFAULT 0,
       error_count INTEGER NOT NULL DEFAULT 0,
       notes TEXT NOT NULL DEFAULT '{}',
-      actor TEXT NOT NULL DEFAULT 'scope-recall-openclaw'
+      actor TEXT NOT NULL DEFAULT 'clawlore'
     );
 
     CREATE TABLE IF NOT EXISTS openclaw_digest_chunks (
@@ -538,7 +538,7 @@ export async function runDigestPipeline(
   const chunks = collectDigestChunks(db, options);
   const runId = `digest-${randomUUID()}`;
   const startedAt = nowIso();
-  const actor = options.actor || "scope-recall-openclaw:cli";
+  const actor = options.actor || "clawlore:cli";
   const sourceType = chunks[0]?.source_type || options.sourceType || "reflection_event";
   const runRow: DigestRunRow = {
     id: runId,
@@ -810,7 +810,7 @@ export function recoverDigestChunks(
     db.prepare(`
       UPDATE openclaw_digest_chunks
       SET status = 'pending_recovery',
-          reason = reason || '; recovery_requested_by:${options.actor || "scope-recall-openclaw:cli"} @ ${at}'
+          reason = reason || '; recovery_requested_by:${options.actor || "clawlore:cli"} @ ${at}'
       WHERE id = ?
         AND status IN ('parse_error', 'retry_exhausted', 'dead_letter')
     `).run(row.id);

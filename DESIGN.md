@@ -1,6 +1,6 @@
-# Scope Recall OpenClaw Design
+# ClawLore Design
 
-`scope-recall-openclaw` is the OpenClaw runtime port of the scope-recall storage model. It keeps long-term memory auditable by separating the durable truth store from the semantic retrieval companion.
+ClawLore is the OpenClaw runtime port of the scope-recall storage model. It keeps long-term memory auditable by separating the durable truth store from the semantic retrieval companion.
 
 ## Goals
 
@@ -19,7 +19,8 @@ OpenClaw integration surfaces:
 
 - Dynamic tools: `memory_recall`, `memory_store`, `memory_forget`, `memory_update`.
 - Optional management tools for stats, debug, listing, compaction, and rank explanation.
-- CLI commands: `openclaw scope-recall` and legacy alias `openclaw memory-pro`.
+- CLI commands: `openclaw clawlore` and compatibility aliases
+  `openclaw scope-recall` and `openclaw memory-pro`.
 - Session hooks for auto-recall, auto-capture, reflection, session recovery, and self-improvement review.
 
 ## Storage Layers
@@ -31,10 +32,10 @@ Hosted embedding providers are recommended for semantic quality. `local-hash` ex
 The intended repair loop is:
 
 ```bash
-openclaw scope-recall doctor --json --quiet
-openclaw scope-recall repair-vectors --dry-run
-openclaw scope-recall repair-vectors
-openclaw scope-recall doctor --json --quiet
+openclaw clawlore doctor --json --quiet
+openclaw clawlore repair-vectors --dry-run
+openclaw clawlore repair-vectors
+openclaw clawlore doctor --json --quiet
 ```
 
 ## Capture Safety

@@ -97,7 +97,7 @@ export async function appendSelfImprovementEntry(params: AppendSelfImprovementEn
     area = "config",
     priority = "medium",
     status = "pending",
-    source = "scope-recall-openclaw/self_improvement_log",
+    source = "clawlore/self_improvement_log",
   } = params;
 
   await ensureSelfImprovementLearningFiles(baseDir);

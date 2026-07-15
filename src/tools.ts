@@ -391,7 +391,7 @@ export function registerSelfImprovementLogTool(api: OpenClawPluginApi, context: 
             category,
             area,
             priority,
-            source: "scope-recall-openclaw/self_improvement_log",
+            source: "clawlore/self_improvement_log",
           });
           const fileName = type === "learning" ? "LEARNINGS.md" : "ERRORS.md";
 
@@ -910,7 +910,7 @@ export function registerMemoryStoreTool(
             ], { excludeInactive: true });
           } catch (err) {
             console.warn(
-              `scope-recall-openclaw: duplicate pre-check failed, continue store: ${String(err)}`,
+              `clawlore: duplicate pre-check failed, continue store: ${String(err)}`,
             );
           }
 
@@ -971,7 +971,7 @@ export function registerMemoryStoreTool(
               [targetScope],
             );
           } catch (err) {
-            console.warn(`scope-recall-openclaw: conflict-review marking fails: ${String(err)}`);
+            console.warn(`clawlore: conflict-review marking fails: ${String(err)}`);
           }
 
           // Dual-write to Markdown mirror if enabled
@@ -1469,7 +1469,7 @@ export function registerMemoryUpdateTool(
                 } catch (patchErr) {
                   // New record is already the source of truth; log but don't fail
                   console.warn(
-                    `scope-recall: failed to patch superseded record ${resolvedId.slice(0, 8)}: ${patchErr}`,
+                    `clawlore: failed to patch superseded record ${resolvedId.slice(0, 8)}: ${patchErr}`,
                   );
                 }
 

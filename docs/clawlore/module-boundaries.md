@@ -1,4 +1,4 @@
-# ClawLore 2.0 Module Boundaries
+# ClawLore v1 Module Boundaries (V2 Data Architecture)
 
 ClawLore remains a modular monolith. Modules communicate through typed ports;
 they do not share hidden database handles or call entry-point helpers.

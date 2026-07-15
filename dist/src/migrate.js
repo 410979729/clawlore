@@ -1,6 +1,6 @@
 /**
  * Migration Utilities
- * Migrates data from old memory-lancedb plugin to scope-recall-openclaw
+ * Migrates data from old memory-lancedb plugin to clawlore
  */
 import { homedir } from "node:os";
 import { join } from "node:path";

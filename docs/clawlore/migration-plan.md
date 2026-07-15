@@ -1,4 +1,4 @@
-# Migration plan: scope-recall-openclaw 1.1.0 to ClawLore 2.0
+# Migration plan: Scope Recall compatibility shell to ClawLore v1
 
 ## Invariants
 
@@ -29,7 +29,7 @@
 ## Execution ledger discipline
 
 - This plan remains the stage-order authority. Current completion and evidence
-  live in `TODO-clawlore-v2.md`, the project handoff, dated run reports, and the
+  live in `TODO-clawlore.md`, the project handoff, dated run reports, and the
   current day log; a later phase must map back to one of the stages above.
 - The current Phase 7D write and Phase 7J compatibility work complete additive
   schema/write and projection-compatibility portions of stages 3, 5, and 6.

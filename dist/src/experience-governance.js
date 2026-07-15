@@ -275,19 +275,19 @@ export function buildExperienceDebtReport(db, options = {}) {
     }
     const recommendations = [];
     if (readyToPromote.length > 0) {
-        recommendations.push(makeRecommendation("ready_to_promote_episodes", readyToPromote.length, "Run a dry-run promotion batch, inspect proposed playbooks, then apply only if evidence is clean.", "openclaw scope-recall experience promote --dry-run --json"));
+        recommendations.push(makeRecommendation("ready_to_promote_episodes", readyToPromote.length, "Run a dry-run promotion batch, inspect proposed playbooks, then apply only if evidence is clean.", "openclaw clawlore experience promote --dry-run --json"));
     }
     if (reviewBacklog.length > 0) {
-        recommendations.push(makeRecommendation("review_backlog_playbooks", reviewBacklog.length, "Review candidates, promote safe low-risk procedures, or mark unsafe items needs_review/quarantined.", "openclaw scope-recall playbooks list --status candidate --json"));
+        recommendations.push(makeRecommendation("review_backlog_playbooks", reviewBacklog.length, "Review candidates, promote safe low-risk procedures, or mark unsafe items needs_review/quarantined.", "openclaw clawlore playbooks list --status candidate --json"));
     }
     if (staleCandidates.length > 0) {
-        recommendations.push(makeRecommendation("stale_candidate_playbooks", staleCandidates.length, "Replay or supersede stale candidates before treating them as reusable procedures.", "openclaw scope-recall experience replay --playbook-id <id> --json"));
+        recommendations.push(makeRecommendation("stale_candidate_playbooks", staleCandidates.length, "Replay or supersede stale candidates before treating them as reusable procedures.", "openclaw clawlore experience replay --playbook-id <id> --json"));
     }
     if (failingPlaybooks.length > 0) {
-        recommendations.push(makeRecommendation("failing_playbooks", failingPlaybooks.length, "Quarantine or revise playbooks with repeated failures before future preflight reuse.", "openclaw scope-recall playbooks quarantine --id <id> --json"));
+        recommendations.push(makeRecommendation("failing_playbooks", failingPlaybooks.length, "Quarantine or revise playbooks with repeated failures before future preflight reuse.", "openclaw clawlore playbooks quarantine --id <id> --json"));
     }
     if (skippedCaptureEvents.length > 0) {
-        recommendations.push(makeRecommendation("skipped_capture_events", skippedCaptureEvents.length, "Inspect skipped task-experience captures before tuning reviewer prompts or capture gates; do not auto-promote skipped transcripts.", "openclaw scope-recall experience debt --json"));
+        recommendations.push(makeRecommendation("skipped_capture_events", skippedCaptureEvents.length, "Inspect skipped task-experience captures before tuning reviewer prompts or capture gates; do not auto-promote skipped transcripts.", "openclaw clawlore experience debt --json"));
     }
     if (recommendations.length === 0) {
         recommendations.push(makeRecommendation("no_action", 0, "No Experience governance debt matched the current thresholds."));

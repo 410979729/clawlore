@@ -54,7 +54,7 @@ function printHelp() {
   console.log(`Usage: node scripts/migrate-legacy-hygiene.mjs --db <memory.sqlite3> [--apply]
 
 Archive legacy scratch rows and normalize missing durable metadata in the
-scope-recall-openclaw SQLite truth store.
+ClawLore SQLite truth store.
 
 Options:
   --db <file>       Explicit memory.sqlite3 path

@@ -1,4 +1,4 @@
-# Scope Recall Response Contracts
+# ClawLore Response Contracts
 
 Status: Phase 1 contract baseline.
 
@@ -22,7 +22,7 @@ changelog entry.
 Command:
 
 ```bash
-openclaw scope-recall doctor --json --quiet
+openclaw clawlore doctor --json --quiet
 ```
 
 Required fields:
@@ -47,7 +47,7 @@ execution fails.
 Command:
 
 ```bash
-openclaw scope-recall dashboard --json
+openclaw clawlore dashboard --json
 ```
 
 Required fields:
@@ -70,8 +70,8 @@ candidate debt, or missing Experience Kernel readiness exists.
 Commands:
 
 ```bash
-openclaw scope-recall repair-vectors --dry-run --json
-openclaw scope-recall repair-vectors --apply --json
+openclaw clawlore repair-vectors --dry-run --json
+openclaw clawlore repair-vectors --apply --json
 ```
 
 Required fields:
@@ -101,10 +101,10 @@ for large stores.
 Commands:
 
 ```bash
-openclaw scope-recall digest report --json
-openclaw scope-recall digest run --dry-run --json
-openclaw scope-recall digest run --apply --json
-openclaw scope-recall digest recovery --dry-run --json
+openclaw clawlore digest report --json
+openclaw clawlore digest run --dry-run --json
+openclaw clawlore digest run --apply --json
+openclaw clawlore digest recovery --dry-run --json
 ```
 
 Required report fields:
@@ -140,9 +140,9 @@ Contracts:
 Commands:
 
 ```bash
-openclaw scope-recall governance cleanup --dry-run --json
-openclaw scope-recall governance rollback --batch-id <id> --dry-run --json
-openclaw scope-recall governance audit-coverage --json
+openclaw clawlore governance cleanup --dry-run --json
+openclaw clawlore governance rollback --batch-id <id> --dry-run --json
+openclaw clawlore governance audit-coverage --json
 ```
 
 Cleanup and rollback responses include:
@@ -165,8 +165,8 @@ Audit coverage includes:
 Commands:
 
 ```bash
-openclaw scope-recall candidates report --json
-openclaw scope-recall candidates apply --dry-run --json
+openclaw clawlore candidates report --json
+openclaw clawlore candidates apply --dry-run --json
 ```
 
 Required fields:
@@ -186,7 +186,7 @@ Apply responses also include mutation counts and batch metadata.
 Command:
 
 ```bash
-openclaw scope-recall journal recovery --dry-run --json
+openclaw clawlore journal recovery --dry-run --json
 ```
 
 Required fields:
@@ -206,7 +206,7 @@ Unsupported journal tables are valid for OpenClaw today and must be explicit.
 Command:
 
 ```bash
-openclaw scope-recall graph hygiene --dry-run --json
+openclaw clawlore graph hygiene --dry-run --json
 ```
 
 Required fields:
@@ -222,8 +222,8 @@ Required fields:
 Commands:
 
 ```bash
-openclaw scope-recall forgetting report --json
-openclaw scope-recall forgetting run --dry-run --json
+openclaw clawlore forgetting report --json
+openclaw clawlore forgetting run --dry-run --json
 ```
 
 Report fields:
@@ -247,10 +247,10 @@ Run fields:
 Commands:
 
 ```bash
-openclaw scope-recall experience stats --json
-openclaw scope-recall experience promote --dry-run --json
-openclaw scope-recall experience replay --playbook-id <id> --json
-openclaw scope-recall playbooks list --json
+openclaw clawlore experience stats --json
+openclaw clawlore experience promote --dry-run --json
+openclaw clawlore experience replay --playbook-id <id> --json
+openclaw clawlore playbooks list --json
 ```
 
 Stats include `episodes`, `playbooks`, and `runs`.
@@ -271,7 +271,7 @@ action, and resulting status.
 Command:
 
 ```bash
-openclaw scope-recall experience replay --playbook-id <id> --cases benchmarks/experience-replay-cases.json --json
+openclaw clawlore experience replay --playbook-id <id> --cases benchmarks/experience-replay-cases.json --json
 ```
 
 Required fields:

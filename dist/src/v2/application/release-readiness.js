@@ -1,10 +1,13 @@
+import { CLAWLORE_CLI_ALIASES, CLAWLORE_CLI_PRIMARY, CLAWLORE_CONFIG_ROOT, CLAWLORE_LEGACY_PLUGIN_IDS, CLAWLORE_PACKAGE_NAME, CLAWLORE_PLUGIN_ID, CLAWLORE_PRODUCT_NAME, } from "../../product-identity.js";
 export const CLAWLORE_COMPATIBILITY_SURFACE_V1 = {
-    productBrand: "ClawLore",
-    packageName: "scope-recall-openclaw",
-    manifestId: "scope-recall-openclaw",
-    configRoot: "plugins.entries.scope-recall-openclaw.config",
-    cliPrimary: "scope-recall",
-    cliAliases: ["memory-pro"],
+    productBrand: CLAWLORE_PRODUCT_NAME,
+    packageName: CLAWLORE_PACKAGE_NAME,
+    manifestId: CLAWLORE_PLUGIN_ID,
+    configRoot: CLAWLORE_CONFIG_ROOT,
+    cliPrimary: CLAWLORE_CLI_PRIMARY,
+    cliAliases: [...CLAWLORE_CLI_ALIASES],
+    legacyPluginIds: [...CLAWLORE_LEGACY_PLUGIN_IDS],
+    legacyConfigRoots: ["plugins.entries.scope-recall-openclaw.config"],
     dataDirectoryPolicy: "preserve_existing",
     sourceMetadataPolicy: "preserve_historical",
     compatibilityMajorVersions: 1,
@@ -15,11 +18,11 @@ export function validateCompatibilitySurface(input) {
         failures.push("package_name_changed");
     if (input.manifestId !== CLAWLORE_COMPATIBILITY_SURFACE_V1.manifestId)
         failures.push("manifest_id_changed");
-    if (!input.cliSource.includes('.command("scope-recall")'))
-        failures.push("primary_cli_missing");
-    if (!input.cliSource.includes('.alias("memory-pro")'))
-        failures.push("legacy_cli_alias_missing");
-    for (const command of ["scope-recall", "memory-pro"]) {
+    for (const legacyId of CLAWLORE_COMPATIBILITY_SURFACE_V1.legacyPluginIds) {
+        if (!input.manifestLegacyPluginIds.includes(legacyId))
+            failures.push(`legacy_plugin_id_missing:${legacyId}`);
+    }
+    for (const command of [CLAWLORE_COMPATIBILITY_SURFACE_V1.cliPrimary, ...CLAWLORE_COMPATIBILITY_SURFACE_V1.cliAliases]) {
         if (!input.manifestCommands.includes(command))
             failures.push(`manifest_command_missing:${command}`);
     }

@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.2.0
+
+- Renamed the canonical package, manifest id, product name, repository metadata,
+  config root, and primary CLI from Scope Recall to ClawLore.
+- Preserved `scope-recall-openclaw` as a legacy plugin id, `scope-recall` and
+  `memory-pro` as CLI aliases, and existing data/OAuth paths as read-compatible
+  migration fallbacks.
+- Kept the stable `scope_recall_*` tool ids as wire compatibility contracts;
+  they no longer define the product name.
+- Retained the existing governance, journal, operator dashboard, golden recall,
+  hard-delete, and release gate protections under the ClawLore identity.
+- Hardened the live release gate to require the canonical `clawlore` extension,
+  exact recursive artifact identity, canonical runtime inspect, and all CLI
+  aliases before a deployment can be claimed.
+- Added an audit-first identity-transition runbook. This release candidate does
+  not authorize live deployment, V2 writes, prompt mutation, or recall cutover.
+
 ## Unreleased
 
 - Added Tianji's independent Scope Recall roadmap, documenting that the

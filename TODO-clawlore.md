@@ -1,12 +1,31 @@
-# ClawLore 2.0 TODO
+# ClawLore v1 TODO
 
-Updated: 2026-07-14
+Updated: 2026-07-15
+
+## R1 — Canonical ClawLore identity candidate
+
+- [x] Rename product, npm package, manifest id, config root, primary CLI,
+      repository metadata, default data path, and default extension to `clawlore`.
+- [x] Preserve `scope-recall-openclaw` as a legacy plugin id, `scope-recall` and
+      `memory-pro` as CLI aliases, old data/OAuth fallback paths, and stable
+      `scope_recall_*` tool ids.
+- [x] Move current design/TODO paths from `clawlore-v2` to `clawlore` and clarify
+      that internal V2 names describe data architecture, not product version.
+- [x] Make source/live release gates canonical, recursive, and fail-closed.
+- [x] Add exact identity regressions and an audit-first migration/rollback runbook.
+- [x] Pass 270/270 tests, typecheck, build, vector repair, golden recall, SBOM,
+      pack scan, and the explicit source-only release gate.
+- [ ] Obtain Tianxuan's independent audit on the exact committed candidate.
+- [ ] Rename/create the GitHub repository and update `origin` only after the
+      destination exists and the audit is accepted.
+- [ ] Deploy the canonical extension/config identity only under a separately
+      authorized, backup-backed rollout. Current live remains legacy-id + shadow.
 
 ## ClawLore v1 production hardening — active after Phase 9
 
 The original migration roadmap closed with `no_cutover`. Independent audit
 found production blockers, now tracked in
-`docs/clawlore-v2/clawlore-v1-production-hardening-plan.md`.
+`docs/clawlore/clawlore-v1-production-hardening-plan.md`.
 
 ### H1 — Mutation authorization and diagnostic privacy
 
@@ -16,7 +35,7 @@ found production blockers, now tracked in
 - [x] Deny correction of archived/superseded/purged memory without restore authority.
 - [x] Redact default digest health output to status/count/timestamp fields.
 - [x] Add focused adversarial regressions; 8/8 and typecheck pass.
-- [ ] Pass full regression/build/release gates after the complete hardening bundle.
+- [x] Pass full regression/build/release gates after the complete hardening bundle.
 
 ### H2 — Enforceable SQL integrity
 
@@ -45,17 +64,22 @@ comparison/fallback lane and no prompt mutation, write, or cutover is enabled.
 
 ### H4 — Reproducible release identity
 
-- [ ] Make missing live extension fail closed outside explicit source-only mode.
-- [ ] Compare recursive runtime artifacts by manifest and SHA-256.
-- [ ] Add build/commit identity independent of SemVer.
-- [ ] Commit lockfile and prove clean `npm ci`/pack/SBOM reproducibility.
+- [x] Make missing live extension fail closed outside explicit source-only mode.
+- [x] Compare recursive runtime artifacts by manifest and SHA-256.
+- [x] Add build/commit identity independent of SemVer.
+- [x] Commit lockfile and prove clean `npm ci`/pack/SBOM reproducibility.
 
 ### H5 — Recovery, soak, deployment, and fresh decision
 
-- [ ] Run encrypted snapshot restore and constrained integrity verification.
-- [ ] Deploy with external rollback backup and exact artifact identity.
-- [ ] Run real-channel shadow probes and bounded soak.
-- [ ] Issue a fresh cutover-or-no-cutover receipt from current live evidence.
+- [x] Run encrypted snapshot restore and constrained integrity verification.
+- [x] Deploy with external rollback backup and exact artifact identity.
+- [x] Run real-channel shadow probes and bounded soak.
+- [x] Issue a fresh cutover-or-no-cutover receipt from current live evidence.
+
+H5 verification: the 2026-07-14 H5 deployment loaded exact build `71e1659`,
+passed 267/267 tests, live gate, schema-v3 checks, shadow probes, and soak, then
+issued a fresh `no_cutover` receipt. The R1 identity candidate is a later source
+change and has intentionally not replaced that live artifact before audit.
 
 ## Phase 0
 
@@ -1074,7 +1098,7 @@ overlap below 0.8.
       golden/release gates; closing package scan 547 files.
 
 Run report:
-`docs/clawlore-v2/eval/phase8f-b3b-phase8g-phase9-completion-run-2026-07-14.md`.
+`docs/clawlore/eval/phase8f-b3b-phase8g-phase9-completion-run-2026-07-14.md`.
 
 ## Phase 0 verification
 
@@ -1233,7 +1257,7 @@ Run report:
   boundary/vector repair/golden recall/release gate PASS; pack scan 330 files.
 
 Run report:
-`projects/clawlore-v2/docs/clawlore-v2/eval/phase6c-live-shadow-run-2026-07-12.md`.
+`projects/clawlore/docs/clawlore/eval/phase6c-live-shadow-run-2026-07-12.md`.
 
 ## Phase 6D observation-audit verification
 
@@ -1258,7 +1282,7 @@ Run report:
   gate PASS; pack scan 334 files.
 
 Run report:
-`projects/clawlore-v2/docs/clawlore-v2/eval/phase6d-shadow-observation-audit-run-2026-07-12.md`.
+`projects/clawlore/docs/clawlore/eval/phase6d-shadow-observation-audit-run-2026-07-12.md`.
 
 ## Boundaries
 

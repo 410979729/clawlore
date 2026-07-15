@@ -86,7 +86,7 @@ added no errors. The fresh decision remains `no_cutover`: active/eligible are
 zero, 493 candidate rows remain unverified, 24 archive proposals remain
 unapplied, 47 current-content differences remain, and no cutover runtime mode
 exists. See
-`docs/clawlore-v2/eval/clawlore-v1-h5-production-deployment-run-2026-07-14.md`.
+`docs/clawlore/eval/clawlore-v1-h5-production-deployment-run-2026-07-14.md`.
 
 ## Final acceptance posture
 

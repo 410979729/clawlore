@@ -276,7 +276,7 @@ export function registerSelfImprovementLogTool(api, context) {
                     category,
                     area,
                     priority,
-                    source: "scope-recall-openclaw/self_improvement_log",
+                    source: "clawlore/self_improvement_log",
                 });
                 const fileName = type === "learning" ? "LEARNINGS.md" : "ERRORS.md";
                 return {
@@ -701,7 +701,7 @@ export function registerMemoryStoreTool(api, context) {
                         ], { excludeInactive: true });
                     }
                     catch (err) {
-                        console.warn(`scope-recall-openclaw: duplicate pre-check failed, continue store: ${String(err)}`);
+                        console.warn(`clawlore: duplicate pre-check failed, continue store: ${String(err)}`);
                     }
                     if (existing.length > 0 && existing[0].score > 0.98) {
                         return {
@@ -748,7 +748,7 @@ export function registerMemoryStoreTool(api, context) {
                         conflictReview = await recordConflictReviewRelations(runtimeContext.store, entry, [targetScope]);
                     }
                     catch (err) {
-                        console.warn(`scope-recall-openclaw: conflict-review marking fails: ${String(err)}`);
+                        console.warn(`clawlore: conflict-review marking fails: ${String(err)}`);
                     }
                     // Dual-write to Markdown mirror if enabled
                     if (context.mdMirror) {
@@ -1165,7 +1165,7 @@ export function registerMemoryUpdateTool(api, context) {
                                 }
                                 catch (patchErr) {
                                     // New record is already the source of truth; log but don't fail
-                                    console.warn(`scope-recall: failed to patch superseded record ${resolvedId.slice(0, 8)}: ${patchErr}`);
+                                    console.warn(`clawlore: failed to patch superseded record ${resolvedId.slice(0, 8)}: ${patchErr}`);
                                 }
                                 return {
                                     content: [

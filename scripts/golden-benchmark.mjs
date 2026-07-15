@@ -111,7 +111,7 @@ function search(db, query, limit = 5, scopeFilter) {
 }
 
 const fixture = JSON.parse(await readFile(casesPath, "utf8"));
-const dbPath = join(tmpdir(), `scope-recall-openclaw-golden-${randomUUID()}.sqlite3`);
+const dbPath = join(tmpdir(), `clawlore-golden-${randomUUID()}.sqlite3`);
 const db = new DatabaseSync(dbPath);
 try {
   db.exec(`

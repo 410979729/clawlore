@@ -916,7 +916,7 @@ function registerForgettingReportTool(api: OpenClawPluginApi, context: Experienc
   api.registerTool((toolCtx) => {
     return {
       name: "scope_recall_forgetting_report",
-      label: "Scope Recall Forgetting Report",
+      label: "ClawLore Forgetting Report",
       description:
         "Read-only report of low-value, duplicate, wrapper-noise, or secret-like memory rows in SQL truth. Does not mutate memory.",
       parameters: Type.Object({
@@ -948,7 +948,7 @@ function registerForgettingReportTool(api: OpenClawPluginApi, context: Experienc
             limit: typeof params.limit === "number" ? params.limit : 200,
           });
 
-          const summary = `Scope Recall Forgetting Report
+          const summary = `ClawLore Forgetting Report
 
 Rows: ${result.active_rows}/${result.total_rows} active
 Soft archive candidates: ${result.soft_archive_candidates.count}
@@ -977,7 +977,7 @@ function registerForgettingRunTool(api: OpenClawPluginApi, context: ExperienceTo
   api.registerTool((toolCtx) => {
     return {
       name: "scope_recall_forgetting_run",
-      label: "Scope Recall Forgetting Run",
+      label: "ClawLore Forgetting Run",
       description:
         "Apply the forgetting loop to SQL truth. Defaults to dry_run=true and soft-archives low-value rows; hard deleting sensitive rows requires hard_delete_sensitive=true.",
       parameters: Type.Object({
@@ -1041,7 +1041,7 @@ function registerGovernanceCleanupReportTool(api: OpenClawPluginApi, context: Ex
   api.registerTool((toolCtx) => {
     return {
       name: "scope_recall_governance_cleanup_report",
-      label: "Scope Recall Governance Cleanup Report",
+      label: "ClawLore Governance Cleanup Report",
       description:
         "Read-only report for historical template/transcript-shaped memory rows that should be reviewed or soft-archived.",
       parameters: Type.Object({
@@ -1088,7 +1088,7 @@ function registerGovernanceCleanupRunTool(api: OpenClawPluginApi, context: Exper
   api.registerTool((toolCtx) => {
     return {
       name: "scope_recall_governance_cleanup_run",
-      label: "Scope Recall Governance Cleanup Run",
+      label: "ClawLore Governance Cleanup Run",
       description:
         "Soft-archive or roll back historical template/transcript-shaped memory rows. Defaults to dry_run=true.",
       parameters: Type.Object({
@@ -1113,7 +1113,7 @@ function registerGovernanceCleanupRunTool(api: OpenClawPluginApi, context: Exper
             const rollback = rollbackCleanupBatch(db, {
               batchId,
               dryRun: params.dry_run !== false,
-              actor: `scope-recall-openclaw:${runtime.agentId}`,
+              actor: `clawlore:${runtime.agentId}`,
             });
             return {
               content: [{ type: "text", text: `Governance cleanup rollback ${rollback.dry_run ? "preview" : "applied"}: restored=${rollback.restored}/${rollback.rollback_candidates}` }],
@@ -1138,7 +1138,7 @@ function registerGovernanceCleanupRunTool(api: OpenClawPluginApi, context: Exper
             dryRun: params.dry_run !== false,
             limit: typeof params.limit === "number" ? params.limit : 200,
             batchId: typeof params.batch_id === "string" && params.batch_id.trim() ? params.batch_id.trim() : undefined,
-            actor: `scope-recall-openclaw:${runtime.agentId}`,
+            actor: `clawlore:${runtime.agentId}`,
           });
           return {
             content: [{ type: "text", text: `Governance cleanup ${result.dry_run ? "preview" : "applied"}: archived=${result.archived}/${result.candidate_count}, batch=${result.batch_id}` }],
@@ -1156,7 +1156,7 @@ function registerMemoryCandidatePromotionReportTool(api: OpenClawPluginApi, cont
   api.registerTool((toolCtx) => {
     return {
       name: "scope_recall_memory_candidate_promotion_report",
-      label: "Scope Recall Memory Candidate Promotion Report",
+      label: "ClawLore Memory Candidate Promotion Report",
       description:
         "Read-only candidate-memory debt report. Shows promotable, kept, and optional archive candidates before any lifecycle mutation.",
       parameters: Type.Object({
@@ -1186,7 +1186,7 @@ function registerMemoryCandidatePromotionRunTool(api: OpenClawPluginApi, context
   api.registerTool((toolCtx) => {
     return {
       name: "scope_recall_memory_candidate_promotion_run",
-      label: "Scope Recall Memory Candidate Promotion Run",
+      label: "ClawLore Memory Candidate Promotion Run",
       description:
         "Dry-run-by-default candidate-memory lifecycle promotion. Set dry_run=false to promote safe ordinary candidates; archive_noise must also be true to archive low-value noise.",
       parameters: Type.Object({
@@ -1205,7 +1205,7 @@ function registerMemoryCandidatePromotionRunTool(api: OpenClawPluginApi, context
           archiveNoise: params.archive_noise === true,
           limit: typeof params.limit === "number" ? params.limit : 1000,
           batchId: typeof params.batch_id === "string" && params.batch_id.trim() ? params.batch_id.trim() : undefined,
-          actor: `scope-recall-openclaw:${runtime.agentId}`,
+          actor: `clawlore:${runtime.agentId}`,
         });
         const mutations = (result.mutations || {}) as Record<string, unknown>;
         return {
@@ -1221,7 +1221,7 @@ function registerGraphHygieneReportTool(api: OpenClawPluginApi, context: Experie
   api.registerTool((toolCtx) => {
     return {
       name: "scope_recall_graph_hygiene_report",
-      label: "Scope Recall Graph Hygiene Report",
+      label: "ClawLore Graph Hygiene Report",
       description:
         "Read-only report for rebuildable graph companion rows that are orphaned or point at hidden lifecycle memories. Reports unsupported when graph tables are absent.",
       parameters: Type.Object({}),
@@ -1245,7 +1245,7 @@ function registerGraphHygieneRunTool(api: OpenClawPluginApi, context: Experience
   api.registerTool((toolCtx) => {
     return {
       name: "scope_recall_graph_hygiene_run",
-      label: "Scope Recall Graph Hygiene Run",
+      label: "ClawLore Graph Hygiene Run",
       description:
         "Dry-run-by-default graph companion repair. Set dry_run=false to remove orphan/hidden-lifecycle rows from rebuildable graph tables.",
       parameters: Type.Object({
@@ -1273,7 +1273,7 @@ function registerJournalRecoveryReportTool(api: OpenClawPluginApi, context: Expe
   api.registerTool((toolCtx) => {
     return {
       name: "scope_recall_journal_recovery_report",
-      label: "Scope Recall Journal Recovery Report",
+      label: "ClawLore Journal Recovery Report",
       description:
         "Read-only report of retry-exhausted or dead-letter journal entries that can be replayed. Returns unsupported when this OpenClaw deployment has no journal tables.",
       parameters: Type.Object({
@@ -1303,7 +1303,7 @@ function registerJournalRecoveryRunTool(api: OpenClawPluginApi, context: Experie
   api.registerTool((toolCtx) => {
     return {
       name: "scope_recall_journal_recovery_run",
-      label: "Scope Recall Journal Recovery Run",
+      label: "ClawLore Journal Recovery Run",
       description:
         "Schedule retry-exhausted/dead-letter journal entries for replay. Defaults to dry_run=true.",
       parameters: Type.Object({
@@ -1323,7 +1323,7 @@ function registerJournalRecoveryRunTool(api: OpenClawPluginApi, context: Experie
           dryRun: params.dry_run !== false,
           limit: typeof params.limit === "number" ? params.limit : 200,
           batchId: typeof params.batch_id === "string" && params.batch_id.trim() ? params.batch_id.trim() : undefined,
-          actor: `scope-recall-openclaw:${runtime.agentId}`,
+          actor: `clawlore:${runtime.agentId}`,
         });
         return {
           content: [{ type: "text", text: `Journal recovery ${result.dry_run ? "preview" : "applied"}: status=${result.status}, scheduled=${result.scheduled}/${result.candidate_count}` }],
@@ -1338,7 +1338,7 @@ function registerDigestReportTool(api: OpenClawPluginApi, context: ExperienceToo
   api.registerTool((toolCtx) => {
     return {
       name: "scope_recall_digest_report",
-      label: "Scope Recall Digest Report",
+      label: "ClawLore Digest Report",
       description:
         "Read-only report for OpenClaw-native digest ledger, failed runs, chunk states, and digest candidate debt.",
       parameters: Type.Object({
@@ -1365,7 +1365,7 @@ function registerDigestRunTool(api: OpenClawPluginApi, context: ExperienceToolCo
   api.registerTool((toolCtx) => {
     return {
       name: "scope_recall_digest_run",
-      label: "Scope Recall Digest Run",
+      label: "ClawLore Digest Run",
       description:
         "Run OpenClaw-native digest extraction. Defaults to dry_run=true and writes only candidate memories when dry_run=false.",
       parameters: Type.Object({
@@ -1401,7 +1401,7 @@ function registerDigestRunTool(api: OpenClawPluginApi, context: ExperienceToolCo
           maxChunks: typeof params.max_chunks === "number" ? params.max_chunks : 25,
           store: context.store,
           embedPassage: (text) => context.embedder.embedPassage(text),
-          actor: `scope-recall-openclaw:${runtime.agentId}`,
+          actor: `clawlore:${runtime.agentId}`,
         });
         return {
           content: [{ type: "text", text: `OpenClaw digest ${result.dry_run ? "preview" : "run"}: status=${result.status}, extracted=${result.extracted}, stored=${result.stored}, skipped=${result.skipped}` }],
@@ -1417,7 +1417,7 @@ function registerDigestRecoveryTool(api: OpenClawPluginApi, context: ExperienceT
   api.registerTool((toolCtx) => {
     return {
       name: "scope_recall_digest_recovery",
-      label: "Scope Recall Digest Recovery",
+      label: "ClawLore Digest Recovery",
       description:
         "Report or schedule recovery for OpenClaw-native digest parse/retry/dead-letter chunks. Defaults to dry_run=true.",
       parameters: Type.Object({
@@ -1434,7 +1434,7 @@ function registerDigestRecoveryTool(api: OpenClawPluginApi, context: ExperienceT
           ? recoverDigestChunks(db, {
               dryRun: false,
               limit,
-              actor: `scope-recall-openclaw:${runtime.agentId}`,
+              actor: `clawlore:${runtime.agentId}`,
             })
           : { ...digestRecoveryReport(db, { limit }), dry_run: true };
         return {
@@ -1450,7 +1450,7 @@ function registerOperatorDashboardTool(api: OpenClawPluginApi, context: Experien
   api.registerTool((toolCtx) => {
     return {
       name: "scope_recall_operator_dashboard",
-      label: "Scope Recall Operator Dashboard",
+      label: "ClawLore Operator Dashboard",
       description:
         "Read-only operator dashboard summarizing SQL truth, FTS, governance cleanup, journal recovery, Experience Kernel, and vector status.",
       parameters: Type.Object({}),
@@ -1464,7 +1464,7 @@ function registerOperatorDashboardTool(api: OpenClawPluginApi, context: Experien
         });
         const summary = dashboard.summary as Record<string, unknown>;
         return {
-          content: [{ type: "text", text: `Scope Recall dashboard: memories=${summary.memory_rows}, fts=${summary.fts_status}, governance=${summary.governance_cleanup_candidates}, candidates=${summary.memory_candidate_debt}, graph=${summary.graph_hygiene_status}, journal=${summary.journal_recovery_status}/${summary.journal_replay_candidates}, digest=${summary.digest_status}/${summary.digest_candidate_debt}, experience=${summary.experience_status}` }],
+          content: [{ type: "text", text: `ClawLore dashboard: memories=${summary.memory_rows}, fts=${summary.fts_status}, governance=${summary.governance_cleanup_candidates}, candidates=${summary.memory_candidate_debt}, graph=${summary.graph_hygiene_status}, journal=${summary.journal_recovery_status}/${summary.journal_replay_candidates}, digest=${summary.digest_status}/${summary.digest_candidate_debt}, experience=${summary.experience_status}` }],
           details: dashboard,
         };
       },

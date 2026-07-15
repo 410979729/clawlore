@@ -1,9 +1,9 @@
-# OpenClaw Scope Recall Contract Matrix
+# OpenClaw ClawLore Contract Matrix
 
 Status: Phase 1 contract baseline.
 
 This matrix defines the OpenClaw-native capability contract for
-`scope-recall-openclaw`. It is not a Yuheng/Hermes file-for-file checklist.
+ClawLore. It is not a Yuheng/Hermes file-for-file checklist.
 Each row identifies the user/operator contract, primary implementation files,
 minimum tests, dynamic probes, release-gate hooks, and current maturity.
 
@@ -16,7 +16,7 @@ Status values:
 
 | Contract | Promise | Primary Files | Required Tests | Dynamic Probes | Release Gate | Status |
 | --- | --- | --- | --- | --- | --- | --- |
-| Tool surface | Public OpenClaw tools are registered only when config gates allow them. | `index.ts`, `src/tools.ts`, `src/experience-tools.ts`, `openclaw.plugin.json` | `tests/safety-regressions.test.mjs`, `tests/experience-kernel.test.mjs` | `openclaw plugins inspect scope-recall-openclaw` | Manifest tool contract checks | `partial` |
+| Tool surface | Public OpenClaw tools are registered only when config gates allow them. | `index.ts`, `src/tools.ts`, `src/experience-tools.ts`, `openclaw.plugin.json` | `tests/safety-regressions.test.mjs`, `tests/experience-kernel.test.mjs` | `openclaw plugins inspect clawlore` | Manifest tool contract checks | `partial` |
 | Operator CLI | CLI routes are dry-run-first where mutating and JSON-capable where automatable. | `cli.ts`, `dist/cli.js`, `README.md` | `tests/safety-regressions.test.mjs`, `tests/governance-alignment.test.mjs` | `doctor --json`, `dashboard --json`, route help smoke | CLI marker checks, pack dry-run | `partial` |
 | SQLite truth authority | SQLite truth remains canonical; vector, FTS, graph, reports, and mirrors are rebuildable companions. | `src/store.ts`, `src/sql-truth-store.ts`, `src/sqlite-vector-store.ts` | `tests/sql-truth-authority.test.mjs`, `scripts/smoke-vector-repair.mjs` | doctor SQL/FTS/vector drift report | Required files, smoke repair, busy timeout checks | `partial` |
 | Scope isolation | Recall and operator actions do not cross user, chat, thread, workspace, or agent scope unless explicitly authorized. | `src/scopes.ts`, `src/identity-addressing.ts`, `src/clawteam-scope.ts`, `src/tools.ts`, `docs/runtime-identity-scope-rules.md` | `tests/safety-regressions.test.mjs`, future cross-chat/thread fixtures | safe recall probe from isolated scopes | Runtime identity doc marker, future live probe gate | `partial` |

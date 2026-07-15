@@ -197,7 +197,7 @@ function buildSuccessHtml(): string {
   return [
     "<!doctype html>",
     "<html><body>",
-    "<h1>scope-recall OAuth complete</h1>",
+    "<h1>ClawLore OAuth complete</h1>",
     "<p>You can close this window and return to your terminal.</p>",
     "</body></html>",
   ].join("");
@@ -207,7 +207,7 @@ function buildErrorHtml(message: string): string {
   return [
     "<!doctype html>",
     "<html><body>",
-    "<h1>scope-recall OAuth failed</h1>",
+    "<h1>ClawLore OAuth failed</h1>",
     `<p>${message}</p>`,
     "</body></html>",
   ].join("");

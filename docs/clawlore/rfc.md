@@ -1,4 +1,4 @@
-# RFC: ClawLore 2.0
+# RFC: ClawLore v1 (V2 Data Architecture)
 
 Status: proposed implementation baseline  
 Date: 2026-07-11

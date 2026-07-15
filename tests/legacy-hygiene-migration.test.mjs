@@ -81,7 +81,7 @@ function runMigration(dbPath, args = []) {
 }
 
 test("legacy hygiene migration is dry-run first and backup-backed on apply", () => {
-  const dir = mkdtempSync(join(tmpdir(), "scope-recall-openclaw-hygiene-"));
+  const dir = mkdtempSync(join(tmpdir(), "clawlore-hygiene-"));
   const dbPath = createTruthDb(dir);
 
   try {

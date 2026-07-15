@@ -64,8 +64,12 @@ const manifest = JSON.parse(await readFile("openclaw.plugin.json", "utf8"));
 const changelog = await readFile("CHANGELOG.md", "utf8");
 const sourceRoot = await realpath(process.cwd());
 const gitRoot = (await realpath(runCapture("git", ["rev-parse", "--show-toplevel"]).trim()));
-const allowNestedGitRoot = process.env.SCOPE_RECALL_ALLOW_NESTED_GIT_ROOT === "1";
-const sourceOnly = process.env.SCOPE_RECALL_SOURCE_ONLY === "1";
+const enabledByEnvironment = (...names) => names.some((name) => process.env[name] === "1");
+const allowNestedGitRoot = enabledByEnvironment(
+  "CLAWLORE_ALLOW_NESTED_GIT_ROOT",
+  "SCOPE_RECALL_ALLOW_NESTED_GIT_ROOT",
+);
+const sourceOnly = enabledByEnvironment("CLAWLORE_SOURCE_ONLY", "SCOPE_RECALL_SOURCE_ONLY");
 const sourceInsideGitRoot = sourceRoot === gitRoot || sourceRoot.startsWith(`${gitRoot}/`);
 
 if (gitRoot !== sourceRoot && !(allowNestedGitRoot && sourceInsideGitRoot)) {
@@ -104,11 +108,13 @@ const requiredFiles = [
   "docs/phase-7-release-hardening-audit-2026-06-30.md",
   "docs/operator-runbook.md",
   "docs/release-readiness-template.md",
+  "docs/clawlore/identity-transition-v1.md",
   "docs/tianji-independent-roadmap-2026-07-01.md",
   "openclaw.plugin.json",
   "package-lock.json",
   "tsconfig.json",
   "index.ts",
+  "src/product-identity.ts",
   "src/runtime-scope-metadata.ts",
   "src/embedder.ts",
   "src/experience-models.ts",
@@ -214,7 +220,7 @@ for (const toolName of requiredExperienceTools) {
   }
   const signal = manifest.toolMetadata?.[toolName]?.configSignals?.[0];
   if (
-    signal?.rootPath !== "plugins.entries.scope-recall-openclaw.config" ||
+    signal?.rootPath !== "plugins.entries.clawlore.config" ||
     signal?.mode?.path !== "enableManagementTools" ||
     !Array.isArray(signal?.mode?.allowed) ||
     !signal.mode.allowed.includes("true")
@@ -359,7 +365,11 @@ for (const marker of ["openclaw-scope-v1", "scope_filter_mode", "memory_store", 
 }
 
 const stateDir = resolve(process.env.OPENCLAW_STATE_DIR || process.env.OPENCLAW_HOME || resolve(sourceRoot, "../../.."));
-const extensionDir = resolve(process.env.SCOPE_RECALL_EXTENSION_DIR || resolve(stateDir, "extensions/scope-recall-openclaw"));
+const extensionDir = resolve(
+  process.env.CLAWLORE_EXTENSION_DIR ||
+  process.env.SCOPE_RECALL_EXTENSION_DIR ||
+  resolve(stateDir, "extensions/clawlore"),
+);
 if (!sourceOnly && !(await exists(extensionDir))) {
   throw new Error(`release gate failed: live extension target is missing: ${extensionDir}`);
 }
@@ -396,7 +406,7 @@ if (sourceOnly) {
 }
 console.log(`release gate build identity: commit=${gitCommit} runtime=${candidateIdentity.digest} dirty=${gitDirty}`);
 
-if (!sourceOnly && process.env.SCOPE_RECALL_SKIP_RUNTIME_SMOKE !== "1") {
+if (!sourceOnly && !enabledByEnvironment("CLAWLORE_SKIP_RUNTIME_SMOKE", "SCOPE_RECALL_SKIP_RUNTIME_SMOKE")) {
   const configPath = resolve(process.env.OPENCLAW_CONFIG_PATH || resolve(stateDir, "openclaw.json"));
   const inferredCli = resolve(stateDir, "../../app/node_modules/.bin/openclaw");
   const configuredCli = String(process.env.OPENCLAW_CLI || "").trim();
@@ -416,26 +426,28 @@ if (!sourceOnly && process.env.SCOPE_RECALL_SKIP_RUNTIME_SMOKE !== "1") {
     OPENCLAW_CONFIG_PATH: configPath,
   };
   const inspect = parseJsonWithPreamble(
-    runCapture(openclawCli, ["plugins", "inspect", "scope-recall-openclaw", "--json"], { env: runtimeEnv }),
+    runCapture(openclawCli, ["plugins", "inspect", "clawlore", "--json"], { env: runtimeEnv }),
     "OpenClaw plugin inspect",
   );
   if (
-    inspect.plugin?.id !== "scope-recall-openclaw" ||
+    inspect.plugin?.id !== "clawlore" ||
     inspect.plugin?.status !== "loaded" ||
     inspect.plugin?.version !== packageJson.version ||
     inspect.plugin?.enabled !== true ||
     inspect.plugin?.activated !== true ||
     !Array.isArray(inspect.commands) ||
-    !inspect.commands.includes("scope-recall")
+    !inspect.commands.includes("clawlore") ||
+    !inspect.commands.includes("scope-recall") ||
+    !inspect.commands.includes("memory-pro")
   ) {
-    throw new Error("release gate failed: OpenClaw runtime did not load scope-recall-openclaw with expected command surface");
+    throw new Error("release gate failed: OpenClaw runtime did not load ClawLore with the canonical and compatibility command surface");
   }
   if (!inspect.plugin?.rootDir || await realpath(inspect.plugin.rootDir) !== extensionRoot) {
     throw new Error("release gate failed: OpenClaw inspect rootDir does not match the verified live extension");
   }
   const doctor = parseJsonWithPreamble(
-    runCapture(openclawCli, ["scope-recall", "doctor", "--json", "--quiet"], { env: runtimeEnv }),
-    "OpenClaw scope-recall doctor",
+    runCapture(openclawCli, ["clawlore", "doctor", "--json", "--quiet"], { env: runtimeEnv }),
+    "OpenClaw ClawLore doctor",
   );
   if (doctor.ok !== true) {
     throw new Error("release gate failed: OpenClaw runtime doctor did not report ok=true");

@@ -1,4 +1,4 @@
-# Scope Recall Release Readiness Template
+# ClawLore Release Readiness Template
 
 Use this template for each release candidate.
 

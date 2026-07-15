@@ -2,7 +2,7 @@
 
 ## 概述
 
-Experience Kernel 是 scope-recall-openclaw 插件的经验沉淀系统，用于将任务执行经验转化为可复用的 playbook。
+Experience Kernel 是 ClawLore 插件的经验沉淀系统，用于将任务执行经验转化为可复用的 playbook。
 
 **核心工作流：**
 ```

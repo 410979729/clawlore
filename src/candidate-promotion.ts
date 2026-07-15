@@ -464,7 +464,7 @@ export function promoteMemoryCandidates(
   const dryRun = options.dryRun !== false;
   const limit = Math.max(1, Math.min(5000, Math.trunc(options.limit ?? 1000)));
   const batchId = options.batchId || `candidate-promotion-${randomUUID()}`;
-  const actor = options.actor || "scope-recall-openclaw";
+  const actor = options.actor || "clawlore";
   const at = nowIso();
   const before = candidateDebtReport(db, { limit });
   const rows = candidateRows(db, { limit });

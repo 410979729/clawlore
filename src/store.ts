@@ -135,7 +135,7 @@ export const loadLanceDB = async (): Promise<
     return await lancedbImportPromise;
   } catch (err) {
     throw new Error(
-      `scope-recall-openclaw: failed to load LanceDB. ${String(err)}`,
+      `clawlore: failed to load LanceDB. ${String(err)}`,
       { cause: err },
     );
   }
@@ -350,20 +350,20 @@ export class MemoryStore {
 
         if (missingColumns.length > 0) {
           console.warn(
-            `scope-recall-openclaw: migrating legacy table — adding columns: ${missingColumns.map((c) => c.name).join(", ")}`,
+            `clawlore: migrating legacy table — adding columns: ${missingColumns.map((c) => c.name).join(", ")}`,
           );
           await table.addColumns(missingColumns);
           console.log(
-            `scope-recall-openclaw: migration complete — ${missingColumns.length} column(s) added`,
+            `clawlore: migration complete — ${missingColumns.length} column(s) added`,
           );
         }
       } catch (err) {
         const msg = String(err);
         if (msg.includes("already exists")) {
           // Concurrent initialization race — another process already added the columns
-          console.log("scope-recall-openclaw: migration columns already exist (concurrent init)");
+          console.log("clawlore: migration columns already exist (concurrent init)");
         } else {
-          console.warn("scope-recall-openclaw: could not check/migrate table schema:", err);
+          console.warn("clawlore: could not check/migrate table schema:", err);
         }
       }
     } catch (_openErr) {
@@ -466,12 +466,12 @@ export class MemoryStore {
       truth.reconcile(missingEntries, { deleteMissing: false });
       this.sqlTruthStore = truth;
       console.log(
-        `scope-recall-openclaw: SQL truth companion ready (${truth.count()} rows -> ${truth.path})`,
+        `clawlore: SQL truth companion ready (${truth.count()} rows -> ${truth.path})`,
       );
     } catch (err) {
       this.sqlTruthStore = null;
       console.warn(
-        "scope-recall-openclaw: SQL truth companion unavailable; using LanceDB-only retrieval:",
+        "clawlore: SQL truth companion unavailable; using LanceDB-only retrieval:",
         err,
       );
     }
@@ -482,7 +482,7 @@ export class MemoryStore {
     try {
       this.sqlTruthStore.upsert(entry);
     } catch (err) {
-      console.warn("scope-recall-openclaw: SQL truth upsert failed; LanceDB row preserved:", err);
+      console.warn("clawlore: SQL truth upsert failed; LanceDB row preserved:", err);
     }
   }
 
@@ -491,7 +491,7 @@ export class MemoryStore {
     try {
       this.sqlTruthStore.delete(id);
     } catch (err) {
-      console.warn("scope-recall-openclaw: SQL truth delete failed; LanceDB delete already applied:", err);
+      console.warn("clawlore: SQL truth delete failed; LanceDB delete already applied:", err);
     }
   }
 
@@ -511,7 +511,7 @@ export class MemoryStore {
     const message = err instanceof Error ? err.message : String(err);
     this.vectorCompanionError = `${operation}: ${message}`;
     console.warn(
-      `scope-recall-openclaw: LanceDB companion ${operation} failed; SQL truth row preserved and vector repair is needed:`,
+      `clawlore: LanceDB companion ${operation} failed; SQL truth row preserved and vector repair is needed:`,
       err,
     );
   }
@@ -966,7 +966,7 @@ export class MemoryStore {
     try {
       return this.sqlTruthStore.search(query, limit, scopeFilter, options);
     } catch (err) {
-      console.warn("scope-recall-openclaw: SQL truth search failed; falling back to LanceDB search:", err);
+      console.warn("clawlore: SQL truth search failed; falling back to LanceDB search:", err);
       return [];
     }
   }
@@ -1591,7 +1591,7 @@ export class MemoryStore {
       missingVectorRows,
       staleVectorRows,
       truncated,
-      repairHint: needsRepair ? "Run: openclaw scope-recall repair-vectors --dry-run" : null,
+      repairHint: needsRepair ? "Run: openclaw clawlore repair-vectors --dry-run" : null,
     };
   }
 
@@ -1699,7 +1699,7 @@ export class MemoryStore {
           try {
             await this.table!.dropIndex((idx as any).name || "text");
           } catch (err) {
-            console.warn(`scope-recall-openclaw: dropIndex(${(idx as any).name || "text"}) failed:`, err);
+            console.warn(`clawlore: dropIndex(${(idx as any).name || "text"}) failed:`, err);
           }
         }
       }

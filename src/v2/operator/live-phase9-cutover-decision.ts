@@ -272,7 +272,7 @@ export function createLiveClawLorePhase9NoCutoverReceiptV1(input: {
   const postcheck = privateJson<LiveCandidateUnsafeTraceRewritePostcheckV1>(input.rewritePostcheckPath);
   validateRewritePostcheck(postcheck.value);
   const config = privateJson<OpenClawConfigV1>(input.configPath);
-  const plugin = config.value.plugins?.entries?.["scope-recall-openclaw"];
+  const plugin = config.value.plugins?.entries?.["clawlore"];
   const clawlore = plugin?.config?.clawloreV2;
   if (plugin?.enabled !== true || clawlore?.mode !== "shadow" || clawlore.contextEngine !== "compatibility") {
     throw new Error("Phase 9 live configuration is not the expected read-only shadow boundary");

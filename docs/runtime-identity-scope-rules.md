@@ -3,7 +3,7 @@
 Status: Phase 2 baseline.
 
 This document defines the OpenClaw-native runtime identity contract for
-`scope-recall-openclaw`. It is a metadata and boundary contract, not a place for
+ClawLore. It is a metadata and boundary contract, not a place for
 live chat ids, tokens, API keys, or private credential values.
 
 ## Runtime Field Audit

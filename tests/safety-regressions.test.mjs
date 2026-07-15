@@ -339,12 +339,12 @@ test("manifest declares all owned tools and marks management tools with config a
   assert.ok(manifest.contracts.tools.includes("self_improvement_review"));
 
   const secretSignal = manifest.toolMetadata.memory_store_secret_index.configSignals[0];
-  assert.equal(secretSignal.rootPath, "plugins.entries.scope-recall-openclaw.config");
+  assert.equal(secretSignal.rootPath, "plugins.entries.clawlore.config");
   assert.equal(secretSignal.mode.path, "secretIndexToolsEnabled");
   assert.deepEqual(secretSignal.mode.allowed, ["true"]);
 
   const governSignal = manifest.toolMetadata.memory_govern.configSignals[0];
-  assert.equal(governSignal.rootPath, "plugins.entries.scope-recall-openclaw.config");
+  assert.equal(governSignal.rootPath, "plugins.entries.clawlore.config");
   assert.equal(governSignal.mode.path, "enableManagementTools");
   assert.deepEqual(governSignal.mode.allowed, ["true"]);
 
@@ -362,7 +362,7 @@ test("manifest declares all owned tools and marks management tools with config a
     );
     if (!alwaysAvailableExperienceTools.has(toolName)) {
       const signal = manifest.toolMetadata[toolName].configSignals?.[0];
-      assert.equal(signal?.rootPath, "plugins.entries.scope-recall-openclaw.config", toolName);
+      assert.equal(signal?.rootPath, "plugins.entries.clawlore.config", toolName);
       assert.equal(signal?.mode?.path, "enableManagementTools", toolName);
       assert.deepEqual(signal?.mode?.allowed, ["true"], toolName);
     }
@@ -451,11 +451,13 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   const gate = readFileSync(new URL("../scripts/release-gate.mjs", import.meta.url), "utf8");
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const indexSource = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
-  assert.match(packageJson.scripts["release:gate"], /SCOPE_RECALL_ALLOW_NESTED_GIT_ROOT=1/);
-  assert.match(packageJson.scripts["release:gate:source"], /SCOPE_RECALL_SOURCE_ONLY=1/);
+  assert.match(packageJson.scripts["release:gate"], /CLAWLORE_ALLOW_NESTED_GIT_ROOT=1/);
+  assert.match(packageJson.scripts["release:gate:source"], /CLAWLORE_SOURCE_ONLY=1/);
   assert.match(packageJson.scripts["release:reproducibility"], /reproducible-install-gate/);
   assert.match(gate, /"rev-parse",\s*"--show-toplevel"/);
+  assert.match(gate, /CLAWLORE_ALLOW_NESTED_GIT_ROOT/);
   assert.match(gate, /SCOPE_RECALL_ALLOW_NESTED_GIT_ROOT/);
+  assert.match(gate, /CLAWLORE_SOURCE_ONLY/);
   assert.match(gate, /SCOPE_RECALL_SOURCE_ONLY/);
   assert.match(gate, /live extension target is missing/);
   assert.match(gate, /runtimeArtifactIdentity/);
@@ -466,8 +468,8 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   assert.match(gate, /refusing self-drift comparison/);
   assert.match(gate, /OPENCLAW_STATE_DIR/);
   assert.match(gate, /OPENCLAW_CONFIG_PATH/);
-  assert.match(gate, /plugins",\s*"inspect",\s*"scope-recall-openclaw"/);
-  assert.match(gate, /"scope-recall",\s*"doctor",\s*"--json",\s*"--quiet"/);
+  assert.match(gate, /plugins",\s*"inspect",\s*"clawlore"/);
+  assert.match(gate, /"clawlore",\s*"doctor",\s*"--json",\s*"--quiet"/);
   assert.match(indexSource, /diagnosticBuildTag = `\$\{DIAG_BUILD_TAG_PREFIX\}-\$\{pluginVersion\}`/);
   assert.doesNotMatch(indexSource, /scope-recall-openclaw-1\.0\.24/);
 });

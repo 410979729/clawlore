@@ -22,11 +22,10 @@ function evidence(overrides = {}) {
 test("release compatibility keeps package, manifest, CLI alias, config, and data identities", async () => {
   const pkg = JSON.parse(await readFile("package.json", "utf8"));
   const manifest = JSON.parse(await readFile("openclaw.plugin.json", "utf8"));
-  const cliSource = await readFile("cli.ts", "utf8");
   const failures = validateCompatibilitySurface({
     packageName: pkg.name,
     manifestId: manifest.id,
-    cliSource,
+    manifestLegacyPluginIds: manifest.legacyPluginIds,
     manifestCommands: manifest.commandAliases.map((command) => command.name),
   });
   assert.deepEqual(failures, []);

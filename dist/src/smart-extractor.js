@@ -98,7 +98,7 @@ export class SmartExtractor {
         const conversationSafety = evaluateCaptureSafety(conversationText);
         if (!conversationSafety.allowed) {
             stats.skipped += 1;
-            this.debugLog(`scope-recall-openclaw: smart-extractor: skipped unsafe conversation text reason=${conversationSafety.reason} pattern=${conversationSafety.pattern ?? "unknown"}`);
+            this.debugLog(`clawlore: smart-extractor: skipped unsafe conversation text reason=${conversationSafety.reason} pattern=${conversationSafety.pattern ?? "unknown"}`);
             return stats;
         }
         const targetScope = options.scope ?? this.config.defaultScope ?? "global";
@@ -114,12 +114,12 @@ export class SmartExtractor {
         // Step 1: LLM extraction
         const candidates = await this.extractCandidates(conversationText);
         if (candidates.length === 0) {
-            this.log("scope-recall: smart-extractor: no memories extracted");
+            this.log("clawlore: smart-extractor: no memories extracted");
             // LLM returned zero candidates → strongest noise signal → feedback to noise bank
             this.learnAsNoise(conversationText);
             return stats;
         }
-        this.log(`scope-recall: smart-extractor: extracted ${candidates.length} candidate(s)`);
+        this.log(`clawlore: smart-extractor: extracted ${candidates.length} candidate(s)`);
         // Step 1b: Batch-internal dedup — embed candidate abstracts and remove near-duplicates
         //          before expensive per-candidate LLM dedup calls (see src/batch-dedup.ts)
         const capped = candidates.slice(0, MAX_MEMORIES_PER_EXTRACTION);
@@ -131,11 +131,11 @@ export class SmartExtractor {
             if (dedupResult.duplicateIndices.length > 0) {
                 survivingCandidates = dedupResult.survivingIndices.map((i) => capped[i]);
                 stats.skipped += dedupResult.duplicateIndices.length;
-                this.log(`scope-recall: smart-extractor: batchDedup dropped ${dedupResult.duplicateIndices.length} near-duplicate(s), ${survivingCandidates.length} survivor(s)`);
+                this.log(`clawlore: smart-extractor: batchDedup dropped ${dedupResult.duplicateIndices.length} near-duplicate(s), ${survivingCandidates.length} survivor(s)`);
             }
         }
         catch (err) {
-            this.log(`scope-recall: smart-extractor: batchDedup failed, proceeding without batch dedup: ${String(err)}`);
+            this.log(`clawlore: smart-extractor: batchDedup failed, proceeding without batch dedup: ${String(err)}`);
         }
         // Step 2: Process each surviving candidate through dedup pipeline
         for (const candidate of survivingCandidates) {
@@ -146,14 +146,14 @@ export class SmartExtractor {
             }, this.config.workspaceBoundary)) {
                 stats.skipped += 1;
                 stats.boundarySkipped = (stats.boundarySkipped ?? 0) + 1;
-                this.log(`scope-recall: smart-extractor: skipped USER.md-exclusive [${candidate.category}] ${candidate.abstract.slice(0, 60)}`);
+                this.log(`clawlore: smart-extractor: skipped USER.md-exclusive [${candidate.category}] ${candidate.abstract.slice(0, 60)}`);
                 continue;
             }
             try {
                 await this.processCandidate(candidate, conversationText, sessionKey, stats, targetScope, scopeFilter, runtimeMetadata);
             }
             catch (err) {
-                this.log(`scope-recall: smart-extractor: failed to process candidate [${candidate.category}]: ${String(err)}`);
+                this.log(`clawlore: smart-extractor: failed to process candidate [${candidate.category}]: ${String(err)}`);
             }
         }
         return stats;
@@ -188,7 +188,7 @@ export class SmartExtractor {
                     result.push(text);
                 }
                 else {
-                    this.debugLog(`scope-recall-openclaw: smart-extractor: embedding noise filtered: ${text.slice(0, 80)}`);
+                    this.debugLog(`clawlore: smart-extractor: embedding noise filtered: ${text.slice(0, 80)}`);
                 }
             }
             catch {
@@ -211,7 +211,7 @@ export class SmartExtractor {
             const vec = await this.embedder.embed(tail);
             if (vec && vec.length > 0) {
                 noiseBank.learn(vec);
-                this.debugLog("scope-recall-openclaw: smart-extractor: learned noise from zero-extraction");
+                this.debugLog("clawlore: smart-extractor: learned noise from zero-extraction");
             }
         }
         catch {
@@ -245,7 +245,7 @@ export class SmartExtractor {
         if (!result.memories || !Array.isArray(result.memories)) {
             throw new Error(`extract-candidates returned unexpected shape keys=${Object.keys(result).join(",") || "(none)"}`);
         }
-        this.debugLog(`scope-recall-openclaw: smart-extractor: extract-candidates raw memories=${result.memories.length}`);
+        this.debugLog(`clawlore: smart-extractor: extract-candidates raw memories=${result.memories.length}`);
         // Validate and normalize candidates
         const candidates = [];
         let invalidCategoryCount = 0;
@@ -256,7 +256,7 @@ export class SmartExtractor {
             const category = normalizeCategory(raw.category ?? "");
             if (!category) {
                 invalidCategoryCount++;
-                this.debugLog(`scope-recall-openclaw: smart-extractor: dropping candidate due to invalid category rawCategory=${JSON.stringify(raw.category ?? "")} abstract=${JSON.stringify((raw.abstract ?? "").trim().slice(0, 120))}`);
+                this.debugLog(`clawlore: smart-extractor: dropping candidate due to invalid category rawCategory=${JSON.stringify(raw.category ?? "")} abstract=${JSON.stringify((raw.abstract ?? "").trim().slice(0, 120))}`);
                 continue;
             }
             const abstract = (raw.abstract ?? "").trim();
@@ -265,18 +265,18 @@ export class SmartExtractor {
             const candidateSafety = evaluateCaptureSafety([abstract, overview, content].filter(Boolean).join("\n"));
             if (!candidateSafety.allowed) {
                 unsafeCandidateCount++;
-                this.debugLog(`scope-recall-openclaw: smart-extractor: dropping unsafe candidate reason=${candidateSafety.reason} pattern=${candidateSafety.pattern ?? "unknown"} category=${category}`);
+                this.debugLog(`clawlore: smart-extractor: dropping unsafe candidate reason=${candidateSafety.reason} pattern=${candidateSafety.pattern ?? "unknown"} category=${category}`);
                 continue;
             }
             // Skip empty or noise
             if (!abstract || abstract.length < 5) {
                 shortAbstractCount++;
-                this.debugLog(`scope-recall-openclaw: smart-extractor: dropping candidate due to short abstract category=${category} abstract=${JSON.stringify(abstract)}`);
+                this.debugLog(`clawlore: smart-extractor: dropping candidate due to short abstract category=${category} abstract=${JSON.stringify(abstract)}`);
                 continue;
             }
             if (isNoise(abstract)) {
                 noiseAbstractCount++;
-                this.debugLog(`scope-recall-openclaw: smart-extractor: dropping candidate due to noise abstract category=${category} abstract=${JSON.stringify(abstract.slice(0, 120))}`);
+                this.debugLog(`clawlore: smart-extractor: dropping candidate due to noise abstract category=${category} abstract=${JSON.stringify(abstract.slice(0, 120))}`);
                 continue;
             }
             // Sanitize attachment markers before persisting
@@ -285,7 +285,7 @@ export class SmartExtractor {
             const sanitizedContent = sanitizeCaptureText(content) || content;
             candidates.push({ category, abstract: sanitizedAbstract, overview: sanitizedOverview, content: sanitizedContent });
         }
-        this.debugLog(`scope-recall-openclaw: smart-extractor: validation summary accepted=${candidates.length}, invalidCategory=${invalidCategoryCount}, shortAbstract=${shortAbstractCount}, noiseAbstract=${noiseAbstractCount}, unsafe=${unsafeCandidateCount}`);
+        this.debugLog(`clawlore: smart-extractor: validation summary accepted=${candidates.length}, invalidCategory=${invalidCategoryCount}, shortAbstract=${shortAbstractCount}, noiseAbstract=${noiseAbstractCount}, unsafe=${unsafeCandidateCount}`);
         return candidates;
     }
     // --------------------------------------------------------------------------
@@ -313,7 +313,7 @@ export class SmartExtractor {
         const embeddingText = `${candidate.abstract} ${candidate.content}`;
         const vector = await this.embedder.embed(embeddingText);
         if (!vector || vector.length === 0) {
-            this.log("scope-recall: smart-extractor: embedding failed, storing as-is");
+            this.log("clawlore: smart-extractor: embedding failed, storing as-is");
             await this.storeCandidate(candidate, vector || [], sessionKey, targetScope, undefined, runtimeMetadata);
             stats.created++;
             return;
@@ -329,7 +329,7 @@ export class SmartExtractor {
             : undefined;
         if (admission?.decision === "reject") {
             stats.rejected = (stats.rejected ?? 0) + 1;
-            this.log(`scope-recall: smart-extractor: admission rejected [${candidate.category}] ${candidate.abstract.slice(0, 60)} — ${admission.audit.reason}`);
+            this.log(`clawlore: smart-extractor: admission rejected [${candidate.category}] ${candidate.abstract.slice(0, 60)} — ${admission.audit.reason}`);
             await this.recordRejectedAdmission(candidate, conversationText, sessionKey, targetScope, scopeFilter ?? [targetScope], admission.audit, runtimeMetadata);
             return;
         }
@@ -353,7 +353,7 @@ export class SmartExtractor {
                 }
                 break;
             case "skip":
-                this.log(`scope-recall: smart-extractor: skipped [${candidate.category}] ${candidate.abstract.slice(0, 60)}`);
+                this.log(`clawlore: smart-extractor: skipped [${candidate.category}] ${candidate.abstract.slice(0, 60)}`);
                 stats.skipped++;
                 break;
             case "supersede":
@@ -457,7 +457,7 @@ export class SmartExtractor {
         try {
             const data = await this.llm.completeJson(prompt, "dedup-decision");
             if (!data) {
-                this.log("scope-recall: smart-extractor: dedup LLM returned unparseable response, defaulting to CREATE");
+                this.log("clawlore: smart-extractor: dedup LLM returned unparseable response, defaulting to CREATE");
                 return { decision: "create", reason: "LLM response unparseable" };
             }
             const decision = (data.decision?.toLowerCase() ??
@@ -478,7 +478,7 @@ export class SmartExtractor {
             // unsafe — we could invalidate the wrong memory. Degrade to create.
             const destructiveDecisions = new Set(["supersede", "contradict"]);
             if (destructiveDecisions.has(decision) && !hasValidIndex) {
-                this.log(`scope-recall: smart-extractor: ${decision} decision has missing/invalid match_index (${idx}), degrading to create`);
+                this.log(`clawlore: smart-extractor: ${decision} decision has missing/invalid match_index (${idx}), degrading to create`);
                 return {
                     decision: "create",
                     reason: `${decision} degraded: missing match_index`,
@@ -492,7 +492,7 @@ export class SmartExtractor {
             };
         }
         catch (err) {
-            this.log(`scope-recall: smart-extractor: dedup LLM failed: ${String(err)}`);
+            this.log(`clawlore: smart-extractor: dedup LLM failed: ${String(err)}`);
             return { decision: "create", reason: `LLM failed: ${String(err)}` };
         }
     }
@@ -515,7 +515,7 @@ export class SmartExtractor {
                 scopeFilter: scopeFilter ?? [targetScope],
             });
             if (profileAdmission.decision === "reject") {
-                this.log(`scope-recall: smart-extractor: admission rejected profile [${candidate.abstract.slice(0, 60)}] — ${profileAdmission.audit.reason}`);
+                this.log(`clawlore: smart-extractor: admission rejected profile [${candidate.abstract.slice(0, 60)}] — ${profileAdmission.audit.reason}`);
                 await this.recordRejectedAdmission(candidate, conversationText, sessionKey, targetScope, scopeFilter ?? [targetScope], profileAdmission.audit, runtimeMetadata);
                 return "rejected";
             }
@@ -560,7 +560,7 @@ export class SmartExtractor {
         }
         catch {
             // Fallback: store as new
-            this.log(`scope-recall: smart-extractor: could not read existing memory ${matchId}, storing as new`);
+            this.log(`clawlore: smart-extractor: could not read existing memory ${matchId}, storing as new`);
             const vector = await this.embedder.embed(`${candidate.abstract} ${candidate.content}`);
             await this.storeCandidate(candidate, vector || [], "merge-fallback", targetScope, undefined, runtimeMetadata);
             return;
@@ -569,7 +569,7 @@ export class SmartExtractor {
         const prompt = buildMergePrompt(existingAbstract, existingOverview, existingContent, candidate.abstract, candidate.overview, candidate.content, candidate.category);
         const merged = await this.llm.completeJson(prompt, "merge-memory");
         if (!merged) {
-            this.log("scope-recall: smart-extractor: merge LLM failed, skipping merge");
+            this.log("clawlore: smart-extractor: merge LLM failed, skipping merge");
             return;
         }
         // Re-embed the merged content
@@ -605,7 +605,7 @@ export class SmartExtractor {
         catch {
             // Non-critical: merge succeeded, support stats update is best-effort
         }
-        this.log(`scope-recall: smart-extractor: merged [${candidate.category}]${contextLabel ? ` [${contextLabel}]` : ""} into ${matchId.slice(0, 8)}`);
+        this.log(`clawlore: smart-extractor: merged [${candidate.category}]${contextLabel ? ` [${contextLabel}]` : ""} into ${matchId.slice(0, 8)}`);
     }
     /**
      * Handle SUPERSEDE: preserve the old record as historical but mark it as no
@@ -666,7 +666,7 @@ export class SmartExtractor {
             }),
         });
         await this.store.update(matchId, { metadata: stringifySmartMetadata(invalidatedMetadata) }, scopeFilter);
-        this.log(`scope-recall: smart-extractor: superseded [${candidate.category}] ${matchId.slice(0, 8)} -> ${created.id.slice(0, 8)}`);
+        this.log(`clawlore: smart-extractor: superseded [${candidate.category}] ${matchId.slice(0, 8)} -> ${created.id.slice(0, 8)}`);
     }
     // --------------------------------------------------------------------------
     // Context-Aware Handlers (support / contextualize / contradict)
@@ -683,7 +683,7 @@ export class SmartExtractor {
         const updated = updateSupportStats(supportInfo, contextLabel, "support");
         meta.support_info = updated;
         await this.store.update(matchId, { metadata: stringifySmartMetadata(this.withAdmissionAudit({ ...meta, ...runtimeMetadata }, admissionAudit)) }, scopeFilter);
-        this.log(`scope-recall: smart-extractor: support [${contextLabel || "general"}] on ${matchId.slice(0, 8)} — ${reason}`);
+        this.log(`clawlore: smart-extractor: support [${contextLabel || "general"}] on ${matchId.slice(0, 8)} — ${reason}`);
     }
     /**
      * Handle CONTEXTUALIZE: create a new entry that adds situational nuance,
@@ -719,7 +719,7 @@ export class SmartExtractor {
             importance: this.getDefaultImportance(candidate.category),
             metadata,
         });
-        this.log(`scope-recall: smart-extractor: contextualize [${contextLabel || "general"}] new entry linked to ${matchId.slice(0, 8)}`);
+        this.log(`clawlore: smart-extractor: contextualize [${contextLabel || "general"}] new entry linked to ${matchId.slice(0, 8)}`);
     }
     /**
      * Handle CONTRADICT: create contradicting entry + record contradiction evidence
@@ -766,9 +766,9 @@ export class SmartExtractor {
             metadata,
         });
         await recordConflictReviewRelations(this.store, created, scopeFilter ?? [targetScope]).catch((err) => {
-            this.log(`scope-recall: smart-extractor: conflict-review marking failed: ${String(err)}`);
+            this.log(`clawlore: smart-extractor: conflict-review marking failed: ${String(err)}`);
         });
-        this.log(`scope-recall: smart-extractor: contradict [${contextLabel || "general"}] on ${matchId.slice(0, 8)}, new entry created`);
+        this.log(`clawlore: smart-extractor: contradict [${contextLabel || "general"}] on ${matchId.slice(0, 8)}, new entry created`);
     }
     // --------------------------------------------------------------------------
     // Store Helper
@@ -807,7 +807,7 @@ export class SmartExtractor {
             importance: this.getDefaultImportance(candidate.category),
             metadata,
         });
-        this.log(`scope-recall: smart-extractor: created [${candidate.category}] ${candidate.abstract.slice(0, 60)}`);
+        this.log(`clawlore: smart-extractor: created [${candidate.category}] ${candidate.abstract.slice(0, 60)}`);
     }
     /**
      * Map 6-category to existing 5-category store type for backward compatibility.
@@ -888,7 +888,7 @@ export class SmartExtractor {
             });
         }
         catch (err) {
-            this.log(`scope-recall-openclaw: smart-extractor: rejected admission audit write failed: ${String(err)}`);
+            this.log(`clawlore: smart-extractor: rejected admission audit write failed: ${String(err)}`);
         }
     }
 }

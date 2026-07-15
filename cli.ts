@@ -3,12 +3,18 @@
  */
 
 import type { Command } from "commander";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import * as readline from "node:readline";
 import JSON5 from "json5";
+import {
+  CLAWLORE_CLI_ALIASES,
+  CLAWLORE_CLI_PRIMARY,
+  CLAWLORE_LEGACY_DEFAULTS,
+  CLAWLORE_PLUGIN_ID,
+} from "./src/product-identity.js";
 import { loadLanceDB, type MemoryEntry, type MemoryStore } from "./src/store.js";
 import { createRetriever, type MemoryRetriever } from "./src/retriever.js";
 import type { MemoryScopeManager } from "./src/scopes.js";
@@ -125,7 +131,10 @@ function resolveOpenClawHome(): string {
 }
 
 function resolveDefaultOauthPath(): string {
-  return path.join(resolveOpenClawHome(), ".scope-recall-openclaw", "oauth.json");
+  const home = resolveOpenClawHome();
+  const canonical = path.join(home, ".clawlore", "oauth.json");
+  const legacy = path.join(home, CLAWLORE_LEGACY_DEFAULTS.oauthDirectoryName, "oauth.json");
+  return !existsSync(canonical) && existsSync(legacy) ? legacy : canonical;
 }
 
 function resolveLoginOauthPath(rawPath: unknown): string {
@@ -670,9 +679,10 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
   ]);
 
   const memory = program
-    .command("scope-recall")
-    .alias("memory-pro")
-    .description("Scope recall memory management commands");
+    .command(CLAWLORE_CLI_PRIMARY)
+    .alias(CLAWLORE_CLI_ALIASES[0])
+    .alias(CLAWLORE_CLI_ALIASES[1])
+    .description("ClawLore memory management commands");
 
   // Version
   memory
@@ -692,12 +702,12 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
     .option("--config <path>", "OpenClaw config file to update")
     .option("--provider <provider>", `OAuth provider to use (${OAUTH_PROVIDER_CHOICES})`)
     .option("--model <model>", "Override the model saved into llm.model")
-    .option("--oauth-path <path>", "OAuth file path (default: ~/.openclaw/.scope-recall-openclaw/oauth.json)")
+    .option("--oauth-path <path>", "OAuth file path (default: ~/.openclaw/.clawlore/oauth.json; an existing legacy path is reused)")
     .option("--timeout <seconds>", "OAuth callback timeout in seconds", "120")
     .option("--no-browser", "Compatibility flag; the command prints the authorization URL and does not launch a browser")
     .action(async (options) => {
       try {
-        const pluginId = context.pluginId || "scope-recall-openclaw";
+        const pluginId = context.pluginId || CLAWLORE_PLUGIN_ID;
         const currentLlm = context.pluginConfig?.llm;
         const currentProvider = currentLlm && typeof currentLlm === "object" && typeof (currentLlm as any).oauthProvider === "string"
           ? String((currentLlm as any).oauthProvider)
@@ -779,7 +789,7 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
     .option("--config <path>", "OpenClaw config file to inspect")
     .action(async (options) => {
       try {
-        const pluginId = context.pluginId || "scope-recall-openclaw";
+        const pluginId = context.pluginId || CLAWLORE_PLUGIN_ID;
         const configPath = resolveOpenClawConfigPath(options.config);
         const openclawConfig = await loadOpenClawConfig(configPath);
         const pluginConfig = getExistingPluginConfigRoot(openclawConfig, pluginId);
@@ -823,7 +833,7 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
     .option("--oauth-path <path>", "OAuth file path to remove")
     .action(async (options) => {
       try {
-        const pluginId = context.pluginId || "scope-recall-openclaw";
+        const pluginId = context.pluginId || CLAWLORE_PLUGIN_ID;
         const configPath = resolveOpenClawConfigPath(options.config);
         const openclawConfig = await loadOpenClawConfig(configPath);
         const pluginConfig = ensurePluginConfigRoot(openclawConfig, pluginId);
@@ -1092,7 +1102,7 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
           return;
         }
 
-        console.log("Scope Recall Doctor:");
+        console.log("ClawLore Doctor:");
         console.log(`• Status: ${summary.ok ? "ok" : "issues found"}`);
         console.log(`• SQL truth: ${diagnostics.sqlTruth.available ? `${diagnostics.sqlTruth.count} rows` : "unavailable"}`);
         console.log(`• FTS: ${diagnostics.sqlTruth.fts?.healthy ? "healthy" : "needs repair or unavailable"}`);
@@ -1198,7 +1208,7 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
 
   memory
     .command("dashboard")
-    .description("Render the Scope Recall operator dashboard")
+    .description("Render the ClawLore operator dashboard")
     .option("--json", "Output as JSON")
     .action(async (options) => {
       try {
@@ -1214,7 +1224,7 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
         }
 
         const summary = dashboard.summary as Record<string, unknown>;
-        console.log("Scope Recall Operator Dashboard:");
+        console.log("ClawLore Operator Dashboard:");
         console.log(`• Memories: ${summary.memory_rows}`);
         console.log(`• FTS: ${summary.fts_status}`);
         console.log(`• Governance cleanup candidates: ${summary.governance_cleanup_candidates}`);
@@ -1278,7 +1288,7 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
           archiveNoise: options.archiveNoise === true,
           limit: parseLimitOption(options.limit, 1000),
           batchId: typeof options.batchId === "string" && options.batchId.trim() ? options.batchId.trim() : undefined,
-          actor: "scope-recall-openclaw:cli",
+          actor: "clawlore:cli",
         });
         if (options.json) {
           writeJson(result);
@@ -1363,7 +1373,7 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
           embedPassage: context.embedder
             ? (text) => context.embedder!.embedPassage(text)
             : undefined,
-          actor: "scope-recall-openclaw:cli",
+          actor: "clawlore:cli",
         });
         if (options.json) {
           writeJson(result);
@@ -1402,7 +1412,7 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
           : recoverDigestChunks(db, {
               dryRun: false,
               limit: parseLimitOption(options.limit, 100, 500),
-              actor: "scope-recall-openclaw:cli",
+              actor: "clawlore:cli",
             });
         if (options.json) {
           writeJson(result);
@@ -1439,7 +1449,7 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
           dryRun: dryRunFromApplyOptions(options),
           limit: parseLimitOption(options.limit, 500),
           batchId: typeof options.batchId === "string" && options.batchId.trim() ? options.batchId.trim() : undefined,
-          actor: "scope-recall-openclaw:cli",
+          actor: "clawlore:cli",
         });
         if (options.json) {
           writeJson(result);
@@ -1468,7 +1478,7 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
         const result = rollbackCleanupBatch(db, {
           batchId: String(options.batchId),
           dryRun: dryRunFromApplyOptions(options),
-          actor: "scope-recall-openclaw:cli",
+          actor: "clawlore:cli",
         });
         if (options.json) {
           writeJson(result);
@@ -1556,7 +1566,7 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
               limit: parseLimitOption(options.limit, 500),
               dryRun: false,
               batchId: typeof options.batchId === "string" && options.batchId.trim() ? options.batchId.trim() : undefined,
-              actor: "scope-recall-openclaw:cli",
+              actor: "clawlore:cli",
             });
         if (options.json) {
           writeJson(result);
@@ -1850,7 +1860,7 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
     .option("--scope <scope>", "Optional scope id")
     .option("--max-episodes <n>", "Maximum episodes to scan", "50")
     .option("--reviewer-note <note>", "Reviewer note to store with an applied batch")
-    .option("--requested-by <name>", "Operator name or automation id", "scope-recall-openclaw:cli")
+    .option("--requested-by <name>", "Operator name or automation id", "clawlore:cli")
     .option("--apply", "Apply promotion and record the batch")
     .option("--dry-run", "Preview only; wins over --apply")
     .option("--json", "Output as JSON")
@@ -1862,7 +1872,7 @@ export function registerMemoryCLI(program: Command, context: CLIContext): void {
           max_episodes: parseLimitOption(options.maxEpisodes, 50, 500),
           dry_run: dryRunFromApplyOptions(options),
           reviewer_note: typeof options.reviewerNote === "string" ? options.reviewerNote : "",
-          requested_by: typeof options.requestedBy === "string" ? options.requestedBy : "scope-recall-openclaw:cli",
+          requested_by: typeof options.requestedBy === "string" ? options.requestedBy : "clawlore:cli",
         });
         if (options.json) {
           writeJson(result);

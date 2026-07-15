@@ -279,7 +279,7 @@ export function renderLegacyContextSources(bundle: LegacyContextSourceBundleV1):
   if (inherited.length > 0) {
     hookOutputs.push([
       "<inherited-rules>",
-      "Stable rules inherited from scope-recall-openclaw reflections. Treat as long-term behavioral constraints unless user overrides.",
+      "Stable rules inherited from clawlore reflections. Treat as long-term behavioral constraints unless user overrides.",
       ...inherited.map((line, index) => `${index + 1}. ${line}`),
       "</inherited-rules>",
     ].join("\n"));

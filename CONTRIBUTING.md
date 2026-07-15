@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for improving `scope-recall-openclaw`.
+Thank you for improving `clawlore`.
 
 ## Development Rules
 
@@ -24,7 +24,7 @@ npm run release:gate
 For live OpenClaw validation, use the target instance's own OpenClaw binary and home directory:
 
 ```bash
-OPENCLAW_HOME=/path/to/state /path/to/openclaw scope-recall doctor --json --quiet
+OPENCLAW_HOME=/path/to/state /path/to/openclaw clawlore doctor --json --quiet
 ```
 
 ## Pull Request Checklist

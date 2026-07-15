@@ -161,20 +161,20 @@ function createApiKeyClient(config, log) {
                 const raw = response.choices?.[0]?.message?.content;
                 if (!raw) {
                     lastError =
-                        `scope-recall-openclaw: llm-client [${label}] empty response content from model ${config.model}`;
+                        `clawlore: llm-client [${label}] empty response content from model ${config.model}`;
                     log(lastError);
                     return null;
                 }
                 if (typeof raw !== "string") {
                     lastError =
-                        `scope-recall-openclaw: llm-client [${label}] non-string response content type=${Array.isArray(raw) ? "array" : typeof raw} from model ${config.model}`;
+                        `clawlore: llm-client [${label}] non-string response content type=${Array.isArray(raw) ? "array" : typeof raw} from model ${config.model}`;
                     log(lastError);
                     return null;
                 }
                 const jsonStr = extractJsonFromResponse(raw);
                 if (!jsonStr) {
                     lastError =
-                        `scope-recall-openclaw: llm-client [${label}] no JSON object found (chars=${raw.length}, preview=${JSON.stringify(previewText(raw))})`;
+                        `clawlore: llm-client [${label}] no JSON object found (chars=${raw.length}, preview=${JSON.stringify(previewText(raw))})`;
                     log(lastError);
                     return null;
                 }
@@ -186,25 +186,25 @@ function createApiKeyClient(config, log) {
                     if (repairedJsonStr !== jsonStr) {
                         try {
                             const repaired = JSON.parse(repairedJsonStr);
-                            log(`scope-recall-openclaw: llm-client [${label}] recovered malformed JSON via heuristic repair (jsonChars=${jsonStr.length})`);
+                            log(`clawlore: llm-client [${label}] recovered malformed JSON via heuristic repair (jsonChars=${jsonStr.length})`);
                             return repaired;
                         }
                         catch (repairErr) {
                             lastError =
-                                `scope-recall-openclaw: llm-client [${label}] JSON.parse failed: ${err instanceof Error ? err.message : String(err)}; repair failed: ${repairErr instanceof Error ? repairErr.message : String(repairErr)} (jsonChars=${jsonStr.length}, jsonPreview=${JSON.stringify(previewText(jsonStr))})`;
+                                `clawlore: llm-client [${label}] JSON.parse failed: ${err instanceof Error ? err.message : String(err)}; repair failed: ${repairErr instanceof Error ? repairErr.message : String(repairErr)} (jsonChars=${jsonStr.length}, jsonPreview=${JSON.stringify(previewText(jsonStr))})`;
                             log(lastError);
                             return null;
                         }
                     }
                     lastError =
-                        `scope-recall-openclaw: llm-client [${label}] JSON.parse failed: ${err instanceof Error ? err.message : String(err)} (jsonChars=${jsonStr.length}, jsonPreview=${JSON.stringify(previewText(jsonStr))})`;
+                        `clawlore: llm-client [${label}] JSON.parse failed: ${err instanceof Error ? err.message : String(err)} (jsonChars=${jsonStr.length}, jsonPreview=${JSON.stringify(previewText(jsonStr))})`;
                     log(lastError);
                     return null;
                 }
             }
             catch (err) {
                 lastError =
-                    `scope-recall-openclaw: llm-client [${label}] request failed for model ${config.model}: ${err instanceof Error ? err.message : String(err)}`;
+                    `clawlore: llm-client [${label}] request failed for model ${config.model}: ${err instanceof Error ? err.message : String(err)}`;
                 log(lastError);
                 return null;
             }
@@ -301,14 +301,14 @@ function createOauthClient(config, log) {
                         })();
                     if (!raw) {
                         lastError =
-                            `scope-recall-openclaw: llm-client [${label}] empty OAuth response content from model ${config.model}`;
+                            `clawlore: llm-client [${label}] empty OAuth response content from model ${config.model}`;
                         log(lastError);
                         return null;
                     }
                     const jsonStr = extractJsonFromResponse(raw);
                     if (!jsonStr) {
                         lastError =
-                            `scope-recall-openclaw: llm-client [${label}] no JSON object found in OAuth response (chars=${raw.length}, preview=${JSON.stringify(previewText(raw))})`;
+                            `clawlore: llm-client [${label}] no JSON object found in OAuth response (chars=${raw.length}, preview=${JSON.stringify(previewText(raw))})`;
                         log(lastError);
                         return null;
                     }
@@ -320,18 +320,18 @@ function createOauthClient(config, log) {
                         if (repairedJsonStr !== jsonStr) {
                             try {
                                 const repaired = JSON.parse(repairedJsonStr);
-                                log(`scope-recall-openclaw: llm-client [${label}] recovered malformed OAuth JSON via heuristic repair (jsonChars=${jsonStr.length})`);
+                                log(`clawlore: llm-client [${label}] recovered malformed OAuth JSON via heuristic repair (jsonChars=${jsonStr.length})`);
                                 return repaired;
                             }
                             catch (repairErr) {
                                 lastError =
-                                    `scope-recall-openclaw: llm-client [${label}] OAuth JSON.parse failed: ${err instanceof Error ? err.message : String(err)}; repair failed: ${repairErr instanceof Error ? repairErr.message : String(repairErr)} (jsonChars=${jsonStr.length}, jsonPreview=${JSON.stringify(previewText(jsonStr))})`;
+                                    `clawlore: llm-client [${label}] OAuth JSON.parse failed: ${err instanceof Error ? err.message : String(err)}; repair failed: ${repairErr instanceof Error ? repairErr.message : String(repairErr)} (jsonChars=${jsonStr.length}, jsonPreview=${JSON.stringify(previewText(jsonStr))})`;
                                 log(lastError);
                                 return null;
                             }
                         }
                         lastError =
-                            `scope-recall-openclaw: llm-client [${label}] OAuth JSON.parse failed: ${err instanceof Error ? err.message : String(err)} (jsonChars=${jsonStr.length}, jsonPreview=${JSON.stringify(previewText(jsonStr))})`;
+                            `clawlore: llm-client [${label}] OAuth JSON.parse failed: ${err instanceof Error ? err.message : String(err)} (jsonChars=${jsonStr.length}, jsonPreview=${JSON.stringify(previewText(jsonStr))})`;
                         log(lastError);
                         return null;
                     }
@@ -342,7 +342,7 @@ function createOauthClient(config, log) {
             }
             catch (err) {
                 lastError =
-                    `scope-recall-openclaw: llm-client [${label}] OAuth request failed for model ${config.model}: ${err instanceof Error ? err.message : String(err)}`;
+                    `clawlore: llm-client [${label}] OAuth request failed for model ${config.model}: ${err instanceof Error ? err.message : String(err)}`;
                 log(lastError);
                 return null;
             }

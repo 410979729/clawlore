@@ -68,7 +68,7 @@ test("noise filter rejects raw user task prompts", () => {
 });
 
 test("high-signal distilled memory remains admissible", () => {
-  const text = "天姬记忆治理经验：Scope Recall 需要先审计 SQLite/FTS/LanceDB 一致性，再做高密度蒸馏并同步向量库。";
+  const text = "天姬记忆治理经验：ClawLore 需要先审计 SQLite/FTS/LanceDB 一致性，再做高密度蒸馏并同步向量库。";
   assert.equal(evaluateCaptureSafety(text).allowed, true);
   assert.equal(isNoise(text), false);
 });

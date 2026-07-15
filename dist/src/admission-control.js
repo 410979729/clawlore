@@ -503,7 +503,7 @@ export class AdmissionController {
             max_similarity: novelty.maxSimilarity,
             evaluated_at: now,
         };
-        this.debugLog(`scope-recall-openclaw: admission-control: decision=${audit.decision} hint=${audit.hint ?? "n/a"} score=${audit.score.toFixed(3)} candidate=${JSON.stringify(params.candidate.abstract.slice(0, 80))}`);
+        this.debugLog(`clawlore: admission-control: decision=${audit.decision} hint=${audit.hint ?? "n/a"} score=${audit.score.toFixed(3)} candidate=${JSON.stringify(params.candidate.abstract.slice(0, 80))}`);
         return { decision, hint, audit };
     }
 }

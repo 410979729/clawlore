@@ -1,12 +1,16 @@
-# Scope Recall Configuration Reference
+# ClawLore Configuration Reference
 
 Status: Phase 1 contract baseline.
 
 Configuration lives under:
 
 ```text
-plugins.entries.scope-recall-openclaw.config
+plugins.entries.clawlore.config
 ```
+
+OpenClaw's manifest declares `scope-recall-openclaw` as a legacy plugin id so
+existing installations can be migrated without losing their configuration.
+New configuration and all release evidence must use the canonical root above.
 
 Do not copy live API keys or local credentials into this document. Defaults are
 public manifest defaults or conservative operational guidance.

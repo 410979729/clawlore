@@ -64,7 +64,7 @@ export async function ensureSelfImprovementLearningFiles(baseDir) {
     await ensureFile(join(learningsDir, "ERRORS.md"), DEFAULT_ERRORS_TEMPLATE);
 }
 export async function appendSelfImprovementEntry(params) {
-    const { baseDir, type, summary, details = "", suggestedAction = "", category = "best_practice", area = "config", priority = "medium", status = "pending", source = "scope-recall-openclaw/self_improvement_log", } = params;
+    const { baseDir, type, summary, details = "", suggestedAction = "", category = "best_practice", area = "config", priority = "medium", status = "pending", source = "clawlore/self_improvement_log", } = params;
     await ensureSelfImprovementLearningFiles(baseDir);
     const learningsDir = join(baseDir, ".learnings");
     const fileName = type === "learning" ? "LEARNINGS.md" : "ERRORS.md";

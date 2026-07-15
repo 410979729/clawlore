@@ -81,7 +81,7 @@ export function ensureGovernanceAuditSchema(db: DatabaseSync): void {
       before_json TEXT NOT NULL DEFAULT '{}',
       after_json TEXT NOT NULL DEFAULT '{}',
       reason TEXT NOT NULL DEFAULT '',
-      actor TEXT NOT NULL DEFAULT 'scope-recall-openclaw',
+      actor TEXT NOT NULL DEFAULT 'clawlore',
       dry_run INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT ''
     );

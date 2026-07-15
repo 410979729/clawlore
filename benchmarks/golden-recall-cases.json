@@ -1,9 +1,9 @@
 {
-  "name": "scope-recall-openclaw-golden-recall-v1",
+  "name": "clawlore-golden-recall-v1",
   "setup": [
     {
       "id": "release-gate",
-      "text": "Scope Recall release hardening requires version, changelog, diff check, typecheck, build, release gate, and workspace extension drift checks.",
+      "text": "ClawLore release hardening requires version, changelog, diff check, typecheck, build, release gate, and workspace extension drift checks.",
       "category": "procedures",
       "scope": "agent:main",
       "metadata": {

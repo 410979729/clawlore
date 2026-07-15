@@ -431,10 +431,10 @@ export class Embedder {
         this._capabilities = getEmbeddingCapabilities(profile);
         // Warn if configured fields will be silently ignored by this provider profile
         if (config.normalized !== undefined && !this._capabilities.normalized) {
-            console.debug(`[scope-recall-openclaw] embedding.normalized is set but provider profile "${profile}" does not support it — value will be ignored`);
+            console.debug(`[clawlore] embedding.normalized is set but provider profile "${profile}" does not support it — value will be ignored`);
         }
         if ((config.taskQuery || config.taskPassage) && !this._capabilities.taskField) {
-            console.debug(`[scope-recall-openclaw] embedding.taskQuery/taskPassage is set but provider profile "${profile}" does not support task hints — values will be ignored`);
+            console.debug(`[clawlore] embedding.taskQuery/taskPassage is set but provider profile "${profile}" does not support task hints — values will be ignored`);
         }
         // Create a client pool — one OpenAI client per key
         this.clients = resolvedKeys.map(key => {
@@ -455,7 +455,7 @@ export class Embedder {
             return new OpenAI(assignOpenAiClientCredential(clientOptions, key));
         });
         if (this.clients.length > 1) {
-            console.log(`[scope-recall-openclaw] Initialized ${this.clients.length} API keys for round-robin rotation`);
+            console.log(`[clawlore] Initialized ${this.clients.length} API keys for round-robin rotation`);
         }
         this.dimensions = getVectorDimensions(config.model, config.dimensions);
         this._cache = new EmbeddingCache(256, 30); // 256 entries, 30 min TTL
@@ -569,7 +569,7 @@ export class Embedder {
                 }
                 lastError = error instanceof Error ? error : new Error(String(error));
                 if (this.isRateLimitError(error) && attempt < maxAttempts - 1) {
-                    console.log(`[scope-recall-openclaw] Attempt ${attempt + 1}/${maxAttempts} hit rate limit, rotating to next key...`);
+                    console.log(`[clawlore] Attempt ${attempt + 1}/${maxAttempts} hit rate limit, rotating to next key...`);
                     continue;
                 }
                 // Non-rate-limit error → don't retry, let caller handle (e.g. chunking)
@@ -688,10 +688,10 @@ export class Embedder {
         // FR-01: Recursion depth limit — force truncate when too deep
         if (depth >= MAX_EMBED_DEPTH) {
             const safeLimit = Math.floor(text.length * STRICT_REDUCTION_FACTOR);
-            console.warn(`[scope-recall-openclaw] Recursion depth ${depth} reached MAX_EMBED_DEPTH (${MAX_EMBED_DEPTH}), ` +
+            console.warn(`[clawlore] Recursion depth ${depth} reached MAX_EMBED_DEPTH (${MAX_EMBED_DEPTH}), ` +
                 `force-truncating ${text.length} chars → ${safeLimit} chars (strict ${STRICT_REDUCTION_FACTOR * 100}% reduction)`);
             if (safeLimit < 100) {
-                throw new Error(`[scope-recall-openclaw] Failed to embed: input too large for model context after ${MAX_EMBED_DEPTH} retries`);
+                throw new Error(`[clawlore] Failed to embed: input too large for model context after ${MAX_EMBED_DEPTH} retries`);
             }
             text = text.slice(0, safeLimit);
         }
@@ -728,10 +728,10 @@ export class Embedder {
                         chunkResult.chunks[0].length > text.length * 0.9) {
                         // Use strict reduction factor to guarantee each retry makes progress
                         const safeLimit = Math.floor(text.length * STRICT_REDUCTION_FACTOR);
-                        console.warn(`[scope-recall-openclaw] smartChunk produced 1 chunk (${chunkResult.chunks[0].length} chars) ≈ original (${text.length} chars). ` +
+                        console.warn(`[clawlore] smartChunk produced 1 chunk (${chunkResult.chunks[0].length} chars) ≈ original (${text.length} chars). ` +
                             `Force-truncating to ${safeLimit} chars (strict ${STRICT_REDUCTION_FACTOR * 100}% reduction) to avoid infinite recursion.`);
                         if (safeLimit < 100) {
-                            throw new Error(`[scope-recall-openclaw] Failed to embed: chunking couldn't reduce input size enough for model context`);
+                            throw new Error(`[clawlore] Failed to embed: chunking couldn't reduce input size enough for model context`);
                         }
                         const truncated = text.slice(0, safeLimit);
                         return this.embedSingle(truncated, task, depth + 1, signal);

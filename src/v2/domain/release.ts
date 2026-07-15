@@ -2,11 +2,13 @@ export type ClawLoreRolloutModeV1 = "disabled" | "shadow" | "v2-write" | "cutove
 
 export interface CompatibilitySurfaceV1 {
   productBrand: "ClawLore";
-  packageName: "scope-recall-openclaw";
-  manifestId: "scope-recall-openclaw";
-  configRoot: "plugins.entries.scope-recall-openclaw.config";
-  cliPrimary: "scope-recall";
-  cliAliases: ["memory-pro"];
+  packageName: "clawlore";
+  manifestId: "clawlore";
+  configRoot: "plugins.entries.clawlore.config";
+  cliPrimary: "clawlore";
+  cliAliases: ["scope-recall", "memory-pro"];
+  legacyPluginIds: ["scope-recall-openclaw"];
+  legacyConfigRoots: ["plugins.entries.scope-recall-openclaw.config"];
   dataDirectoryPolicy: "preserve_existing";
   sourceMetadataPolicy: "preserve_historical";
   compatibilityMajorVersions: 1;
