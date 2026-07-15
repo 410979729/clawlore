@@ -70,9 +70,30 @@ Focused regression covers:
 
 The pre-commit full regression passed 321/321 tests. Typecheck, build, vector
 repair smoke, the 124-case deterministic recall matrix, and the 200,000-row
-SQLite FTS baseline also passed. The exact clean committed candidate must repeat
-the full source gate before handoff; that gate includes clean post-build state,
-SBOM, extracted npm-pack content scan, and official-registry production audit.
+SQLite FTS baseline also passed.
+
+The first exact clean remediation commit was
+`d83036e9d05f4ea509b232039cab3ef28e01608a`. A no-reused-`node_modules`
+lockfile install repeated the complete source gate with 321/321 tests,
+typecheck, build, vector repair, 124/124 deterministic recall with zero
+cross-scope leakage, the 200,000-row SQLite FTS baseline, official-registry
+production audit with zero known vulnerabilities, a 42-component SBOM, and an
+182-file extracted npm-pack filename/content scan. Build left the tree clean.
+The recursive runtime digest was
+`72675fa14301e6017e758a057fbffa048a73beb8ac2d5eaf834ce51ba2321831`.
+
+An isolated OpenClaw `2026.7.1-beta.5` state then loaded `clawlore@1.2.0` as
+`loaded`, `enabled`, and `activated`, selected it for the memory slot, and
+registered `clawlore`, `scope-recall`, and `memory-pro`. After explicit empty
+Experience-schema initialization, read-only doctor returned `ok=true`; all
+three command identities returned matching zero-row SQL/FTS/vector stats with
+zero repair debt and zero scan-budget exhaustion.
+
+The evidence-only descendant containing this report and the refreshed handoff
+repeated the same exact clean source gate before delivery. Because those
+changes are documentation-only, the recursive runtime digest remained the
+value above; the delivered commit is the repository HEAD named in the handoff
+message rather than a self-referential hash embedded in this commit.
 
 ## Truth and rollout boundary
 
@@ -90,6 +111,7 @@ SBOM, extracted npm-pack content scan, and official-registry production audit.
 
 ## Next gate
 
-Provide Tianxuan the exact clean commit, recursive runtime digest, source-gate
-output, this report, and the prior three audit-remediation reports. Repository
-push and any live deployment remain separately gated decisions.
+Provide Tianxuan the final clean HEAD, recursive runtime digest, source-gate
+output, this report, and the prior three audit-remediation reports for
+independent read-only re-audit. Repository push and any live deployment remain
+separately gated decisions.

@@ -56,6 +56,20 @@ internal tool errors are fully redacted, and source-only gates reject
 post-build dirty trees. Verification covers 321 tests. See
 `eval/clawlore-v1-fourth-independent-audit-remediation-run-2026-07-15.md`.
 
+The exact clean code commit `d83036e9d05f4ea509b232039cab3ef28e01608a`
+repeated the full lockfile-clean source gate: 321/321 tests, typecheck, build,
+vector repair, 124/124 deterministic recall with zero cross-scope leakage,
+the 200,000-row SQLite FTS baseline, official-registry audit with zero known
+production vulnerabilities, a 42-component SBOM, and an 182-file extracted
+pack scan. Its recursive runtime digest was
+`72675fa14301e6017e758a057fbffa048a73beb8ac2d5eaf834ce51ba2321831`.
+Isolated OpenClaw `2026.7.1-beta.5` loaded and activated the package, exposed
+all three command identities, and returned `doctor ok=true` after isolated
+Experience schema initialization.
+The final documentation-only descendant repeated the same clean source gate;
+the delivered commit is the repository HEAD named in the handoff message, and
+the recursive runtime digest remains unchanged.
+
 This candidate does not authorize a live rename, V2 writes, lifecycle
 promotion, ContextEngine, prompt mutation, or final-recall cutover. Tianxuan's
 re-audit of the exact clean remediation commit is the next gate; repository
@@ -90,11 +104,9 @@ not an implied approval to switch later without fresh evidence.
 
 ## Next controlled boundary
 
-1. Commit the exact fourth-audit remediation candidate and record its recursive
-   runtime digest plus clean release-gate evidence.
-2. Give Tianxuan the commit, this handoff, the identity-transition runbook, and
+1. Give Tianxuan the final clean HEAD, this handoff, the identity-transition runbook, and
    all dated audit-remediation reports for independent read-only re-audit.
-3. If the audit passes, create or rename the GitHub repository to `clawlore`,
+2. If the audit passes, create or rename the GitHub repository to `clawlore`,
    verify the destination, then update `origin` and push the audited commit.
-4. Treat any live identity migration as a separate backup-backed rollout with
+3. Treat any live identity migration as a separate backup-backed rollout with
    an atomic config/extension switch, post-restart gates, and rollback evidence.
