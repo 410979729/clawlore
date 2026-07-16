@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +8,7 @@ import test from "node:test";
 const require = createRequire(import.meta.url);
 const { createJiti } = require("jiti");
 const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: false });
+const { verifyPrivatePath } = jiti("../src/file-privacy.ts");
 const { SqliteTruthStoreV2 } = jiti("../src/v2/storage/sqlite-truth-v2.ts");
 const {
   createEncryptedSnapshotArchiveV2,
@@ -75,7 +76,7 @@ test("encrypted archive restores verified Truth V2 without retaining plaintext s
     assert.equal(manifest.algorithm, "aes-256-gcm");
     assert.equal(manifest.keyId, "fixture-key-2026-07");
     assert.equal(manifest.snapshot.tableCounts.memory_items, 1);
-    assert.equal((await stat(archivePath)).mode & 0o777, 0o600);
+    verifyPrivatePath(archivePath, { kind: "file" });
     const archive = await readFile(archivePath);
     assert.equal(archive.includes(Buffer.from("Sensitive fixture")), false);
     assert.equal(archive.includes(Buffer.alloc(32, 0x7a)), false);
@@ -100,7 +101,7 @@ test("encrypted archive restores verified Truth V2 without retaining plaintext s
   }
 });
 
-test("file SecretRef rejects group-readable backup keys", async () => {
+test("file SecretRef rejects insecure POSIX mode and hardens the Windows DACL", async () => {
   const root = await mkdtemp(join(tmpdir(), "clawlore-key-permissions-"));
   const keyPath = join(root, "backup.key");
   try {
@@ -110,7 +111,12 @@ test("file SecretRef rejects group-readable backup keys", async () => {
       keyId: "unsafe-key",
       secretRef: { source: "file", path: keyPath },
     });
-    await assert.rejects(() => provider.current(), /permissions must be 0600 or stricter/);
+    if (process.platform === "win32") {
+      await provider.current();
+      verifyPrivatePath(keyPath, { kind: "file" });
+    } else {
+      await assert.rejects(() => provider.current(), /permissions must be 0600 or stricter/);
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }

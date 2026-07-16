@@ -198,8 +198,10 @@ function execute(paths) {
 test("append-only V1 delta writes candidate truth and converged projections", async () => {
   const paths = await fixture();
   try {
-    const beforeEvidence = new DatabaseSync(paths.source, { readOnly: true })
+    const beforeDb = new DatabaseSync(paths.source, { readOnly: true });
+    const beforeEvidence = beforeDb
       .prepare("SELECT evidence_json FROM memory_sources WHERE source_id='source:existing'").get().evidence_json;
+    beforeDb.close();
     const receipt = await execute(paths);
     assert.equal(receipt.status, "applied");
     assert.equal(receipt.v2.deltaRows, 1);

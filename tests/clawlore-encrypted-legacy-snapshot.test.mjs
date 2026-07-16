@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +9,7 @@ import { createJiti } from "jiti";
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite");
 const jiti = createJiti(import.meta.url);
+const { verifyPrivatePath } = jiti("../src/file-privacy.ts");
 const {
   createEncryptedLegacySnapshotArchiveV2,
   createFileSecretRefKeyProviderV2,
@@ -43,7 +44,7 @@ test("legacy SQLite archive is encrypted, permission-tight, restorable, and leav
     });
     assert.equal(manifest.snapshot.profile, "scope-recall-legacy-v1");
     assert.equal(manifest.snapshot.memoryTruth.rowCount, 1);
-    assert.equal((await stat(archivePath)).mode & 0o777, 0o600);
+    verifyPrivatePath(archivePath, { kind: "file" });
     assert.equal((await readFile(archivePath)).includes(Buffer.from("Plaintext fixture")), false);
 
     const restored = await restoreEncryptedLegacySnapshotArchiveV2({

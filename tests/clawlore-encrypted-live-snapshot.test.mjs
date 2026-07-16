@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +9,7 @@ import { createJiti } from "jiti";
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite");
 const jiti = createJiti(import.meta.url);
+const { verifyPrivatePath } = jiti("../src/file-privacy.ts");
 const { createAndVerifyLegacyLiveEncryptedSnapshotV2 } = jiti(
   "../src/v2/operator/legacy-live-encrypted-snapshot.ts",
 );
@@ -52,8 +53,8 @@ test("live encrypted snapshot workflow persists only ciphertext and a non-author
     assert.equal(receipt.authorizesV2Writes, false);
     assert.equal(receipt.restoreVerified, true);
     assert.equal(receipt.snapshot.memoryTruthRows, 1);
-    assert.equal((await stat(archivePath)).mode & 0o777, 0o600);
-    assert.equal((await stat(receiptPath)).mode & 0o777, 0o600);
+    verifyPrivatePath(archivePath, { kind: "file" });
+    verifyPrivatePath(receiptPath, { kind: "file" });
     assert.equal((await readFile(archivePath)).includes(Buffer.from("ciphertext only")), false);
     assert.equal(await missing(restoreTestPath), true);
     assert.equal(await missing(`${restoreTestPath}-wal`), true);

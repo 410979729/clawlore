@@ -1,7 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { lstat, open, rename, rm } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { readOAuthSessionFile } from "./oauth-session-storage.js";
 import { diagnosticErrorSummary, diagnosticIdentifier } from "./diagnostic-redaction.js";
 import { enforcePrivatePath, ensurePrivateDirectory } from "./file-privacy.js";
@@ -16,6 +16,7 @@ export interface OAuthLoginOptions {
   onAuthorizeUrl?: (url: string) => void | Promise<void>;
 }
 const EXPIRY_SKEW_MS = 60_000;
+const oauthSessionWriteQueues = new Map<string, Promise<void>>();
 
 export type OAuthProviderId = "openai-codex";
 
@@ -530,7 +531,7 @@ async function syncOAuthParentDirectory(directory: string): Promise<void> {
   }
 }
 
-export async function saveOAuthSession(
+async function saveOAuthSessionUnlocked(
   authPath: string,
   session: OAuthSession,
   hooks: OAuthSessionWriteHooks = {},
@@ -578,6 +579,28 @@ export async function saveOAuthSession(
   } finally {
     if (!renamed) {
       await rm(temporaryPath, { force: true }).catch(() => undefined);
+    }
+  }
+}
+
+export async function saveOAuthSession(
+  authPath: string,
+  session: OAuthSession,
+  hooks: OAuthSessionWriteHooks = {},
+): Promise<void> {
+  const queueKey = resolve(authPath);
+  const previous = oauthSessionWriteQueues.get(queueKey) ?? Promise.resolve();
+  let release!: () => void;
+  const completed = new Promise<void>((resolveQueue) => { release = resolveQueue; });
+  const queued = previous.catch(() => undefined).then(() => completed);
+  oauthSessionWriteQueues.set(queueKey, queued);
+  await previous.catch(() => undefined);
+  try {
+    await saveOAuthSessionUnlocked(authPath, session, hooks);
+  } finally {
+    release();
+    if (oauthSessionWriteQueues.get(queueKey) === queued) {
+      oauthSessionWriteQueues.delete(queueKey);
     }
   }
 }

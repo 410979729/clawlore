@@ -608,7 +608,12 @@ export async function executeLiveCandidateUnsafeTraceRewriteV1(input: {
       db.close();
       throw new Error("unsafe trace rewrite target mapping is incomplete");
     }
-    assertTargetMatches(live, planned);
+    try {
+      assertTargetMatches(live, planned);
+    } catch (error) {
+      db.close();
+      throw error;
+    }
   }
   const targetItemIds = plan.rows.map((planned) => byHash.get(planned.itemIdSha256)!.item_id).sort();
   const beforeNonTargetDigest = nonTargetDigest(db, targetItemIds);

@@ -10,6 +10,7 @@ const require = createRequire(import.meta.url);
 const { createJiti } = require("jiti");
 const { DatabaseSync } = require("node:sqlite");
 const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: false });
+const { verifyPrivatePath } = jiti("../src/file-privacy.ts");
 const { createLiveV1AppendDeltaPlanV1 } = jiti("../src/v2/operator/live-v1-append-delta-plan.ts");
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
@@ -152,16 +153,22 @@ test("append-only V1 delta plan fails closed when a V2 item loses legacy backing
   }
 });
 
-test("append-only V1 delta plan rejects a group-readable baseline", async () => {
+test("append-only V1 delta plan rejects insecure POSIX mode and hardens the Windows DACL", async () => {
   const paths = await fixture();
   try {
     await chmod(paths.baseline, 0o640);
-    await assert.rejects(() => createLiveV1AppendDeltaPlanV1({
+    const run = () => createLiveV1AppendDeltaPlanV1({
       sourcePath: paths.source,
       baselineReceiptPath: paths.baseline,
       proposedRolloutId: "clawlore-v2-v1-delta-fixture-r1",
       defaults: { tenantId: "local", agentId: "main", workspaceId: "workspace" },
-    }), /owner-only/);
+    });
+    if (process.platform === "win32") {
+      await run();
+      verifyPrivatePath(paths.baseline, { kind: "file" });
+    } else {
+      await assert.rejects(run, /owner-only/);
+    }
   } finally {
     await rm(paths.root, { recursive: true, force: true });
   }

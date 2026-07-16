@@ -17,6 +17,11 @@ const {
   saveOAuthSession,
 } = jiti("../src/llm-oauth.ts");
 const { readOAuthSessionFile } = jiti("../src/oauth-session-storage.ts");
+const { verifyPrivatePath } = jiti("../src/file-privacy.ts");
+
+function assertPrivate(path, kind = "file") {
+  verifyPrivatePath(path, { kind });
+}
 
 function session(accessToken = "fixture-access", refreshToken = "fixture-refresh") {
   return {
@@ -36,7 +41,7 @@ test("OAuth session replacement is atomic and hardens an existing 0644 file", as
     writeFileSync(authPath, "legacy-wide-file\n", { mode: 0o644 });
     chmodSync(authPath, 0o644);
     await saveOAuthSession(authPath, session());
-    assert.equal(lstatSync(authPath).mode & 0o777, 0o600);
+    assertPrivate(authPath);
     const stored = JSON.parse(readFileSync(authPath, "utf8"));
     assert.equal(stored.access_token, "fixture-access");
     assert.equal(stored.refresh_token, "fixture-refresh");
@@ -75,8 +80,8 @@ test("OAuth session load hardens an existing 0644 file and private parent before
     chmodSync(authPath, 0o644);
     const loaded = await loadOAuthSession(authPath);
     assert.equal(loaded.accountId, "fixture-load-account");
-    assert.equal(lstatSync(dir).mode & 0o777, 0o700);
-    assert.equal(lstatSync(authPath).mode & 0o777, 0o600);
+    assertPrivate(dir, "directory");
+    assertPrivate(authPath);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -152,7 +157,7 @@ test("OAuth failure after rename leaves a complete private replacement", async (
       /fixture_directory_sync_failure/,
     );
     assert.equal(existsSync(authPath), true);
-    assert.equal(lstatSync(authPath).mode & 0o777, 0o600);
+    assertPrivate(authPath);
     assert.equal(JSON.parse(readFileSync(authPath, "utf8")).access_token, "post-rename-access");
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -168,7 +173,7 @@ test("concurrent OAuth refreshes never leave partial JSON or temporary files", a
     );
     const stored = JSON.parse(readFileSync(authPath, "utf8"));
     assert.match(stored.access_token, /^access-\d+$/);
-    assert.equal(lstatSync(authPath).mode & 0o777, 0o600);
+    assertPrivate(authPath);
     assert.deepEqual(readdirSync(dir).filter((name) => name.endsWith(".tmp")), []);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -227,7 +232,7 @@ test("OAuth callback listener is ready before an immediate browser callback", as
       },
     });
     assert.equal(result.session.accountId, "listener-account");
-    assert.equal(lstatSync(authPath).mode & 0o777, 0o600);
+    assertPrivate(authPath);
   } finally {
     globalThis.fetch = originalFetch;
     rmSync(dir, { recursive: true, force: true });

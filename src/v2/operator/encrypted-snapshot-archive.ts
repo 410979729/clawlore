@@ -5,9 +5,9 @@ import {
   randomBytes,
   timingSafeEqual,
 } from "node:crypto";
-import { preparePrivateFileForRead } from "../../file-privacy.js";
+import { enforcePrivatePath, preparePrivateFileForRead } from "../../file-privacy.js";
 import { createReadStream, createWriteStream } from "node:fs";
-import { appendFile, chmod, mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { pipeline } from "node:stream/promises";
 import {
@@ -200,6 +200,7 @@ export async function createEncryptedSnapshotArchiveV2(input: {
       snapshot,
     };
     await writeFile(input.archivePath, encodeHeader(header), { flag: "wx", mode: 0o600 });
+    enforcePrivatePath(input.archivePath, { kind: "file" });
     try {
       const cipher = createCipheriv("aes-256-gcm", key, iv, { authTagLength: AUTH_TAG_BYTES });
       await pipeline(
@@ -208,7 +209,7 @@ export async function createEncryptedSnapshotArchiveV2(input: {
         createWriteStream(input.archivePath, { flags: "a", mode: 0o600 }),
       );
       await appendFile(input.archivePath, cipher.getAuthTag());
-      await chmod(input.archivePath, 0o600);
+      enforcePrivatePath(input.archivePath, { kind: "file" });
     } catch (error) {
       await rm(input.archivePath, { force: true });
       throw error;
@@ -254,6 +255,7 @@ export async function createEncryptedLegacySnapshotArchiveV2(input: {
       snapshot,
     };
     await writeFile(input.archivePath, encodeHeader(header), { flag: "wx", mode: 0o600 });
+    enforcePrivatePath(input.archivePath, { kind: "file" });
     try {
       const cipher = createCipheriv("aes-256-gcm", key, iv, { authTagLength: AUTH_TAG_BYTES });
       await pipeline(
@@ -262,7 +264,7 @@ export async function createEncryptedLegacySnapshotArchiveV2(input: {
         createWriteStream(input.archivePath, { flags: "a", mode: 0o600 }),
       );
       await appendFile(input.archivePath, cipher.getAuthTag());
-      await chmod(input.archivePath, 0o600);
+      enforcePrivatePath(input.archivePath, { kind: "file" });
     } catch (error) {
       await rm(input.archivePath, { force: true });
       throw error;

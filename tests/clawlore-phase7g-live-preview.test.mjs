@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +10,7 @@ const require = createRequire(import.meta.url);
 const { createJiti } = require("jiti");
 const { DatabaseSync } = require("node:sqlite");
 const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: false });
+const { verifyPrivatePath } = jiti("../src/file-privacy.ts");
 const { createAndVerifyLegacyLiveEncryptedSnapshotV2 } =
   jiti("../src/v2/operator/legacy-live-encrypted-snapshot.ts");
 const { createLivePhase7GPreviewV1 } = jiti("../src/v2/operator/live-phase7g-preview.ts");
@@ -107,7 +108,7 @@ test("live Phase 7G preview is snapshot-bound, complete, redacted, and query-onl
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name='memory_fts_compat_v2'").get().n, 0);
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM memory_items WHERE lifecycle='candidate'").get().n, 2);
     db.close();
-    assert.equal((await stat(paths.receipt)).mode & 0o077, 0);
+    verifyPrivatePath(paths.receipt, { kind: "file" });
   } finally {
     await rm(paths.root, { recursive: true, force: true });
   }

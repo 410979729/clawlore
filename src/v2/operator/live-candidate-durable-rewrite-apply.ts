@@ -606,7 +606,12 @@ export async function executeLiveCandidateDurableRewriteV1(input: {
       db.close();
       throw new Error("durable rewrite target mapping is incomplete");
     }
-    assertTargetMatches(live, planned);
+    try {
+      assertTargetMatches(live, planned);
+    } catch (error) {
+      db.close();
+      throw error;
+    }
   }
   const representativePlans = plan.rows.filter((row) => row.role === "rewrite_representative");
   const companionPlans = plan.rows.filter((row) => row.role === "post_rewrite_dedupe_hold");
