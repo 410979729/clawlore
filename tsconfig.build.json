@@ -4,6 +4,7 @@
     "noEmit": false,
     "outDir": "dist",
     "rootDir": ".",
+    "newLine": "lf",
     "declaration": false,
     "sourceMap": false
   },

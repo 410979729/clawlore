@@ -620,6 +620,8 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   const reproducibility = readFileSync(new URL("../scripts/reproducible-install-gate.mjs", import.meta.url), "utf8");
   const workflow = readFileSync(new URL("../.github/workflows/release-gate.yml", import.meta.url), "utf8");
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  const buildConfig = JSON.parse(readFileSync(new URL("../tsconfig.build.json", import.meta.url), "utf8"));
+  const gitAttributes = readFileSync(new URL("../.gitattributes", import.meta.url), "utf8");
   const indexSource = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
   assert.equal(packageJson.scripts["release:gate"], "node scripts/run-release-gate.mjs");
   assert.equal(packageJson.scripts["release:gate:source"], "node scripts/run-release-gate.mjs --source-only");
@@ -674,6 +676,10 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   assert.match(workflow, /windows-latest/);
   assert.match(workflow, /openclaw@2026\.7\.1-beta\.5/);
   assert.match(workflow, /npm run release:gate:source/);
+  assert.equal(buildConfig.compilerOptions.newLine, "lf");
+  assert.match(gitAttributes, /^\/src\/\*\*\/\*\.ts text eol=lf$/m);
+  assert.match(gitAttributes, /^\/dist\/\*\.js text eol=lf$/m);
+  assert.match(gitAttributes, /^\/dist\/\*\*\/\*\.js text eol=lf$/m);
   assert.equal(
     packageJson.clawloreRelease.scriptPolicy,
     "all-except-published-runtime-scripts-are-source-checkout-only",

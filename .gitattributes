@@ -1,0 +1,7 @@
+# TypeScript sources and tracked build output are byte-stable LF on every
+# supported host. This also prevents preserved source comments from introducing
+# mixed CRLF into a Windows build when core.autocrlf is enabled.
+/*.ts text eol=lf
+/src/**/*.ts text eol=lf
+/dist/*.js text eol=lf
+/dist/**/*.js text eol=lf
