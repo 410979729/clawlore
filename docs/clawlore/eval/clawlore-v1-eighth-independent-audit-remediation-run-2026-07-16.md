@@ -87,7 +87,7 @@ each bound field and also covers truncated JSON.
   dedicated user-profile test temp root rather than a broadly writable system
   temp ancestor.
 - `package.json` and `package-lock.json` declare Node 24, Linux/Windows, and an
-  optional OpenClaw `>=2026.7.1-beta.2 <2027` peer boundary. The changelog now
+  optional OpenClaw `>=2026.7.1-beta.5 <2027` peer boundary. The changelog now
   has `Unreleased` first and dates 1.2.0.
 - Large-module decomposition remains accepted architectural debt. The new
   regressions provide characterization coverage around the changed authority,
@@ -135,6 +135,39 @@ smokes, compatibility metadata, registry identity, and clean state matched.
 The verifier observed 44 SBOM components in its dependency environment and
 accepted that difference only because SBOM identity is an explicitly declared
 platform/toolchain variance.
+
+## Post-interruption closure
+
+The interrupted Windows run left seven failures concentrated in two test
+files. Their exact pass/fail pattern and the Windows `EBUSY` cleanup traces
+showed that tests removed temporary SQL/LanceDB trees while stores were still
+open; the two cases that already closed their stores passed. The legacy-hygiene
+test also passed a URL pathname directly as a Windows subprocess cwd. Commit
+`53c6e65ef3adb125e890841d9aed25e94ccae87e` closes every store before recursive
+cleanup and converts the module URL with `fileURLToPath()`. The focused 16/16
+regression, full 379/0/1 Linux suite, typecheck, and build passed.
+
+The next standard gate correctly refused the real OpenClaw smoke because the
+new CI workflow installed `2026.7.1-beta.2` while the package already required
+plugin API and Gateway `2026.7.1-beta.5`. Commit
+`0547e7687ba3b025422aeaee49a34de6b8923428` aligns the optional peer range,
+release assertion, CI fixture, and regression contract at `beta.5`.
+
+Canonical evidence was regenerated and then verified in normal mode at commit
+`7b439915f562b1df23445ee496481892a68cb8fb` using Node 24.14.0 and an
+isolated real OpenClaw `2026.7.1-beta.5` host. Both full gates passed 379/0/1,
+typecheck, build, vector repair, 124/124 recall, the 200,000-row FTS baseline,
+official-registry vulnerabilities 0, a 42-component SBOM, a 186-file pack, and
+all three packed smokes. The release-input digest is
+`7809597722d215155a7a28d7380e84724ae3468e70c7b65d0cf178249364068b`; the
+runtime digest is
+`82e894c689b7f7873c30cadbc6ab27b722eb1b7bedb897704d5e7515271e5fc5`.
+
+A single bounded reconnect to the authorized Windows work computer timed out
+at the final HEAD. No continuous polling or remote change followed. Therefore
+the exact Windows source gate and deletion/absence verification of the clearly
+owned audit roots remain pending; this report still does not claim
+cross-platform release acceptance.
 
 ## Windows status and live boundary
 

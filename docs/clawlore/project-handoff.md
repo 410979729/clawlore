@@ -194,6 +194,31 @@ changed. The isolated audit directories still require cleanup when the client
 is reachable. Real Windows Node 24 validation therefore remains a release
 gate, not a claimed success.
 
+Post-interruption review found that the remaining Windows failures were in the
+test harness rather than the production data path: SQL-truth authority tests
+removed temporary trees before closing their SQLite/LanceDB stores, and the
+legacy-hygiene subprocess used a URL pathname as a Windows filesystem path.
+Commit `53c6e65ef3adb125e890841d9aed25e94ccae87e` closes both defects. The
+standard gate then exposed a separate release-contract mismatch: CI installed
+OpenClaw `2026.7.1-beta.2`, below the package's existing `beta.5` plugin API and
+Gateway floor. Commit `0547e7687ba3b025422aeaee49a34de6b8923428`
+aligns the optional peer range, gate assertion, CI fixture, and regression
+contract at `>=2026.7.1-beta.5 <2027`.
+
+Normal-mode evidence verification commit
+`7b439915f562b1df23445ee496481892a68cb8fb`
+passed both evidence-write and normal-mode Linux source gates. Each run covered
+379 passed, 0 failed, one Windows-only skip, typecheck, build, vector repair,
+124/124 recall, the 200,000-row FTS baseline, official-registry vulnerabilities
+0, a 42-component SBOM, a 186-file pack, and all three packed smokes against an
+isolated real OpenClaw `2026.7.1-beta.5` host. Canonical release-input digest is
+`7809597722d215155a7a28d7380e84724ae3468e70c7b65d0cf178249364068b`;
+runtime digest is
+`82e894c689b7f7873c30cadbc6ab27b722eb1b7bedb897704d5e7515271e5fc5`.
+One bounded Windows reconnect at this exact candidate timed out. No repeat polling
+or remote mutation followed, so the exact Windows gate and owned audit-root
+cleanup remain open.
+
 Normal-mode Linux verification at documentation commit
 `37ab56946487e15135c9f98400585386c4e69e8c` then re-ran the same source gate
 against the checked-in canonical evidence. All stable evidence fields matched,
@@ -221,9 +246,10 @@ restart did not deploy the candidate or alter the memory data plane.
 
 This candidate still does not authorize a live rename, V2 writes, lifecycle
 promotion, ContextEngine, prompt mutation, or final-recall cutover. Tianxuan's
-re-audit of the exact delivered clean HEAD after the real Windows gate is the
-next gate; repository
-creation/rename and push follow only after that audit is accepted.
+read-only review may proceed against the exact delivered clean HEAD, but
+cross-platform acceptance remains conditional on the real Windows gate and
+owned-test-root cleanup. Repository creation/rename and push follow only after
+both the platform gate and independent audit are accepted.
 
 ## Current live boundary
 

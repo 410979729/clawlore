@@ -130,10 +130,31 @@ Updated: 2026-07-16
 - [x] Re-run the normal-mode Linux source gate at documentation commit
       `37ab56946487e15135c9f98400585386c4e69e8c`; checked-in evidence matched
       every stable field, with the declared SBOM/platform variance accepted.
+- [x] Close the post-interruption Windows test-harness defects: every SQL-truth
+      authority test now closes its store before recursive cleanup, and the
+      legacy-hygiene subprocess converts its module URL with `fileURLToPath()`.
+      Commit `53c6e65ef3adb125e890841d9aed25e94ccae87e` passes the focused 16/16
+      regression plus the full 379/0/1 Linux suite, typecheck, and build.
+- [x] Align the published OpenClaw peer floor, release-gate contract, CI host
+      fixture, and regression assertions at `2026.7.1-beta.5`; the former CI
+      `beta.2` fixture was below the package's declared plugin API/Gateway floor
+      and correctly failed the real-host load. Commit
+      `0547e7687ba3b025422aeaee49a34de6b8923428` closes the mismatch.
+- [x] Generate and independently re-check canonical Linux release evidence at
+      normal-mode verification commit `7b439915f562b1df23445ee496481892a68cb8fb`:
+      379 passed / 0 failed / 1 Windows-only skip, 124/124 recall, 200k FTS,
+      vulnerabilities 0, 42-component SBOM, 186-file pack, all three packed
+      smokes, release-input digest `7809597722d215155a7a28d7380e84724ae3468e70c7b65d0cf178249364068b`,
+      and runtime digest `82e894c689b7f7873c30cadbc6ab27b722eb1b7bedb897704d5e7515271e5fc5`.
 - [ ] Pass the same final source gate on the authorized real Windows Node 24
       client. Real-Windows testing found and fixed additional POSIX-mode/ACL,
       SQLite-handle, OAuth rename-race, path-separator, and output-DACL defects;
       the final focused rerun was interrupted when the client became unreachable.
+      A single bounded reconnect at final HEAD timed out on 2026-07-16; no
+      continuous polling was performed.
+- [ ] Remove only the clearly owned Windows audit roots after the client is
+      reachable, then verify each path is absent. Do not touch user-owned or
+      ownership-unclear files.
 - [ ] Obtain Tianxuan's eighth independent acceptance before repository push,
       package release, live deployment, or V2 cutover.
 
