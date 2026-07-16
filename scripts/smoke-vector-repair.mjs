@@ -19,9 +19,10 @@ function assert(condition, message) {
 }
 
 const dbPath = await mkdtemp(join(tmpdir(), "scope-recall-vector-repair-"));
+let store;
 
 try {
-  const store = new MemoryStore({ dbPath, vectorDim: 4 });
+  store = new MemoryStore({ dbPath, vectorDim: 4 });
   const fakeEmbedder = {
     async embedPassage(text) {
       return [text.length, 1, 0, 0];
@@ -91,5 +92,9 @@ try {
 
   console.log("smoke:vector-repair ok");
 } finally {
-  await rm(dbPath, { recursive: true, force: true });
+  try {
+    await store?.close();
+  } finally {
+    await rm(dbPath, { recursive: true, force: true });
+  }
 }

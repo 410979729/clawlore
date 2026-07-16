@@ -623,6 +623,7 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   const buildConfig = JSON.parse(readFileSync(new URL("../tsconfig.build.json", import.meta.url), "utf8"));
   const gitAttributes = readFileSync(new URL("../.gitattributes", import.meta.url), "utf8");
   const indexSource = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
+  const vectorRepairSmoke = readFileSync(new URL("../scripts/smoke-vector-repair.mjs", import.meta.url), "utf8");
   assert.equal(packageJson.scripts["release:gate"], "node scripts/run-release-gate.mjs");
   assert.equal(packageJson.scripts["release:gate:source"], "node scripts/run-release-gate.mjs --source-only");
   assert.equal(packageJson.engines.node, ">=24.0.0 <25");
@@ -680,6 +681,11 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   assert.match(gitAttributes, /^\/src\/\*\*\/\*\.ts text eol=lf$/m);
   assert.match(gitAttributes, /^\/dist\/\*\.js text eol=lf$/m);
   assert.match(gitAttributes, /^\/dist\/\*\*\/\*\.js text eol=lf$/m);
+  assert.match(vectorRepairSmoke, /await store\?\.close\(\)/);
+  assert.ok(
+    vectorRepairSmoke.indexOf("await store?.close()") < vectorRepairSmoke.indexOf("await rm(dbPath"),
+    "vector repair smoke must close SQLite before removing its temporary directory",
+  );
   assert.equal(
     packageJson.clawloreRelease.scriptPolicy,
     "all-except-published-runtime-scripts-are-source-checkout-only",
