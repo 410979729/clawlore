@@ -624,6 +624,7 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   const gitAttributes = readFileSync(new URL("../.gitattributes", import.meta.url), "utf8");
   const indexSource = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
   const vectorRepairSmoke = readFileSync(new URL("../scripts/smoke-vector-repair.mjs", import.meta.url), "utf8");
+  const supplyChainAudit = readFileSync(new URL("../scripts/supply-chain-audit.mjs", import.meta.url), "utf8");
   assert.equal(packageJson.scripts["release:gate"], "node scripts/run-release-gate.mjs");
   assert.equal(packageJson.scripts["release:gate:source"], "node scripts/run-release-gate.mjs --source-only");
   assert.equal(packageJson.engines.node, ">=24.0.0 <25");
@@ -673,6 +674,8 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   assert.match(preflight, /process\.execPath/);
   assert.match(reproducibility, /npm_execpath/);
   assert.match(reproducibility, /process\.execPath/);
+  assert.match(supplyChainAudit, /npm_execpath/);
+  assert.match(supplyChainAudit, /process\.execPath/);
   assert.match(workflow, /ubuntu-latest/);
   assert.match(workflow, /windows-latest/);
   assert.match(workflow, /openclaw@2026\.7\.1-beta\.5/);

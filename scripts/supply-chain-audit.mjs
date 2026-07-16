@@ -23,9 +23,12 @@ export function interpretAuditResult(result) {
 }
 
 export function runSupplyChainAudit(root = process.cwd(), registry = DEFAULT_AUDIT_REGISTRY) {
+  const npmArgs = ["audit", "--json", "--omit=dev", `--registry=${registry}`];
+  const npmExecPath = String(process.env.npm_execpath || "").trim();
+  const useWindowsNpmCli = process.platform === "win32" && /npm-cli\.js$/i.test(npmExecPath);
   const result = spawnSync(
-    "npm",
-    ["audit", "--json", "--omit=dev", `--registry=${registry}`],
+    useWindowsNpmCli ? process.execPath : "npm",
+    useWindowsNpmCli ? [npmExecPath, ...npmArgs] : npmArgs,
     { cwd: resolve(root), encoding: "utf8", shell: false },
   );
   const verdict = interpretAuditResult(result);
