@@ -97,7 +97,41 @@ Updated: 2026-07-16
       typecheck/build/vector repair, 124-case recall, 200k FTS, official audit
       0, 42-component SBOM, 186-file pack, packed runtime/LanceDB/OpenClaw CLI
       smokes, and build `dirty=false`.
-- [ ] Obtain Tianxuan's seventh independent acceptance before repository push,
+- [x] Receive Tianxuan's seventh independent review of the exact delivered
+      candidate. The result was NO-GO with four authority/Windows blockers and
+      six should-fix findings; remediation is tracked below.
+
+### Eighth independent-audit remediation
+
+- [x] Separate trusted-ancestor validation from strict private-leaf ACL
+      enforcement. Accept only current-user/SYSTEM/Administrators writers on
+      Windows and owner-correct non-writable ancestors on POSIX; never rewrite
+      an existing ancestor.
+- [x] Use writable handles for Windows backup and receipt fsync, and sync each
+      atomic receipt through the same exclusive handle used to write it.
+- [x] Upgrade authority to schema version 4 and reject arbitrary-name triggers,
+      user-defined indexes on protected tables, and namespace views; require
+      valid fixtures to pass CRUD, FTS, and durable-state characterization.
+- [x] Upgrade external migration receipts to a fully bound version 3 contract
+      and rebuild malformed completed receipts only from verified internal
+      evidence plus the exact backup.
+- [x] Preserve system `undefined` scope bypass for read tools; require an
+      explicit write scope for system promote/archive calls.
+- [x] Preserve compatible legacy vector-repair debt transactionally and block
+      incompatible outbox contracts instead of silently dropping them.
+- [x] Add Linux/Windows Node 24 CI, Node/OpenClaw/OS compatibility metadata,
+      self-checking release-input evidence, toolchain/SBOM identity, and dated
+      changelog structure.
+- [x] Pass the Linux exact clean source gate for
+      `b75e0b06e4f2701c670f114a8d1f0a25d6056250`: 379 passed, 0 failed,
+      1 Windows-only skip; typecheck/build/vector repair, 124/124 recall,
+      200k FTS, official audit 0, 42-component SBOM, 186-file pack, three
+      packed smokes, and `dirty=false`.
+- [ ] Pass the same final source gate on the authorized real Windows Node 24
+      client. Real-Windows testing found and fixed additional POSIX-mode/ACL,
+      SQLite-handle, OAuth rename-race, path-separator, and output-DACL defects;
+      the final focused rerun was interrupted when the client became unreachable.
+- [ ] Obtain Tianxuan's eighth independent acceptance before repository push,
       package release, live deployment, or V2 cutover.
 
 ## ClawLore v1 production hardening — active after Phase 9

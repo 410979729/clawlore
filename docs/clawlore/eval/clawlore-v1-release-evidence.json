@@ -1,4 +1,56 @@
 {
   "schema": "clawlore.release-evidence.v2",
-  "status": "pending final clean release-gate generation"
+  "package": "clawlore@1.2.0",
+  "observedCommit": "b75e0b06e4f2701c670f114a8d1f0a25d6056250",
+  "releaseInput": {
+    "algorithm": "sha256-tracked-release-inputs-v1",
+    "digest": "925923b9bb3ce462e36503ea4c43d18e16b4abe6b5f2e62f7b832ec2d15e9f57",
+    "fileCount": 555,
+    "excludedAuditLedger": [
+      "TODO-clawlore.md",
+      "docs/clawlore/project-handoff.md",
+      "docs/clawlore/eval/"
+    ]
+  },
+  "runtimeDigest": "358a22ef60077035bc40aa4dbfa01b78111d63b395373f18e408bf6531479d22",
+  "sourceOnly": true,
+  "dirty": false,
+  "packFileCount": 186,
+  "packageLockSha256": "fc53e2f0a6d9b4b041e710265efb56a2742b9a75968196bdabb5f58c6af1eb89",
+  "sbom": {
+    "format": "CycloneDX",
+    "specVersion": "1.5",
+    "tool": "npm sbom --package-lock-only --sbom-format cyclonedx",
+    "toolVersion": "11.9.0",
+    "componentCount": 42,
+    "sha256": "66fe1ba42753e7a8bca26919ac79380b5ddee76ddcc3997e34a916293674e0a9"
+  },
+  "toolchain": {
+    "node": "v24.14.0",
+    "npm": "11.9.0",
+    "os": "linux",
+    "arch": "x64"
+  },
+  "compatibility": {
+    "node": ">=24.0.0 <25",
+    "os": [
+      "linux",
+      "win32"
+    ],
+    "openclawPeer": ">=2026.7.1-beta.2 <2027"
+  },
+  "supplyChainRegistry": "https://registry.npmjs.org",
+  "packedRuntimeSmoke": true,
+  "packedLanceDbSmoke": true,
+  "packedOpenClawCliSmoke": true,
+  "allowedPlatformVariance": [
+    "observedCommit",
+    "sbom.componentCount",
+    "sbom.sha256",
+    "sbom.toolVersion",
+    "toolchain.node",
+    "toolchain.npm",
+    "toolchain.os",
+    "toolchain.arch"
+  ]
 }

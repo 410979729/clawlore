@@ -1,7 +1,8 @@
 # ClawLore v1 project handoff
 
 Current through Phase 9, H1-H5 production hardening, the R1 canonical identity
-transition, and six independent-audit remediation rounds through 2026-07-16.
+transition, and the seventh independent review plus its eighth remediation
+candidate through 2026-07-16.
 
 ## Canonical identity candidate
 
@@ -151,13 +152,56 @@ path during this run. The conditional real-PowerShell test is present and will
 run on Windows CI; Linux fixtures prove command construction and default-deny
 ACL evaluation but are not misrepresented as a Windows canary.
 
+The seventh independent review then found four remaining blockers: ordinary
+Windows ancestors were incorrectly held to the final owner-only leaf policy;
+Windows rejected backup/receipt fsync through read-only handles; arbitrary-name
+SQLite triggers were outside the authority fingerprint; and an external
+`status=completed` receipt was trusted without binding its fields to internal
+evidence and the backup. The eighth remediation separates trusted-ancestor and
+strict-leaf policies, writes and syncs migration artifacts through writable
+handles, upgrades authority to schema version 4 with exhaustive protected-
+object enumeration plus CRUD characterization, and upgrades external receipts
+to a fully bound version 3 contract with verified recovery.
+
+System management reads now preserve the reserved unfiltered bypass while
+system mutations require explicit scopes. Compatible legacy vector-repair debt
+is included in the logical snapshot and migrated instead of dropped. The
+release contract now declares Node 24, Linux/Windows, and an OpenClaw peer
+range; a visible two-platform CI matrix runs the same source gate. Canonical
+evidence binds tracked release-input content rather than a self-referential
+final commit hash and records lockfile, SBOM, toolchain, platform, pack, runtime,
+and compatibility identity.
+
+Exact clean code-and-dist commit `b75e0b06e4f2701c670f114a8d1f0a25d6056250`
+passed the Linux source gate with 379 passed, 0 failed, one Windows-only skip,
+runtime digest
+`358a22ef60077035bc40aa4dbfa01b78111d63b395373f18e408bf6531479d22`,
+release-input digest
+`925923b9bb3ce462e36503ea4c43d18e16b4abe6b5f2e62f7b832ec2d15e9f57`,
+42 SBOM components, 186 package files, official-registry vulnerabilities 0,
+and all three packed smokes true. See
+`eval/clawlore-v1-eighth-independent-audit-remediation-run-2026-07-16.md` and
+`eval/clawlore-v1-release-evidence.json`.
+
+The authorized Windows work computer accepted an isolated audit checkout and
+Node 24 dependencies under the user's profile. Real-Windows tests exposed and
+then drove fixes for POSIX-mode assumptions, output ACL enforcement, leaked
+SQLite handles, concurrent OAuth atomic-renames, path separators, and the
+release wrapper. A focused run reached the final affected suites before the
+client disappeared from the tailnet; the exact final source gate did not
+complete. No live plugin, service, system configuration, or user data was
+changed. The isolated audit directories still require cleanup when the client
+is reachable. Real Windows Node 24 validation therefore remains a release
+gate, not a claimed success.
+
 The live Gateway port source was separately aligned from stale config `19421`
 to the service/listener truth `19021` under a controlled backup. That config
 restart did not deploy the candidate or alter the memory data plane.
 
 This candidate still does not authorize a live rename, V2 writes, lifecycle
 promotion, ContextEngine, prompt mutation, or final-recall cutover. Tianxuan's
-re-audit of the exact delivered clean HEAD is the next gate; repository
+re-audit of the exact delivered clean HEAD after the real Windows gate is the
+next gate; repository
 creation/rename and push follow only after that audit is accepted.
 
 ## Current live boundary
