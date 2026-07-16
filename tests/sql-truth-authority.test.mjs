@@ -18,9 +18,11 @@ const { MemoryStore } = jiti("../src/store.ts");
 test("existing SQL truth metadata is not overwritten by stale vector rows on startup", async () => {
   const dir = mkdtempSync(join(tmpdir(), "scope-recall-sql-authority-"));
   const id = "00000000-0000-4000-8000-000000000011";
+  let first;
+  let second;
 
   try {
-    const first = new MemoryStore({ dbPath: dir, vectorDim: 4 });
+    first = new MemoryStore({ dbPath: dir, vectorDim: 4 });
     await first.importEntry({
       id,
       text: "Raw runtime wrapper Command hints: /bin/bash -lc \"pwd\"",
@@ -47,8 +49,10 @@ test("existing SQL truth metadata is not overwritten by stale vector rows on sta
       id,
     );
     sql.close();
+    await first.close();
+    first = undefined;
 
-    const second = new MemoryStore({ dbPath: dir, vectorDim: 4 });
+    second = new MemoryStore({ dbPath: dir, vectorDim: 4 });
     const row = await second.getById(id);
     assert.ok(row);
     const metadata = JSON.parse(row.metadata);
@@ -60,6 +64,8 @@ test("existing SQL truth metadata is not overwritten by stale vector rows on sta
       [],
     );
   } finally {
+    await second?.close();
+    await first?.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -168,8 +174,9 @@ for (const backend of BACKENDS) {
   test(`${backend}: deleted SQL truth never returns when vector delete fails`, async () => {
     const dir = mkdtempSync(join(tmpdir(), `clawlore-sql-delete-${backend}-`));
     const id = "10000000-0000-4000-8000-000000000001";
+    let store;
     try {
-      const store = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: backend });
+      store = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: backend });
       await store.importEntry(entry(id, "obsolete deploy endpoint"));
       const deleted = await withFailingVectorMutation(store, () => store.delete(id));
       assert.equal(deleted, true);
@@ -187,6 +194,7 @@ for (const backend of BACKENDS) {
       assert.deepEqual(repaired.errors, []);
       assert.equal(db.prepare("SELECT COUNT(*) AS count FROM vector_companion_repair_outbox").get().count, 0);
     } finally {
+      await store?.close();
       rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -194,8 +202,9 @@ for (const backend of BACKENDS) {
   test(`${backend}: updated recall is rehydrated only from current SQL truth`, async () => {
     const dir = mkdtempSync(join(tmpdir(), `clawlore-sql-update-${backend}-`));
     const id = "20000000-0000-4000-8000-000000000002";
+    let store;
     try {
-      const store = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: backend });
+      store = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: backend });
       await store.importEntry(entry(id, "old deployment region", { revision: 1 }));
       const updated = await withFailingVectorMutation(store, () => store.update(id, {
         text: "current deployment region",
@@ -221,6 +230,7 @@ for (const backend of BACKENDS) {
       assert.deepEqual(repaired.errors, []);
       assert.equal(db.prepare("SELECT COUNT(*) AS count FROM vector_companion_repair_outbox").get().count, 0);
     } finally {
+      await store?.close();
       rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -229,8 +239,9 @@ for (const backend of BACKENDS) {
     const dir = mkdtempSync(join(tmpdir(), `clawlore-sql-mixed-${backend}-`));
     const updateId = "25000000-0000-4000-8000-000000000002";
     const supersedeId = "35000000-0000-4000-8000-000000000003";
+    let store;
     try {
-      const store = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: backend });
+      store = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: backend });
       await store.importEntry(entry(updateId, "old mixed update", { revision: 1 }));
       await withFailingVectorDeleteOnly(store, () => store.update(updateId, {
         text: "current mixed update",
@@ -286,6 +297,7 @@ for (const backend of BACKENDS) {
       assert.deepEqual(repaired.errors, []);
       assert.equal(db.prepare("SELECT COUNT(*) AS count FROM vector_companion_repair_outbox").get().count, 0);
     } finally {
+      await store?.close();
       rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -293,8 +305,9 @@ for (const backend of BACKENDS) {
   test(`${backend}: superseded stale vector is inactive and replacement remains SQL-recallable`, async () => {
     const dir = mkdtempSync(join(tmpdir(), `clawlore-sql-supersede-${backend}-`));
     const id = "30000000-0000-4000-8000-000000000003";
+    let store;
     try {
-      const store = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: backend });
+      store = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: backend });
       await store.importEntry(entry(id, "legacy hostname", { fact_key: "service-host" }));
       const replacement = await withFailingVectorMutation(store, () => store.supersede(id, {
         text: "canonical hostname",
@@ -344,6 +357,7 @@ for (const backend of BACKENDS) {
       assert.deepEqual(repaired.errors, []);
       assert.equal(db.prepare("SELECT COUNT(*) AS count FROM vector_companion_repair_outbox").get().count, 0);
     } finally {
+      await store?.close();
       rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -351,8 +365,9 @@ for (const backend of BACKENDS) {
   test(`${backend}: SQL scope is authoritative when the vector companion has stale scope metadata`, async () => {
     const dir = mkdtempSync(join(tmpdir(), `clawlore-sql-scope-${backend}-`));
     const id = "40000000-0000-4000-8000-000000000004";
+    let store;
     try {
-      const store = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: backend });
+      store = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: backend });
       await store.importEntry(entry(id, "principal scoped current truth"));
       const db = await store.getSqlTruthDb();
       db.prepare("UPDATE memory_truth SET scope = ?, updated_at = ? WHERE id = ?")
@@ -363,6 +378,7 @@ for (const backend of BACKENDS) {
       assert.equal(hits[0].entry.scope, "user:current");
       assert.deepEqual(await store.vectorSearch([1, 0, 0, 0], 5, 0.1, ["agent:test"]), []);
     } finally {
+      await store?.close();
       rmSync(dir, { recursive: true, force: true });
     }
   });

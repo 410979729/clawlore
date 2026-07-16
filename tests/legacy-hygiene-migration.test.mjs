@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
@@ -72,7 +73,7 @@ function runMigration(dbPath, args = []) {
     process.execPath,
     ["scripts/migrate-legacy-hygiene.mjs", "--db", dbPath, ...args],
     {
-      cwd: new URL("..", import.meta.url).pathname,
+      cwd: fileURLToPath(new URL("..", import.meta.url)),
       encoding: "utf8",
     },
   );
