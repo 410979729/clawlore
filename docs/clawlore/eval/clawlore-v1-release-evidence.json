@@ -1,10 +1,10 @@
 {
   "schema": "clawlore.release-evidence.v2",
   "package": "clawlore@1.2.0",
-  "observedCommit": "b75e0b06e4f2701c670f114a8d1f0a25d6056250",
+  "observedCommit": "0547e7687ba3b025422aeaee49a34de6b8923428",
   "releaseInput": {
     "algorithm": "sha256-tracked-release-inputs-v1",
-    "digest": "925923b9bb3ce462e36503ea4c43d18e16b4abe6b5f2e62f7b832ec2d15e9f57",
+    "digest": "7809597722d215155a7a28d7380e84724ae3468e70c7b65d0cf178249364068b",
     "fileCount": 555,
     "excludedAuditLedger": [
       "TODO-clawlore.md",
@@ -12,18 +12,18 @@
       "docs/clawlore/eval/"
     ]
   },
-  "runtimeDigest": "358a22ef60077035bc40aa4dbfa01b78111d63b395373f18e408bf6531479d22",
+  "runtimeDigest": "82e894c689b7f7873c30cadbc6ab27b722eb1b7bedb897704d5e7515271e5fc5",
   "sourceOnly": true,
   "dirty": false,
   "packFileCount": 186,
-  "packageLockSha256": "fc53e2f0a6d9b4b041e710265efb56a2742b9a75968196bdabb5f58c6af1eb89",
+  "packageLockSha256": "66e22abef648c898e8e4e41c3e9e5edb399437b70a7a697cd8f3206ff731b7cd",
   "sbom": {
     "format": "CycloneDX",
     "specVersion": "1.5",
     "tool": "npm sbom --package-lock-only --sbom-format cyclonedx",
     "toolVersion": "11.9.0",
     "componentCount": 42,
-    "sha256": "66fe1ba42753e7a8bca26919ac79380b5ddee76ddcc3997e34a916293674e0a9"
+    "sha256": "98c8d0e544de65172859365713f9f538eb569a5a0bb7266739bd5e7c79009d2e"
   },
   "toolchain": {
     "node": "v24.14.0",
@@ -37,7 +37,7 @@
       "linux",
       "win32"
     ],
-    "openclawPeer": ">=2026.7.1-beta.2 <2027"
+    "openclawPeer": ">=2026.7.1-beta.5 <2027"
   },
   "supplyChainRegistry": "https://registry.npmjs.org",
   "packedRuntimeSmoke": true,
