@@ -1,4 +1,5 @@
 import { readFileSync, statSync } from "node:fs";
+import { preparePrivateFileForRead } from "../../../file-privacy.js";
 import type { ReleaseArtifactBindingV1, ReleaseReadinessReceiptV1 } from "../../domain/release.js";
 import { diagnosticErrorSummary } from "../../../diagnostic-redaction.js";
 
@@ -18,9 +19,12 @@ function record(value: unknown): Record<string, unknown> {
 }
 
 function readPrivateJson(path: string): Record<string, unknown> {
+  if (process.platform === "win32") preparePrivateFileForRead(path);
   const info = statSync(path);
   if (!info.isFile()) throw new Error("rollout_control_not_file");
-  if ((info.mode & 0o077) !== 0) throw new Error("rollout_control_permissions_must_be_0600");
+  if (process.platform !== "win32" && (info.mode & 0o077) !== 0) {
+    throw new Error("rollout_control_permissions_must_be_0600");
+  }
   if (info.size <= 0 || info.size > MAX_CONTROL_FILE_BYTES) {
     throw new Error("rollout_control_size_invalid");
   }

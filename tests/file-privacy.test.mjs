@@ -8,7 +8,12 @@ import test from "node:test";
 const require = createRequire(import.meta.url);
 const { createJiti } = require("jiti");
 const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: false });
-const { enforcePrivatePath, ensurePrivateDirectory, verifyPrivatePath } = jiti("../src/file-privacy.ts");
+const {
+  enforcePrivatePath,
+  ensurePrivateDirectory,
+  preparePrivateFileForRead,
+  verifyPrivatePath,
+} = jiti("../src/file-privacy.ts");
 
 test("POSIX private path adapter tightens file and directory modes", {
   skip: process.platform === "win32",
@@ -243,6 +248,41 @@ test("an existing dedicated Windows leaf is tightened after trusted-ancestor val
   };
   try {
     ensurePrivateDirectory(root, { platform: "win32", execFile: fakeExec });
+    assert.deepEqual(modes, ["verify", "enforce"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Windows private-file reads validate the parent trust boundary before tightening the file", () => {
+  const root = mkdtempSync(join(tmpdir(), "clawlore-private-read-windows-"));
+  const file = join(root, "control.json");
+  const currentSid = "S-1-5-21-1000";
+  const modes = [];
+  writeFileSync(file, "{}\n");
+  const fakeExec = (command, args, options = {}) => {
+    if (command === "whoami.exe") return `"fixture","${currentSid}"\r\n`;
+    const mode = options.env.CLAWLORE_PRIVATE_MODE;
+    modes.push(mode);
+    if (mode === "verify") {
+      return JSON.stringify({
+        ownerSid: currentSid,
+        protected: false,
+        access: [
+          { sid: currentSid, type: "Allow", rights: "FullControl", inherited: true },
+          { sid: "S-1-5-18", type: "Allow", rights: "FullControl", inherited: true },
+          { sid: "S-1-5-32-545", type: "Allow", rights: "ReadAndExecute", inherited: true },
+        ],
+      });
+    }
+    return JSON.stringify({
+      ownerSid: currentSid,
+      protected: true,
+      access: [{ sid: currentSid, type: "Allow", rights: "FullControl", inherited: false }],
+    });
+  };
+  try {
+    preparePrivateFileForRead(file, { platform: "win32", execFile: fakeExec });
     assert.deepEqual(modes, ["verify", "enforce"]);
   } finally {
     rmSync(root, { recursive: true, force: true });

@@ -1,3 +1,4 @@
+import { preparePrivateFileForRead } from "../../file-privacy.js";
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -55,9 +56,10 @@ function privateJson(path: string, maximumBytes: number): {
   value: Record<string, unknown>;
   sha256: string;
 } {
+  if (process.platform === "win32") preparePrivateFileForRead(path);
   const info = statSync(path);
   if (!info.isFile()) throw new Error("rollout control is not a file");
-  if ((info.mode & 0o077) !== 0) throw new Error("rollout control permissions must be 0600");
+  if ((process.platform !== "win32" && (info.mode & 0o077) !== 0)) throw new Error("rollout control permissions must be 0600");
   if (info.size <= 0 || info.size > maximumBytes) throw new Error("rollout control size is invalid");
   const bytes = readFileSync(path);
   const value = JSON.parse(bytes.toString("utf8")) as Record<string, unknown>;

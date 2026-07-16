@@ -1,3 +1,4 @@
+import { preparePrivateFileForRead } from "../../file-privacy.js";
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -124,8 +125,9 @@ function addUnique(index: Map<string, string | null>, value: string, key: string
 }
 
 function privateJson(path: string, maxBytes = CONTROL_MAX_BYTES): { value: unknown; sha256: string } {
+  if (process.platform === "win32") preparePrivateFileForRead(path);
   const info = statSync(path);
-  if (!info.isFile() || (info.mode & 0o077) !== 0 || info.size <= 0 || info.size > maxBytes) {
+  if (!info.isFile() || (process.platform !== "win32" && (info.mode & 0o077) !== 0) || info.size <= 0 || info.size > maxBytes) {
     throw new Error("control input must be a non-empty owner-only JSON file");
   }
   const bytes = readFileSync(path);

@@ -1,3 +1,4 @@
+import { preparePrivateFileForRead } from "../../file-privacy.js";
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -326,8 +327,9 @@ function isDigest(value: unknown): value is string {
 }
 
 function privateBytes(path: string, maximumBytes: number): { bytes: Buffer; sha256: string } {
+  if (process.platform === "win32") preparePrivateFileForRead(path);
   const info = statSync(path);
-  if (!info.isFile() || (info.mode & 0o077) !== 0 || info.size <= 0 || info.size > maximumBytes) {
+  if (!info.isFile() || (process.platform !== "win32" && (info.mode & 0o077) !== 0) || info.size <= 0 || info.size > maximumBytes) {
     throw new Error("duplicate archive control must be a non-empty owner-only file");
   }
   const bytes = readFileSync(path);

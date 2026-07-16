@@ -5,6 +5,7 @@ import {
   randomBytes,
   timingSafeEqual,
 } from "node:crypto";
+import { preparePrivateFileForRead } from "../../file-privacy.js";
 import { createReadStream, createWriteStream } from "node:fs";
 import { appendFile, chmod, mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -94,9 +95,12 @@ export function createFileSecretRefKeyProviderV2(input: {
 }): SnapshotArchiveKeyProviderV2 {
   if (!input.keyId.trim()) throw new Error("snapshot archive key id is required");
   const load = async (): Promise<SnapshotArchiveKeyV2> => {
+    if (process.platform === "win32") preparePrivateFileForRead(input.secretRef.path);
     const info = await stat(input.secretRef.path);
     if (!info.isFile()) throw new Error("file SecretRef must resolve to a regular file");
-    if ((info.mode & 0o077) !== 0) throw new Error("file SecretRef permissions must be 0600 or stricter");
+    if (process.platform !== "win32" && (info.mode & 0o077) !== 0) {
+      throw new Error("file SecretRef permissions must be 0600 or stricter");
+    }
     return { keyId: input.keyId, key: decodeFileKey(await readFile(input.secretRef.path)) };
   };
   return {

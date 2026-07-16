@@ -285,6 +285,32 @@ export function verifyPrivatePath(path: string, options: PrivatePathOptions = {}
   }
 }
 
+/**
+ * Prepare an existing operator/control file for a private read.
+ *
+ * POSIX keeps the traditional fail-closed 0600 contract. Windows mode bits do
+ * not describe the DACL, so first prove that the containing directory has no
+ * untrusted writer, then tighten only the declared file to the strict current-
+ * SID-only policy. This mirrors the OAuth read boundary without rewriting an
+ * arbitrary ancestor directory.
+ */
+export function preparePrivateFileForRead(path: string, options: PrivatePathOptions = {}): void {
+  const status = lstatSync(path);
+  if (status.isSymbolicLink()) {
+    throw new Error("CLAWLORE_PRIVATE_PATH_SYMLINK_REJECTED");
+  }
+  if (!status.isFile()) {
+    throw new Error("CLAWLORE_PRIVATE_PATH_KIND_INVALID");
+  }
+  const platform = options.platform ?? process.platform;
+  if (platform === "win32") {
+    verifyTrustedAncestorDirectory(dirname(path), options);
+    enforcePrivatePath(path, { ...options, kind: "file" });
+    return;
+  }
+  verifyPrivatePath(path, { ...options, kind: "file" });
+}
+
 export function ensurePrivateDirectory(path: string, options: PrivatePathOptions = {}): void {
   if (existsSync(path)) {
     // The caller is declaring `path` itself to be a dedicated private leaf.

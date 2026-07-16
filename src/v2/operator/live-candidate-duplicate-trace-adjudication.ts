@@ -1,3 +1,4 @@
+import { preparePrivateFileForRead } from "../../file-privacy.js";
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -138,8 +139,9 @@ function parseRecord(value: string): Record<string, unknown> {
 }
 
 function privateJson(path: string): { value: unknown; sha256: string } {
+  if (process.platform === "win32") preparePrivateFileForRead(path);
   const info = statSync(path);
-  if (!info.isFile() || (info.mode & 0o077) !== 0 || info.size <= 0 || info.size > CONTROL_MAX_BYTES) {
+  if (!info.isFile() || (process.platform !== "win32" && (info.mode & 0o077) !== 0) || info.size <= 0 || info.size > CONTROL_MAX_BYTES) {
     throw new Error("duplicate-trace adjudication input must be a non-empty owner-only JSON file");
   }
   const bytes = readFileSync(path);
