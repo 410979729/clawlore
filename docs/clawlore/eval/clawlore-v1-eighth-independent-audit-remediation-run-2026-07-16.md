@@ -160,6 +160,17 @@ control was changed. No Gateway restart, push, tag, release, or deployment was
 performed. Live remains `scope-recall-openclaw@1.1.0` until a separately
 authorized rollout.
 
+Final read-only live verification found the Gateway `active/running`, port
+`19021` healthy with `status=live`, and the legacy plugin loaded. SQLite
+reported `quick_check=ok`, zero foreign-key violations, truth/FTS `1031/1031`,
+and `0600` modes for the database, WAL, and SHM files.
+
+The Linux clean worktree and dependency trees created for this run were
+removed, and the project worktree is clean. The state-hygiene audit reports 82
+out-of-project historical/session/cache items; none was deleted without a
+separate ownership decision. Windows isolated audit directories remain pending
+cleanup only because the authorized client is unreachable.
+
 ## Next gate
 
 1. Run the exact committed candidate through the real Windows Node 24 source

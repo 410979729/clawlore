@@ -201,6 +201,20 @@ the gate again passed 379 tests with one Windows-only skip, and the environment'
 44-component SBOM was accepted under the evidence contract's explicitly
 declared SBOM/toolchain variance.
 
+Final live verification was read-only: `openclaw-gateway-tianji.service` was
+`active/running`, port `19021` returned `status=live`, and the loaded extension
+remained `scope-recall-openclaw@1.1.0`. The live SQLite companion reported
+`quick_check=ok`, zero foreign-key violations, truth/FTS `1031/1031`, and
+`0600` database/WAL/SHM files. No candidate deployment or restart occurred.
+
+Local clean worktrees and dependency trees created for this run were removed;
+the project worktree is clean. The workspace state-hygiene audit still reports
+82 items outside the project (historical config/session residues and host-
+managed plugin cache documents). They were not generated as project artifacts
+and were left untouched because deleting them is outside this release repair.
+The isolated Windows audit directories are the only task cleanup still pending,
+blocked by client reachability.
+
 The live Gateway port source was separately aligned from stale config `19421`
 to the service/listener truth `19021` under a controlled backup. That config
 restart did not deploy the candidate or alter the memory data plane.
