@@ -39,7 +39,7 @@ jobs:
       - name: Install locked dependencies
         run: npm ci --include=dev
       - name: Install the supported OpenClaw host fixture
-        run: npm install --prefix "${{ runner.temp }}/clawlore-openclaw-host" --ignore-scripts --no-audit --no-fund openclaw@2026.7.1-beta.2
+        run: npm install --prefix "${{ runner.temp }}/clawlore-openclaw-host" --ignore-scripts --no-audit --no-fund openclaw@2026.7.1-beta.5
       - name: Run the standard source release gate
         run: npm run release:gate:source
         env:

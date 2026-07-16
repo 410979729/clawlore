@@ -159,7 +159,7 @@ if (
 if (
   packageJson.engines?.node !== ">=24.0.0 <25" ||
   JSON.stringify(packageJson.os) !== JSON.stringify(["linux", "win32"]) ||
-  packageJson.peerDependencies?.openclaw !== ">=2026.7.1-beta.2 <2027" ||
+  packageJson.peerDependencies?.openclaw !== ">=2026.7.1-beta.5 <2027" ||
   packageJson.peerDependenciesMeta?.openclaw?.optional !== true
 ) {
   throw new Error("release gate failed: Node/OpenClaw/OS compatibility contract is missing or invalid");

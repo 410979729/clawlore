@@ -621,8 +621,11 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   assert.equal(packageJson.scripts["release:gate:source"], "node scripts/run-release-gate.mjs --source-only");
   assert.equal(packageJson.engines.node, ">=24.0.0 <25");
   assert.deepEqual(packageJson.os, ["linux", "win32"]);
-  assert.equal(packageJson.peerDependencies.openclaw, ">=2026.7.1-beta.2 <2027");
+  assert.equal(packageJson.peerDependencies.openclaw, ">=2026.7.1-beta.5 <2027");
   assert.equal(packageJson.peerDependenciesMeta.openclaw.optional, true);
+  assert.equal(packageJson.openclaw.install.minHostVersion, ">=2026.7.1-beta.5");
+  assert.equal(packageJson.openclaw.compat.pluginApi, ">=2026.7.1-beta.5");
+  assert.equal(packageJson.openclaw.compat.minGatewayVersion, "2026.7.1-beta.5");
   assert.equal(packageJson.clawloreRelease.evidenceFile, "docs/clawlore/eval/clawlore-v1-release-evidence.json");
   assert.match(wrapper, /CLAWLORE_ALLOW_NESTED_GIT_ROOT/);
   assert.match(wrapper, /CLAWLORE_SOURCE_ONLY/);
@@ -664,6 +667,7 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   assert.match(reproducibility, /process\.execPath/);
   assert.match(workflow, /ubuntu-latest/);
   assert.match(workflow, /windows-latest/);
+  assert.match(workflow, /openclaw@2026\.7\.1-beta\.5/);
   assert.match(workflow, /npm run release:gate:source/);
   assert.equal(
     packageJson.clawloreRelease.scriptPolicy,
