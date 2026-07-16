@@ -1,3 +1,4 @@
+import { preparePrivateFileForRead } from "../../file-privacy.js";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -10,8 +11,10 @@ function hash(value) {
     return createHash("sha256").update(value).digest("hex");
 }
 function privateSnapshotReceipt(path) {
+    if (process.platform === "win32")
+        preparePrivateFileForRead(path);
     const info = statSync(path);
-    if (!info.isFile() || (info.mode & 0o077) !== 0 || info.size <= 0 || info.size > CONTROL_MAX_BYTES) {
+    if (!info.isFile() || (process.platform !== "win32" && (info.mode & 0o077) !== 0) || info.size <= 0 || info.size > CONTROL_MAX_BYTES) {
         throw new Error("snapshot receipt must be a non-empty owner-only file");
     }
     const bytes = readFileSync(path);
@@ -32,8 +35,10 @@ function privateSnapshotReceipt(path) {
     return { value, sha256: hash(bytes) };
 }
 function verifyArchive(path, expectedSha256) {
+    if (process.platform === "win32")
+        preparePrivateFileForRead(path);
     const info = statSync(path);
-    if (!info.isFile() || (info.mode & 0o077) !== 0 || info.size <= 0) {
+    if (!info.isFile() || (process.platform !== "win32" && (info.mode & 0o077) !== 0) || info.size <= 0) {
         throw new Error("encrypted snapshot archive must be a non-empty owner-only file");
     }
     if (hash(readFileSync(path)) !== expectedSha256)

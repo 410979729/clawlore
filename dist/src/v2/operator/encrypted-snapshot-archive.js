@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual, } from "node:crypto";
+import { enforcePrivatePath, preparePrivateFileForRead } from "../../file-privacy.js";
 import { createReadStream, createWriteStream } from "node:fs";
-import { appendFile, chmod, mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { createVerifiedSqliteSnapshotV2, inspectSqliteSnapshotV2, restoreVerifiedSqliteSnapshotV2, } from "./sqlite-snapshot.js";
@@ -33,11 +34,14 @@ export function createFileSecretRefKeyProviderV2(input) {
     if (!input.keyId.trim())
         throw new Error("snapshot archive key id is required");
     const load = async () => {
+        if (process.platform === "win32")
+            preparePrivateFileForRead(input.secretRef.path);
         const info = await stat(input.secretRef.path);
         if (!info.isFile())
             throw new Error("file SecretRef must resolve to a regular file");
-        if ((info.mode & 0o077) !== 0)
+        if (process.platform !== "win32" && (info.mode & 0o077) !== 0) {
             throw new Error("file SecretRef permissions must be 0600 or stricter");
+        }
         return { keyId: input.keyId, key: decodeFileKey(await readFile(input.secretRef.path)) };
     };
     return {
@@ -129,11 +133,12 @@ export async function createEncryptedSnapshotArchiveV2(input) {
             snapshot,
         };
         await writeFile(input.archivePath, encodeHeader(header), { flag: "wx", mode: 0o600 });
+        enforcePrivatePath(input.archivePath, { kind: "file" });
         try {
             const cipher = createCipheriv("aes-256-gcm", key, iv, { authTagLength: AUTH_TAG_BYTES });
             await pipeline(createReadStream(plaintextPath), cipher, createWriteStream(input.archivePath, { flags: "a", mode: 0o600 }));
             await appendFile(input.archivePath, cipher.getAuthTag());
-            await chmod(input.archivePath, 0o600);
+            enforcePrivatePath(input.archivePath, { kind: "file" });
         }
         catch (error) {
             await rm(input.archivePath, { force: true });
@@ -175,11 +180,12 @@ export async function createEncryptedLegacySnapshotArchiveV2(input) {
             snapshot,
         };
         await writeFile(input.archivePath, encodeHeader(header), { flag: "wx", mode: 0o600 });
+        enforcePrivatePath(input.archivePath, { kind: "file" });
         try {
             const cipher = createCipheriv("aes-256-gcm", key, iv, { authTagLength: AUTH_TAG_BYTES });
             await pipeline(createReadStream(plaintextPath), cipher, createWriteStream(input.archivePath, { flags: "a", mode: 0o600 }));
             await appendFile(input.archivePath, cipher.getAuthTag());
-            await chmod(input.archivePath, 0o600);
+            enforcePrivatePath(input.archivePath, { kind: "file" });
         }
         catch (error) {
             await rm(input.archivePath, { force: true });

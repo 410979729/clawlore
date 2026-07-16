@@ -1,11 +1,12 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { lstat, open, rename, rm } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { readOAuthSessionFile } from "./oauth-session-storage.js";
 import { diagnosticErrorSummary, diagnosticIdentifier } from "./diagnostic-redaction.js";
 import { enforcePrivatePath, ensurePrivateDirectory } from "./file-privacy.js";
 const EXPIRY_SKEW_MS = 60_000;
+const oauthSessionWriteQueues = new Map();
 const DEFAULT_OAUTH_PROVIDER_ID = "openai-codex";
 const OAUTH_PROVIDER_ALIASES = {
     openai: "openai-codex",
@@ -416,7 +417,7 @@ async function syncOAuthParentDirectory(directory) {
         await handle.close();
     }
 }
-export async function saveOAuthSession(authPath, session, hooks = {}) {
+async function saveOAuthSessionUnlocked(authPath, session, hooks = {}) {
     const directory = dirname(authPath);
     ensurePrivateDirectory(directory);
     await assertOAuthTargetIsNotSymlink(authPath);
@@ -459,6 +460,24 @@ export async function saveOAuthSession(authPath, session, hooks = {}) {
     finally {
         if (!renamed) {
             await rm(temporaryPath, { force: true }).catch(() => undefined);
+        }
+    }
+}
+export async function saveOAuthSession(authPath, session, hooks = {}) {
+    const queueKey = resolve(authPath);
+    const previous = oauthSessionWriteQueues.get(queueKey) ?? Promise.resolve();
+    let release;
+    const completed = new Promise((resolveQueue) => { release = resolveQueue; });
+    const queued = previous.catch(() => undefined).then(() => completed);
+    oauthSessionWriteQueues.set(queueKey, queued);
+    await previous.catch(() => undefined);
+    try {
+        await saveOAuthSessionUnlocked(authPath, session, hooks);
+    }
+    finally {
+        release();
+        if (oauthSessionWriteQueues.get(queueKey) === queued) {
+            oauthSessionWriteQueues.delete(queueKey);
         }
     }
 }

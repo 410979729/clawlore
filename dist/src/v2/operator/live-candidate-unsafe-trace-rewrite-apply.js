@@ -1,3 +1,4 @@
+import { preparePrivateFileForRead } from "../../file-privacy.js";
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -16,8 +17,10 @@ function isDigest(value) {
     return typeof value === "string" && /^[a-f0-9]{64}$/i.test(value);
 }
 function privateBytes(path, maximumBytes) {
+    if (process.platform === "win32")
+        preparePrivateFileForRead(path);
     const info = statSync(path);
-    if (!info.isFile() || (info.mode & 0o077) !== 0 || info.size <= 0 || info.size > maximumBytes) {
+    if (!info.isFile() || (process.platform !== "win32" && (info.mode & 0o077) !== 0) || info.size <= 0 || info.size > maximumBytes) {
         throw new Error("unsafe trace rewrite apply control must be a non-empty owner-only file");
     }
     const bytes = readFileSync(path);
@@ -348,7 +351,13 @@ export async function executeLiveCandidateUnsafeTraceRewriteV1(input) {
             db.close();
             throw new Error("unsafe trace rewrite target mapping is incomplete");
         }
-        assertTargetMatches(live, planned);
+        try {
+            assertTargetMatches(live, planned);
+        }
+        catch (error) {
+            db.close();
+            throw error;
+        }
     }
     const targetItemIds = plan.rows.map((planned) => byHash.get(planned.itemIdSha256).item_id).sort();
     const beforeNonTargetDigest = nonTargetDigest(db, targetItemIds);

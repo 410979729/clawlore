@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { enforcePrivatePath } from "../../file-privacy.js";
 import { createEncryptedLegacySnapshotArchiveV2, createFileSecretRefKeyProviderV2, restoreEncryptedLegacySnapshotArchiveV2, } from "./encrypted-snapshot-archive.js";
 import { inspectLegacySqliteSnapshotV2 } from "./legacy-v1-snapshot.js";
 function opaquePath(path) {
@@ -86,7 +87,7 @@ export async function createAndVerifyLegacyLiveEncryptedSnapshotV2(input) {
         };
         await mkdir(dirname(input.receiptPath), { recursive: true });
         await writeFile(input.receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, { flag: "wx", mode: 0o600 });
-        await chmod(input.receiptPath, 0o600);
+        enforcePrivatePath(input.receiptPath, { kind: "file" });
         completed = true;
         return receipt;
     }

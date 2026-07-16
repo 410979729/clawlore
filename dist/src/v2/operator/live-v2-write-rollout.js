@@ -1,3 +1,4 @@
+import { preparePrivateFileForRead } from "../../file-privacy.js";
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -28,10 +29,12 @@ const ROLLOUT_TABLES = [
     "experience_events_v2",
 ];
 function privateJson(path) {
+    if (process.platform === "win32")
+        preparePrivateFileForRead(path);
     const info = statSync(path);
     if (!info.isFile())
         throw new Error("rollout control is not a file");
-    if ((info.mode & 0o077) !== 0)
+    if ((process.platform !== "win32" && (info.mode & 0o077) !== 0))
         throw new Error("rollout control permissions must be 0600");
     if (info.size <= 0 || info.size > CONTROL_MAX_BYTES)
         throw new Error("rollout control size is invalid");

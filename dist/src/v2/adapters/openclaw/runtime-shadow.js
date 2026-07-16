@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { appendFile, chmod, mkdir, rename, stat } from "node:fs/promises";
+import { appendFile, mkdir, rename, stat } from "node:fs/promises";
 import { dirname } from "node:path";
+import { enforcePrivatePath } from "../../../file-privacy.js";
 import { runCompatibilityContextShadow, } from "./compatibility-context-adapter.js";
 export function normalizeRuntimeShadowConfig(value) {
     const raw = value && typeof value === "object" ? value : {};
@@ -43,7 +44,7 @@ export class JsonlRuntimeShadowTraceSink {
             await rename(this.filePath, `${this.filePath}.1`).catch(() => undefined);
         }
         await appendFile(this.filePath, `${JSON.stringify(receipt)}\n`, { encoding: "utf8", mode: 0o600 });
-        await chmod(this.filePath, 0o600);
+        enforcePrivatePath(this.filePath, { kind: "file" });
     }
 }
 export async function runDefaultOffRuntimeShadow(params) {
