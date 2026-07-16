@@ -1,8 +1,8 @@
 # ClawLore v1 project handoff
 
 Current through Phase 9, H1-H5 production hardening, the R1 canonical identity
-transition, and the seventh independent review plus its eighth remediation
-candidate through 2026-07-16.
+transition, the seventh independent review, and the eighth independent
+read-only review plus focused closure through 2026-07-16.
 
 ## Canonical identity candidate
 
@@ -226,6 +226,24 @@ the gate again passed 379 tests with one Windows-only skip, and the environment'
 44-component SBOM was accepted under the evidence contract's explicitly
 declared SBOM/toolchain variance.
 
+Tianxuan's eighth independent read-only review found no new production-path
+blocker, but identified two P2 evidence/test-harness gaps. Commit
+`3747b8b3ed38c123eb43f0ff175aa34ef3aabcbc` centralizes the exact allowed
+evidence variance, compares stable SBOM format/spec/tool fields, adds
+counterexample regressions, and guarantees that both SQL authority store pairs
+close in `finally` before recursive cleanup. Canonical evidence commit
+`da16172ce49da5c5ef53d2865b1200ac1b33eaf8` passed both evidence-write and
+normal-mode Linux gates: 382 total / 381 passed / 0 failed / one Windows-only
+skip, 124/124 recall, 200,000-row FTS, vulnerabilities 0, 42-component SBOM,
+186-file pack, and all three packed smokes. Release-input digest is
+`e35ca201ea90dfd1d11b0cc741b27b017664689aa6b49049006aa6528544f6b1` across
+556 tracked release inputs; runtime digest remains
+`82e894c689b7f7873c30cadbc6ab27b722eb1b7bedb897704d5e7515271e5fc5`.
+Tianxuan's focused follow-up independently recomputed both identities, closed
+both P2 findings, found no new source blocker, and left the exact worktree
+clean and unchanged. Its overall verdict remains NO-GO only because the exact
+real-Windows gate and owned audit-root cleanup are still open.
+
 Final live verification was read-only: `openclaw-gateway-tianji.service` was
 `active/running`, port `19021` returned `status=live`, and the loaded extension
 remained `scope-recall-openclaw@1.1.0`. The live SQLite companion reported
@@ -234,7 +252,7 @@ remained `scope-recall-openclaw@1.1.0`. The live SQLite companion reported
 
 Local clean worktrees and dependency trees created for this run were removed;
 the project worktree is clean. The workspace state-hygiene audit still reports
-82 items outside the project (historical config/session residues and host-
+84 items outside the project (historical config/session residues and host-
 managed plugin cache documents). They were not generated as project artifacts
 and were left untouched because deleting them is outside this release repair.
 The isolated Windows audit directories are the only task cleanup still pending,
@@ -246,10 +264,10 @@ restart did not deploy the candidate or alter the memory data plane.
 
 This candidate still does not authorize a live rename, V2 writes, lifecycle
 promotion, ContextEngine, prompt mutation, or final-recall cutover. Tianxuan's
-read-only review may proceed against the exact delivered clean HEAD, but
-cross-platform acceptance remains conditional on the real Windows gate and
-owned-test-root cleanup. Repository creation/rename and push follow only after
-both the platform gate and independent audit are accepted.
+eighth source/material review is complete, but cross-platform acceptance
+remains conditional on the real Windows gate and owned-test-root cleanup.
+Repository creation/rename and push follow only after those external gates and
+a separate release decision.
 
 ## Current live boundary
 

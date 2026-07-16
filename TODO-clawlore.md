@@ -146,6 +146,24 @@ Updated: 2026-07-16
       vulnerabilities 0, 42-component SBOM, 186-file pack, all three packed
       smokes, release-input digest `7809597722d215155a7a28d7380e84724ae3468e70c7b65d0cf178249364068b`,
       and runtime digest `82e894c689b7f7873c30cadbc6ab27b722eb1b7bedb897704d5e7515271e5fc5`.
+- [x] Close Tianxuan's two eighth-review should-fix findings in
+      `3747b8b3ed38c123eb43f0ff175aa34ef3aabcbc`: stable evidence comparison
+      now covers SBOM format/spec/tool with counterexample regressions, and
+      SQL authority tests guarantee store closure before recursive cleanup on
+      assertion failure.
+- [x] Regenerate and verify canonical evidence at
+      `da16172ce49da5c5ef53d2865b1200ac1b33eaf8`: 382 total / 381 passed /
+      0 failed / 1 Windows-only skip, 124/124 recall, 200k FTS,
+      vulnerabilities 0, 42-component SBOM, 186-file pack, and three packed
+      smokes. Release-input digest is
+      `e35ca201ea90dfd1d11b0cc741b27b017664689aa6b49049006aa6528544f6b1`;
+      runtime digest remains
+      `82e894c689b7f7873c30cadbc6ab27b722eb1b7bedb897704d5e7515271e5fc5`.
+- [x] Complete Tianxuan's eighth independent read-only review and focused
+      follow-up. Both P2 findings are CLOSED, no new source blocker was found,
+      and the final worktree remained clean at `da16172ce49da5c5ef53d2865b1200ac1b33eaf8`.
+      The review verdict remains NO-GO solely because the external Windows
+      gate and owned-directory cleanup below are unfinished.
 - [ ] Pass the same final source gate on the authorized real Windows Node 24
       client. Real-Windows testing found and fixed additional POSIX-mode/ACL,
       SQLite-handle, OAuth rename-race, path-separator, and output-DACL defects;
@@ -155,8 +173,6 @@ Updated: 2026-07-16
 - [ ] Remove only the clearly owned Windows audit roots after the client is
       reachable, then verify each path is absent. Do not touch user-owned or
       ownership-unclear files.
-- [ ] Obtain Tianxuan's eighth independent acceptance before repository push,
-      package release, live deployment, or V2 cutover.
 
 ## ClawLore v1 production hardening — active after Phase 9
 

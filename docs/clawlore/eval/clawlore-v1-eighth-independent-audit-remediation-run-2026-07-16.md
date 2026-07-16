@@ -7,8 +7,10 @@ The seventh independent audit findings against
 blockers and the release-facing should-fix items were remediated in the source
 candidate and covered by focused regressions. The Linux clean source gate is
 green. The candidate remains **not authorized for repository push,
-publication, live deployment, or V2 cutover**: the final real-Windows gate and
-an eighth independent read-only review are still required.
+publication, live deployment, or V2 cutover**. Tianxuan's eighth independent
+read-only source/material review and focused follow-up are complete with no
+remaining source blocker, but the final real-Windows gate and cleanup of the
+owned Windows audit roots are still required.
 
 ## Remediated blockers
 
@@ -169,6 +171,38 @@ the exact Windows source gate and deletion/absence verification of the clearly
 owned audit roots remain pending; this report still does not claim
 cross-platform release acceptance.
 
+## Eighth independent review and focused closure
+
+Tianxuan independently audited clean commit
+`a9fa9bba4aa09c655331077f44c2a989e0379937`. It found no new
+production-path release blocker and preserved NO-GO for the known external
+Windows gate/cleanup hold. Two P2 gaps were reported: stable release-evidence
+comparison omitted SBOM format/spec/tool, and two SQL authority tests did not
+guarantee store closure before recursive cleanup when an assertion failed.
+
+Commit `3747b8b3ed38c123eb43f0ff175aa34ef3aabcbc` closes both gaps. The shared
+release-evidence contract now centralizes the exact variance list, compares
+stable SBOM format/spec/tool, and has counterexamples proving that each stable
+field change is rejected. SQL store references are hoisted and closed from
+`finally` before removal; a cleanup-order regression proves both closes occur
+while the directory still exists.
+
+Canonical evidence commit
+`da16172ce49da5c5ef53d2865b1200ac1b33eaf8` passed evidence-write and
+normal-mode Linux source gates with 382 total / 381 passed / 0 failed / one
+Windows-only skip, 124/124 recall, the 200,000-row FTS baseline,
+official-registry vulnerabilities 0, a 42-component SBOM, a 186-file pack, and
+all three packed smokes. The tracked release-input digest is
+`e35ca201ea90dfd1d11b0cc741b27b017664689aa6b49049006aa6528544f6b1` across
+556 files; runtime digest remains
+`82e894c689b7f7873c30cadbc6ab27b722eb1b7bedb897704d5e7515271e5fc5`.
+
+Tianxuan's focused read-only follow-up independently recomputed both
+identities, marked P2-1 and P2-2 CLOSED, found no new source blocker, and
+confirmed the exact `da16172` worktree stayed clean and unchanged. Its release
+verdict remains NO-GO solely because the exact Windows Node 24 gate and owned
+Windows audit-root cleanup are unfinished.
+
 ## Windows status and live boundary
 
 The authorized Windows work computer was reachable over Tailscale and accepted
@@ -199,7 +233,7 @@ reported `quick_check=ok`, zero foreign-key violations, truth/FTS `1031/1031`,
 and `0600` modes for the database, WAL, and SHM files.
 
 The Linux clean worktree and dependency trees created for this run were
-removed, and the project worktree is clean. The state-hygiene audit reports 82
+removed, and the project worktree is clean. The state-hygiene audit reports 84
 out-of-project historical/session/cache items; none was deleted without a
 separate ownership decision. Windows isolated audit directories remain pending
 cleanup only because the authorized client is unreachable.
@@ -208,5 +242,6 @@ cleanup only because the authorized client is unreachable.
 
 1. Run the exact committed candidate through the real Windows Node 24 source
    gate, including first-install ACL creation and legacy authority migration.
-2. Give Tianxuan the delivered clean HEAD, this report, canonical evidence, and
-   prior audit chain for an eighth independent read-only review.
+2. Remove only the clearly owned Windows audit roots, verify each path is
+   absent, and make the separate release/push decision from the combined Linux,
+   Windows, and independent-review evidence.
