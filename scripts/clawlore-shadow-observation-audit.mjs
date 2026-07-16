@@ -1,6 +1,12 @@
 import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
+
+const require = createRequire(import.meta.url);
+const { createJiti } = require("jiti");
+const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: false });
+const { enforcePrivatePath } = jiti("../src/file-privacy.ts");
 
 const RECEIPT_KEYS = new Set([
   "schemaVersion",
@@ -236,8 +242,10 @@ export async function writeShadowObservationReceipt(receiptFile, audit, now = ()
   try {
     await writeFile(temporary, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });
     await chmod(temporary, 0o600);
+    enforcePrivatePath(temporary, { kind: "file" });
     await rename(temporary, receiptFile);
     await chmod(receiptFile, 0o600);
+    enforcePrivatePath(receiptFile, { kind: "file" });
   } catch (error) {
     await rm(temporary, { force: true });
     throw error;

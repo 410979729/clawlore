@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import test from "node:test";
 
 const sourceRoot = resolve("src/v2");
@@ -36,7 +36,7 @@ function importedSpecifiers(source) {
 test("V2 modules obey the declared inward dependency direction", async () => {
   const violations = [];
   for (const path of await files(sourceRoot)) {
-    const from = relative(sourceRoot, path).split("/")[0];
+    const from = relative(sourceRoot, path).split(sep)[0];
     assert.ok(allowed[from], `unclassified V2 module: ${from}`);
     const source = await readFile(path, "utf8");
     for (const specifier of importedSpecifiers(source)) {
@@ -44,7 +44,7 @@ test("V2 modules obey the declared inward dependency direction", async () => {
       const target = resolve(dirname(path), specifier.replace(/\.js$/, ".ts"));
       const targetRelative = relative(sourceRoot, target);
       if (targetRelative.startsWith("..")) continue;
-      const to = targetRelative.split("/")[0];
+      const to = targetRelative.split(sep)[0];
       if (!allowed[from].has(to)) violations.push(`${relative(sourceRoot, path)} -> ${targetRelative}`);
     }
   }

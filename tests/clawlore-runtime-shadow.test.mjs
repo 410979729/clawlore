@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
@@ -8,6 +8,7 @@ import test from "node:test";
 const require = createRequire(import.meta.url);
 const { createJiti } = require("jiti");
 const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: false });
+const { verifyPrivatePath } = jiti("../src/file-privacy.ts");
 const {
   JsonlRuntimeShadowTraceSink,
   normalizeRuntimeShadowConfig,
@@ -83,7 +84,7 @@ test("runtime shadow trace excludes raw principal and memory text", async () => 
     const serialized = await readFile(traceFile, "utf8");
     assert.doesNotMatch(serialized, /user-secret-id/);
     assert.doesNotMatch(serialized, /private raw memory text/);
-    assert.equal((await stat(traceFile)).mode & 0o777, 0o600);
+    verifyPrivatePath(traceFile, { kind: "file" });
   } finally {
     await rm(root, { recursive: true, force: true });
   }

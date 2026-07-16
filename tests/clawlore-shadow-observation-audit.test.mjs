@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -7,6 +8,11 @@ import {
   auditShadowObservation,
   writeShadowObservationReceipt,
 } from "../scripts/clawlore-shadow-observation-audit.mjs";
+
+const require = createRequire(import.meta.url);
+const { createJiti } = require("jiti");
+const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: false });
+const { verifyPrivatePath } = jiti("../src/file-privacy.ts");
 
 function receipt(overrides = {}) {
   return {
@@ -152,7 +158,7 @@ test("shadow observation receipt is private and never authorizes V2 writes", asy
         audit,
         () => new Date("2026-07-12T06:45:00.000Z"),
       );
-      assert.equal((await stat(receiptFile)).mode & 0o777, 0o600);
+      verifyPrivatePath(receiptFile, { kind: "file" });
       assert.equal(receipt.decision, "observe");
       assert.deepEqual(receipt.safety, {
         writesEnabled: false,

@@ -12,8 +12,9 @@ const { MemoryStore } = jiti("../src/store.ts");
 
 test("vector hydration expands beyond 200 stale companion rows within a bounded scan", async () => {
   const dir = mkdtempSync(join(tmpdir(), "clawlore-vector-pagination-"));
+  let store;
   try {
-    const store = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: "sqlite-bruteforce" });
+    store = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: "sqlite-bruteforce" });
     const valid = {
       id: "91000000-0000-4000-8000-000000000001",
       text: "valid row behind stale vector crowd",
@@ -46,6 +47,7 @@ test("vector hydration expands beyond 200 stale companion rows within a bounded 
     assert.ok(limits.some((limit) => limit > 200));
     assert.ok(Math.max(...limits) <= 5_000);
   } finally {
+    await store?.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });

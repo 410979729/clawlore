@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, statSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +10,7 @@ const require = createRequire(import.meta.url);
 const { createJiti } = require("jiti");
 const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: false });
 const { SqlTruthStore } = jiti("../src/sql-truth-store.ts");
+const { verifyPrivatePath } = jiti("../src/file-privacy.ts");
 
 function entry(id, metadata) {
   return {
@@ -33,7 +34,7 @@ test("SQL supersede rolls back both revisions on predecessor patch failure and k
     const oldActive = entry("old-1", { fact_key: "preference:theme", valid_from: 1 });
     store.upsert(oldActive);
     for (const path of [sqlitePath, `${sqlitePath}-wal`, `${sqlitePath}-shm`]) {
-      if (existsSync(path)) assert.equal(statSync(path).mode & 0o777, 0o600, path);
+      if (existsSync(path)) verifyPrivatePath(path, { kind: "file" });
     }
 
     const db = store.getDb();
