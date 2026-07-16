@@ -12,6 +12,7 @@ const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: fa
 const { buildReleaseReadinessReceipt } = jiti("../src/v2/application/release-readiness.ts");
 const { loadRuntimeRolloutControlsV1 } = jiti("../src/v2/adapters/openclaw/runtime-rollout-control.ts");
 const { createLegacyShadowCandidateRetrieverV1 } = jiti("../src/v2/adapters/openclaw/legacy-shadow-retrieval.ts");
+const { verifyPrivatePath } = jiti("../src/file-privacy.ts");
 
 function readiness() {
   const provenance = releaseProvenance();
@@ -37,7 +38,7 @@ function readiness() {
   });
 }
 
-test("rollout controls require one valid 0600 readiness file", async () => {
+test("rollout controls require one private readiness file", async () => {
   const root = await mkdtemp(join(tmpdir(), "clawlore-rollout-control-"));
   try {
     const readinessFile = join(root, "readiness.json");
@@ -46,6 +47,7 @@ test("rollout controls require one valid 0600 readiness file", async () => {
     const loaded = loadRuntimeRolloutControlsV1({ readinessFile, expectedBinding: artifactBinding() });
     assert.deepEqual(loaded.errors, []);
     assert.equal(loaded.readiness?.status, "ready");
+    verifyPrivatePath(readinessFile, { kind: "file" });
 
     const mismatched = loadRuntimeRolloutControlsV1({
       readinessFile,
@@ -54,10 +56,18 @@ test("rollout controls require one valid 0600 readiness file", async () => {
     assert.deepEqual(mismatched.errors, ["release_readiness_provenance_mismatch:runtimeDigest"]);
     assert.equal(mismatched.readiness, undefined);
 
-    await chmod(readinessFile, 0o644);
-    const unsafe = loadRuntimeRolloutControlsV1({ readinessFile, expectedBinding: artifactBinding() });
-    assert.deepEqual(unsafe.errors, ["rollout_control_permissions_must_be_0600"]);
-    assert.equal(unsafe.readiness, undefined);
+    if (process.platform === "win32") {
+      await chmod(readinessFile, 0o644);
+      const stillPrivate = loadRuntimeRolloutControlsV1({ readinessFile, expectedBinding: artifactBinding() });
+      assert.deepEqual(stillPrivate.errors, []);
+      assert.equal(stillPrivate.readiness?.status, "ready");
+      verifyPrivatePath(readinessFile, { kind: "file" });
+    } else {
+      await chmod(readinessFile, 0o644);
+      const unsafe = loadRuntimeRolloutControlsV1({ readinessFile, expectedBinding: artifactBinding() });
+      assert.deepEqual(unsafe.errors, ["rollout_control_permissions_must_be_0600"]);
+      assert.equal(unsafe.readiness, undefined);
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }

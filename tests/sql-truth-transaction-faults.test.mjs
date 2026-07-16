@@ -141,8 +141,9 @@ test("permission enforcement failures roll back every durable mutation", () => {
 
 test("SQL truth search errors return fail-closed empty results with stable diagnostics", async () => {
   const dir = mkdtempSync(join(tmpdir(), "clawlore-truth-search-failure-"));
+  let store;
   try {
-    const store = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: "sqlite-bruteforce" });
+    store = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: "sqlite-bruteforce" });
     await store.importEntry(entry("d", "searchable durable truth"));
     store.sqlTruthStore.search = () => { throw new Error("private path /home/a and token-shaped canary"); };
     assert.deepEqual(await store.bm25Search("searchable", 5), []);
@@ -150,6 +151,7 @@ test("SQL truth search errors return fail-closed empty results with stable diagn
     assert.match(status.lastError, /^SQL_TRUTH_SEARCH_FAILED:/);
     assert.equal(status.lastError.includes("/home/a"), false);
   } finally {
+    await store?.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });

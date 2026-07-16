@@ -12,7 +12,7 @@ import {
 const require = createRequire(import.meta.url);
 const { createJiti } = require("jiti");
 const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: false });
-const { verifyPrivatePath } = jiti("../src/file-privacy.ts");
+const { enforcePrivatePath, verifyPrivatePath } = jiti("../src/file-privacy.ts");
 
 function receipt(overrides = {}) {
   return {
@@ -54,6 +54,7 @@ async function withTrace(lines, mode, callback) {
   try {
     await writeFile(traceFile, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`, { mode });
     await chmod(traceFile, mode);
+    if (process.platform === "win32") enforcePrivatePath(traceFile, { kind: "file" });
     return await callback(traceFile);
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -67,7 +68,7 @@ test("shadow observation audit summarizes redacted accepted samples", async () =
   ], 0o600, async (traceFile) => {
     const result = await auditShadowObservation(traceFile);
     assert.equal(result.status, "pass");
-    assert.equal(result.traceMode, "600");
+    assert.equal(result.traceMode, process.platform === "win32" ? "windows-acl" : "600");
     assert.equal(result.sampleCount, 2);
     assert.deepEqual(result.statuses, { completed: 1, skipped: 1 });
     assert.equal(result.acceptedSampleCount, 1);
@@ -108,12 +109,29 @@ test("shadow observation audit rejects raw fields inside comparison evidence", a
   });
 });
 
-test("shadow observation audit rejects group-readable trace files", async () => {
+test("shadow observation audit rejects group-readable trace files", {
+  skip: process.platform === "win32",
+}, async () => {
   await withTrace([receipt()], 0o640, async (traceFile) => {
     const result = await auditShadowObservation(traceFile);
     assert.equal(result.status, "fail");
     assert.deepEqual(result.issues, ["trace_permissions:640"]);
   });
+});
+
+test("shadow observation audit rejects a Windows trace without a private DACL", {
+  skip: process.platform !== "win32",
+}, async () => {
+  const directory = await mkdtemp(join(tmpdir(), "clawlore-shadow-audit-unsafe-windows-"));
+  const traceFile = join(directory, "runtime-shadow.jsonl");
+  try {
+    await writeFile(traceFile, `${JSON.stringify(receipt())}\n`);
+    const result = await auditShadowObservation(traceFile);
+    assert.equal(result.status, "fail");
+    assert.deepEqual(result.issues, ["trace_permissions:windows_acl"]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("shadow observation gate requires direct, group-boundary, and positive samples", async () => {

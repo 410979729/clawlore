@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 const require = createRequire(import.meta.url);
 const { createJiti } = require("jiti");
 const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: false });
-const { enforcePrivatePath } = jiti("../src/file-privacy.ts");
+const { enforcePrivatePath, verifyPrivatePath } = jiti("../src/file-privacy.ts");
 
 const RECEIPT_KEYS = new Set([
   "schemaVersion",
@@ -116,11 +116,24 @@ function validateReceipt(receipt, lineNumber) {
 }
 
 export async function auditShadowObservation(traceFile) {
-  const [metadata, raw] = await Promise.all([stat(traceFile), readFile(traceFile, "utf8")]);
+  const metadata = await stat(traceFile);
   const mode = metadata.mode & 0o777;
+  const traceMode = process.platform === "win32"
+    ? "windows-acl"
+    : mode.toString(8).padStart(3, "0");
+  const issues = [];
+  let privacyVerified = true;
+  try {
+    verifyPrivatePath(traceFile, { kind: "file" });
+  } catch {
+    privacyVerified = false;
+    issues.push(process.platform === "win32"
+      ? "trace_permissions:windows_acl"
+      : `trace_permissions:${mode.toString(8)}`);
+  }
+  const raw = privacyVerified ? await readFile(traceFile, "utf8") : "";
   const lines = raw.split(/\r?\n/).filter((line) => line.trim());
   const receipts = [];
-  const issues = [];
 
   for (const [index, line] of lines.entries()) {
     try {
@@ -131,8 +144,6 @@ export async function auditShadowObservation(traceFile) {
       issues.push(`line_${index + 1}:invalid_json`);
     }
   }
-
-  if ((mode & 0o077) !== 0) issues.push(`trace_permissions:${mode.toString(8)}`);
 
   const validReceipts = receipts.filter((receipt) => receipt && typeof receipt === "object");
   const acceptedSamples = validReceipts.filter((receipt) =>
@@ -159,7 +170,7 @@ export async function auditShadowObservation(traceFile) {
   return {
     schemaVersion: 1,
     status: issues.length === 0 ? "pass" : "fail",
-    traceMode: mode.toString(8).padStart(3, "0"),
+    traceMode,
     sampleCount: validReceipts.length,
     statuses: countBy(validReceipts.map((receipt) => String(receipt.status))),
     ingressKinds: countBy(validReceipts.map((receipt) => String(receipt.ingressKind ?? "legacy_unknown"))),
