@@ -127,9 +127,14 @@ Machine-generated evidence:
 - runtime digest:
   `358a22ef60077035bc40aa4dbfa01b78111d63b395373f18e408bf6531479d22`.
 
-The canonical machine evidence is
-`clawlore-v1-release-evidence.json`. A final normal-mode clean gate must still
-prove that the checked-in evidence matches the delivered release inputs.
+The canonical machine evidence is `clawlore-v1-release-evidence.json`.
+Normal-mode verification at documentation commit
+`37ab56946487e15135c9f98400585386c4e69e8c` passed against that checked-in
+evidence: release-input and runtime digests, lock hash, package count, packed
+smokes, compatibility metadata, registry identity, and clean state matched.
+The verifier observed 44 SBOM components in its dependency environment and
+accepted that difference only because SBOM identity is an explicitly declared
+platform/toolchain variance.
 
 ## Windows status and live boundary
 
@@ -159,6 +164,5 @@ authorized rollout.
 
 1. Run the exact committed candidate through the real Windows Node 24 source
    gate, including first-install ACL creation and legacy authority migration.
-2. Run the final normal-mode Linux clean gate against the checked-in evidence.
-3. Give Tianxuan the delivered clean HEAD, this report, canonical evidence, and
+2. Give Tianxuan the delivered clean HEAD, this report, canonical evidence, and
    prior audit chain for an eighth independent read-only review.

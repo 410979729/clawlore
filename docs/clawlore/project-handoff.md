@@ -194,6 +194,13 @@ changed. The isolated audit directories still require cleanup when the client
 is reachable. Real Windows Node 24 validation therefore remains a release
 gate, not a claimed success.
 
+Normal-mode Linux verification at documentation commit
+`37ab56946487e15135c9f98400585386c4e69e8c` then re-ran the same source gate
+against the checked-in canonical evidence. All stable evidence fields matched,
+the gate again passed 379 tests with one Windows-only skip, and the environment's
+44-component SBOM was accepted under the evidence contract's explicitly
+declared SBOM/toolchain variance.
+
 The live Gateway port source was separately aligned from stale config `19421`
 to the service/listener truth `19021` under a controlled backup. That config
 restart did not deploy the candidate or alter the memory data plane.

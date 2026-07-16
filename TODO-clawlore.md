@@ -127,6 +127,9 @@ Updated: 2026-07-16
       1 Windows-only skip; typecheck/build/vector repair, 124/124 recall,
       200k FTS, official audit 0, 42-component SBOM, 186-file pack, three
       packed smokes, and `dirty=false`.
+- [x] Re-run the normal-mode Linux source gate at documentation commit
+      `37ab56946487e15135c9f98400585386c4e69e8c`; checked-in evidence matched
+      every stable field, with the declared SBOM/platform variance accepted.
 - [ ] Pass the same final source gate on the authorized real Windows Node 24
       client. Real-Windows testing found and fixed additional POSIX-mode/ACL,
       SQLite-handle, OAuth rename-race, path-separator, and output-DACL defects;
