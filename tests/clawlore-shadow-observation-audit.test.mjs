@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -54,7 +54,10 @@ async function withTrace(lines, mode, callback) {
   try {
     await writeFile(traceFile, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`, { mode });
     await chmod(traceFile, mode);
-    if (process.platform === "win32") enforcePrivatePath(traceFile, { kind: "file" });
+    if (process.platform === "win32") {
+      enforcePrivatePath(directory, { kind: "directory" });
+      enforcePrivatePath(traceFile, { kind: "file" });
+    }
     return await callback(traceFile);
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -125,10 +128,39 @@ test("shadow observation audit rejects a Windows trace without a private DACL", 
   const directory = await mkdtemp(join(tmpdir(), "clawlore-shadow-audit-unsafe-windows-"));
   const traceFile = join(directory, "runtime-shadow.jsonl");
   try {
+    enforcePrivatePath(directory, { kind: "directory" });
     await writeFile(traceFile, `${JSON.stringify(receipt())}\n`);
     const result = await auditShadowObservation(traceFile);
     assert.equal(result.status, "fail");
     assert.deepEqual(result.issues, ["trace_permissions:windows_acl"]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("shadow observation audit fails closed when the verified trace is replaced before open", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "clawlore-shadow-audit-swap-"));
+  const traceFile = join(directory, "runtime-shadow.jsonl");
+  const replacement = join(directory, "replacement.jsonl");
+  try {
+    await writeFile(traceFile, `${JSON.stringify(receipt())}\n`, { mode: 0o600 });
+    await writeFile(replacement, `${JSON.stringify(receipt({ traceId: "clawlore-shadow-replacement00001" }))}\n`, { mode: 0o600 });
+    await chmod(traceFile, 0o600);
+    await chmod(replacement, 0o600);
+    if (process.platform === "win32") {
+      enforcePrivatePath(directory, { kind: "directory" });
+      enforcePrivatePath(traceFile, { kind: "file" });
+      enforcePrivatePath(replacement, { kind: "file" });
+    }
+    const result = await auditShadowObservation(traceFile, {
+      async beforeOpen() {
+        await rm(traceFile, { force: true });
+        await rename(replacement, traceFile);
+      },
+    });
+    assert.equal(result.status, "fail");
+    assert.deepEqual(result.issues, ["trace_private_read_failed"]);
+    assert.equal(result.sampleCount, 0);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

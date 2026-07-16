@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 const require = createRequire(import.meta.url);
 const { createJiti } = require("jiti");
 const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: false });
-const { enforcePrivatePath, verifyPrivatePath } = jiti("../src/file-privacy.ts");
+const { enforcePrivatePath, readPrivateFile } = jiti("../src/file-privacy.ts");
 
 const RECEIPT_KEYS = new Set([
   "schemaVersion",
@@ -115,23 +115,29 @@ function validateReceipt(receipt, lineNumber) {
   return issues;
 }
 
-export async function auditShadowObservation(traceFile) {
-  const metadata = await stat(traceFile);
+export async function auditShadowObservation(traceFile, options = {}) {
+  const platform = options.platform ?? process.platform;
+  const metadata = await lstat(traceFile);
   const mode = metadata.mode & 0o777;
-  const traceMode = process.platform === "win32"
+  const traceMode = platform === "win32"
     ? "windows-acl"
     : mode.toString(8).padStart(3, "0");
   const issues = [];
-  let privacyVerified = true;
+  let raw = "";
   try {
-    verifyPrivatePath(traceFile, { kind: "file" });
-  } catch {
-    privacyVerified = false;
-    issues.push(process.platform === "win32"
-      ? "trace_permissions:windows_acl"
-      : `trace_permissions:${mode.toString(8)}`);
+    raw = await readPrivateFile(traceFile, {
+      platform,
+      execFile: options.execFile,
+      beforeOpen: options.beforeOpen,
+    });
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "";
+    issues.push(/CLAWLORE_PRIVATE_FILE_(?:IDENTITY_CHANGED|SECURE_OPEN_FAILED)/.test(code)
+      ? "trace_private_read_failed"
+      : platform === "win32"
+        ? "trace_permissions:windows_acl"
+        : `trace_permissions:${mode.toString(8)}`);
   }
-  const raw = privacyVerified ? await readFile(traceFile, "utf8") : "";
   const lines = raw.split(/\r?\n/).filter((line) => line.trim());
   const receipts = [];
 

@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, statSync } from "node:fs";
+import { chmodSync, constants, existsSync, lstatSync, mkdirSync, statSync } from "node:fs";
+import { lstat, open } from "node:fs/promises";
 import { dirname } from "node:path";
 let cachedWindowsCurrentUserSid = null;
 const WINDOWS_ACL_SCRIPT = [
@@ -227,6 +228,60 @@ export function verifyPrivatePath(path, options = {}) {
     }
     if (typeof process.getuid === "function" && status.uid !== process.getuid()) {
         throw new Error("CLAWLORE_PRIVATE_PATH_OWNER_INVALID");
+    }
+}
+function samePrivateFileIdentity(expected, actual) {
+    return String(expected.dev) === String(actual.dev) && String(expected.ino) === String(actual.ino);
+}
+/**
+ * Read a private regular file through the same handle whose identity is
+ * validated. The trusted-parent check removes untrusted rename authority;
+ * O_NOFOLLOW and the pre/open/post identity checks close pathname swaps.
+ */
+export async function readPrivateFile(path, options = {}) {
+    const platform = options.platform ?? process.platform;
+    verifyTrustedAncestorDirectory(dirname(path), options);
+    const initial = await lstat(path);
+    if (initial.isSymbolicLink() || !initial.isFile()) {
+        throw new Error("CLAWLORE_PRIVATE_FILE_KIND_INVALID");
+    }
+    verifyPrivatePath(path, { ...options, kind: "file" });
+    const expected = await lstat(path);
+    if (!samePrivateFileIdentity(initial, expected)) {
+        throw new Error("CLAWLORE_PRIVATE_FILE_IDENTITY_CHANGED");
+    }
+    await options.beforeOpen?.();
+    const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
+    let handle;
+    try {
+        handle = await open(path, constants.O_RDONLY | noFollow);
+    }
+    catch (error) {
+        throw new Error("CLAWLORE_PRIVATE_FILE_SECURE_OPEN_FAILED", { cause: error });
+    }
+    try {
+        const opened = await handle.stat();
+        if (!opened.isFile() || !samePrivateFileIdentity(expected, opened)) {
+            throw new Error("CLAWLORE_PRIVATE_FILE_IDENTITY_CHANGED");
+        }
+        verifyPrivatePath(path, { ...options, kind: "file" });
+        const current = await lstat(path);
+        if (!samePrivateFileIdentity(opened, current)) {
+            throw new Error("CLAWLORE_PRIVATE_FILE_IDENTITY_CHANGED");
+        }
+        if (platform !== "win32") {
+            const mode = opened.mode & 0o777;
+            if (mode !== 0o600) {
+                throw new Error(`CLAWLORE_PRIVATE_FILE_MODE_INVALID:${mode.toString(8)}`);
+            }
+            if (typeof process.getuid === "function" && opened.uid !== process.getuid()) {
+                throw new Error("CLAWLORE_PRIVATE_FILE_OWNER_INVALID");
+            }
+        }
+        return await handle.readFile({ encoding: "utf8" });
+    }
+    finally {
+        await handle.close();
     }
 }
 /**
