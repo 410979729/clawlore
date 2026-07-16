@@ -13,6 +13,7 @@ import {
   ALLOWED_PLATFORM_VARIANCE,
   stableReleaseEvidenceMatches,
 } from "./release-evidence-contract.mjs";
+import { releaseInputIdentity } from "./release-input-identity.mjs";
 import { assertReleaseSourceState } from "./release-source-state.mjs";
 
 async function exists(path) {
@@ -70,41 +71,6 @@ function runOpenClawCapture(command, args, options = {}) {
     return runCapture(process.execPath, [command, ...args], options);
   }
   return runCapture(command, args, options);
-}
-
-async function releaseInputIdentity({ gitRoot, sourceRoot, diffPathspec }) {
-  const tracked = runCapture("git", ["ls-files", "-z", "--", diffPathspec || "."])
-    .split("\0")
-    .filter(Boolean);
-  const hash = createHash("sha256");
-  let fileCount = 0;
-  for (const gitRelative of tracked.sort()) {
-    const absolute = resolve(gitRoot, gitRelative);
-    const sourceRelative = relative(sourceRoot, absolute).replaceAll("\\", "/");
-    if (!sourceRelative || sourceRelative.startsWith("../")) continue;
-    if (
-      sourceRelative === "TODO-clawlore.md" ||
-      sourceRelative === "docs/clawlore/project-handoff.md" ||
-      sourceRelative.startsWith("docs/clawlore/eval/")
-    ) {
-      continue;
-    }
-    const content = await readFile(absolute);
-    hash.update(`${sourceRelative}\u0000${content.length}\u0000`);
-    hash.update(content);
-    hash.update("\n");
-    fileCount++;
-  }
-  return {
-    algorithm: "sha256-tracked-release-inputs-v1",
-    digest: hash.digest("hex"),
-    fileCount,
-    excludedAuditLedger: [
-      "TODO-clawlore.md",
-      "docs/clawlore/project-handoff.md",
-      "docs/clawlore/eval/",
-    ],
-  };
 }
 
 function parseJsonWithPreamble(raw, label) {
@@ -762,7 +728,7 @@ const releaseEvidence = {
   schema: "clawlore.release-evidence.v2",
   package: `${packageJson.name}@${packageJson.version}`,
   observedCommit: gitCommit,
-  releaseInput: await releaseInputIdentity({ gitRoot, sourceRoot, diffPathspec }),
+  releaseInput: releaseInputIdentity({ gitRoot, sourceRoot, diffPathspec }),
   runtimeDigest: candidateIdentity.digest,
   sourceOnly,
   dirty: gitDirty,
