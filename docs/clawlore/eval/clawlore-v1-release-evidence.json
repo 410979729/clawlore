@@ -1,10 +1,10 @@
 {
   "schema": "clawlore.release-evidence.v2",
   "package": "clawlore@1.2.0",
-  "observedCommit": "19e36bf46a228a2e865316741c8216bb284a3de4",
+  "observedCommit": "60e078b5fa411fca4071f254b55e1c73388c081b",
   "releaseInput": {
     "algorithm": "sha256-tracked-release-inputs-v1",
-    "digest": "380a8f3f70ded751b7951c8e4d5c81d6aaba47e5397217a6dad23d849498aa65",
+    "digest": "e87ca138d1926f5605b70508c28df0fbed96a987fe9d559d464c7ce87f6f2053",
     "fileCount": 557,
     "excludedAuditLedger": [
       "TODO-clawlore.md",
@@ -23,7 +23,7 @@
     "tool": "npm sbom --package-lock-only --sbom-format cyclonedx",
     "toolVersion": "11.9.0",
     "componentCount": 42,
-    "sha256": "3b29a41fa4d3efe36f10a26d63aaa66b4e9ef2acc78e0fd43e6344a40be1adee"
+    "sha256": "0c17c678be8387e61724d9532a92e27ee65eac225a7417ce2afe9780edfc9a90"
   },
   "toolchain": {
     "node": "v24.14.0",
