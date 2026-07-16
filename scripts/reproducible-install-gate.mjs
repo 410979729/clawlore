@@ -5,7 +5,9 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 
 function run(command, args, cwd, capture = false) {
-  const result = spawnSync(command, args, {
+  const npmExecPath = String(process.env.npm_execpath || "").trim();
+  const useWindowsNpmCli = process.platform === "win32" && command === "npm" && /npm-cli\.js$/i.test(npmExecPath);
+  const result = spawnSync(useWindowsNpmCli ? process.execPath : command, useWindowsNpmCli ? [npmExecPath, ...args] : args, {
     cwd,
     encoding: "utf8",
     stdio: capture ? "pipe" : "inherit",

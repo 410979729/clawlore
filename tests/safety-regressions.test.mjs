@@ -612,6 +612,8 @@ test("operator CLI exposes Yuheng 1.6 governance function surface", () => {
 test("release gate includes source/live separation and OpenClaw runtime smoke", () => {
   const gate = readFileSync(new URL("../scripts/release-gate.mjs", import.meta.url), "utf8");
   const wrapper = readFileSync(new URL("../scripts/run-release-gate.mjs", import.meta.url), "utf8");
+  const preflight = readFileSync(new URL("../scripts/dependency-preflight.mjs", import.meta.url), "utf8");
+  const reproducibility = readFileSync(new URL("../scripts/reproducible-install-gate.mjs", import.meta.url), "utf8");
   const workflow = readFileSync(new URL("../.github/workflows/release-gate.yml", import.meta.url), "utf8");
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const indexSource = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
@@ -654,6 +656,12 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   assert.match(gate, /releaseInputIdentity/);
   assert.match(gate, /checked-in release evidence does not match current release inputs/);
   assert.match(gate, /runOpenClawCapture/);
+  assert.match(gate, /npm_execpath/);
+  assert.match(gate, /process\.execPath/);
+  assert.match(preflight, /npm_execpath/);
+  assert.match(preflight, /process\.execPath/);
+  assert.match(reproducibility, /npm_execpath/);
+  assert.match(reproducibility, /process\.execPath/);
   assert.match(workflow, /ubuntu-latest/);
   assert.match(workflow, /windows-latest/);
   assert.match(workflow, /npm run release:gate:source/);

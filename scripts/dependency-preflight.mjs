@@ -3,11 +3,18 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 export function inspectDependencyTree(root = process.cwd()) {
-  const result = spawnSync("npm", ["ls", "--all", "--json"], {
+  const npmArgs = ["ls", "--all", "--json"];
+  const npmExecPath = String(process.env.npm_execpath || "").trim();
+  const useWindowsNpmCli = process.platform === "win32" && /npm-cli\.js$/i.test(npmExecPath);
+  const result = spawnSync(
+    useWindowsNpmCli ? process.execPath : "npm",
+    useWindowsNpmCli ? [npmExecPath, ...npmArgs] : npmArgs,
+    {
     cwd: resolve(root),
     encoding: "utf8",
     shell: false,
-  });
+    },
+  );
   let report = {};
   try {
     report = JSON.parse(result.stdout || "{}");

@@ -20,8 +20,20 @@ async function exists(path) {
   }
 }
 
+function spawnTarget(command, args) {
+  if (process.platform === "win32" && command === "npm") {
+    const npmExecPath = String(process.env.npm_execpath || "").trim();
+    if (!npmExecPath || !/npm-cli\.js$/i.test(npmExecPath)) {
+      throw new Error("release gate failed: npm_execpath is required for shell-free Windows npm execution");
+    }
+    return { command: process.execPath, args: [npmExecPath, ...args] };
+  }
+  return { command, args };
+}
+
 function run(command, args, options = {}) {
-  const result = spawnSync(command, args, {
+  const target = spawnTarget(command, args);
+  const result = spawnSync(target.command, target.args, {
     stdio: "inherit",
     shell: false,
     cwd: options.cwd,
@@ -33,7 +45,8 @@ function run(command, args, options = {}) {
 }
 
 function runCapture(command, args, options = {}) {
-  const result = spawnSync(command, args, {
+  const target = spawnTarget(command, args);
+  const result = spawnSync(target.command, target.args, {
     encoding: "utf8",
     shell: false,
     cwd: options.cwd,
