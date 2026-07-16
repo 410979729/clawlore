@@ -678,6 +678,8 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   assert.match(workflow, /openclaw@2026\.7\.1-beta\.5/);
   assert.match(workflow, /npm run release:gate:source/);
   assert.equal(buildConfig.compilerOptions.newLine, "lf");
+  assert.match(gitAttributes, /^\/package\.json text eol=lf$/m);
+  assert.match(gitAttributes, /^\/openclaw\.plugin\.json text eol=lf$/m);
   assert.match(gitAttributes, /^\/src\/\*\*\/\*\.ts text eol=lf$/m);
   assert.match(gitAttributes, /^\/dist\/\*\.js text eol=lf$/m);
   assert.match(gitAttributes, /^\/dist\/\*\*\/\*\.js text eol=lf$/m);
