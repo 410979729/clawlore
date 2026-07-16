@@ -244,6 +244,55 @@ both P2 findings, found no new source blocker, and left the exact worktree
 clean and unchanged. Its overall verdict remains NO-GO only because the exact
 real-Windows gate and owned audit-root cleanup are still open.
 
+The subsequently restored Windows work computer exposed further defects that
+Linux could not model: POSIX mode checks were not Windows DACL checks, several
+test/smoke paths deleted SQLite trees before closing handles, reused Windows
+checkouts could retain CRLF runtime manifests, and the supply-chain audit
+spawned PATH npm instead of the exact npm CLI driving the gate. The source now
+uses DACL-aware privacy checks, deterministic store closure, LF runtime
+manifests/build output, and `process.execPath + npm_execpath` on Windows.
+
+Tianxuan then independently audited exact candidate
+`d4f778134603d348cb7874eb2674d1951d5235a5` and found two P1 blockers. The
+release-input digest still read working-tree bytes outside the runtime-only LF
+rules, and the shadow observation audit verified a pathname before separately
+reading that pathname. Commit `70c07ebd207146f86241cfbbbad929b518bb0e4d`
+now enumerates committed `HEAD` blobs and hashes their binary contents; its
+regression proves an LF/CRLF working-tree transformation cannot change the
+identity while a committed blob change does. Commit
+`fc8e5c23d1460a4ceb3c93d5548f2747a9a75624` verifies the containing directory
+trust boundary, opens with `O_NOFOLLOW` where available, binds the initial,
+opened, and post-open identity, validates opened-handle mode/owner, reads from
+that same handle, and closes it in `finally`. A controlled replacement race
+fails closed with zero parsed samples.
+
+Canonical evidence commit `df0f80e3105bc6101a6fd78d0eb11a49983390cf`
+passed both evidence-write and normal-mode Linux source gates: 385 total / 383
+passed / 0 failed / two platform skips, 124/124 recall, the 200,000-row FTS
+baseline, official-registry vulnerabilities 0, a 42-component SBOM, a
+186-file pack, and all three packed smokes. The canonical Git-blob v2
+release-input digest is
+`4fb40d68eba161e1f20c53f228a16587d1dee3449d6d13e2030c4b8b534e9f11`
+across 559 files. Runtime digest is
+`ae1892b1622eacc9db7c207179444696abc8274bc464e79d440af27a6e9cb4a1`.
+Tianxuan's exact `df0f80e` focused closure independently recomputed both
+identities, closed both P1 findings and the candidate-provenance P2, found no
+remaining source/material blocker, and left the worktree unchanged. Its only
+new finding is a non-blocking P3: a same-inode permission race may report the
+pre-open mode even though the read itself still fails closed.
+
+Real-Windows evidence is substantial but not final for `df0f80e`. An earlier
+candidate completed 382 tests with 374 passed, 0 failed, and 8 Windows skips,
+then passed typecheck, vector-repair smoke, build, 124/124 recall, the 200,000
+row baseline, byte-identical cross-platform runtime identity, and packed
+runtime/LanceDB smokes. It stopped at an audit transport failure. The pinned
+npm audit fix then passed a standalone Windows vulnerabilities-0 check, but a
+later full run lost SSH before returning its final exit code. The work computer
+became unreachable again before `df0f80e` could be transferred and fully run.
+Therefore overall release status remains NO-GO solely on the exact Windows
+gate and owned-directory cleanup; the partial evidence is not promoted to a
+pass.
+
 Final live verification was read-only: `openclaw-gateway-tianji.service` was
 `active/running`, port `19021` returned `status=live`, and the loaded extension
 remained `scope-recall-openclaw@1.1.0`. The live SQLite companion reported
@@ -298,9 +347,11 @@ not an implied approval to switch later without fresh evidence.
 
 ## Next controlled boundary
 
-1. Give Tianxuan the final clean HEAD, this handoff, the identity-transition runbook, and
-   all dated audit-remediation reports for independent read-only re-audit.
-2. If the audit passes, create or rename the GitHub repository to `clawlore`,
+1. When the authorized work computer is stably reachable, run exact
+   `df0f80e3105bc6101a6fd78d0eb11a49983390cf` through the Windows Node 24
+   source gate, then remove and verify absence of only the clearly owned audit
+   roots.
+2. If the external Windows gates pass, create or rename the GitHub repository to `clawlore`,
    verify the destination, then update `origin` and push the audited commit.
 3. Treat any live identity migration as a separate backup-backed rollout with
    an atomic config/extension switch, post-restart gates, and rollback evidence.

@@ -164,12 +164,37 @@ Updated: 2026-07-16
       and the final worktree remained clean at `da16172ce49da5c5ef53d2865b1200ac1b33eaf8`.
       The review verdict remains NO-GO solely because the external Windows
       gate and owned-directory cleanup below are unfinished.
+- [x] Close the additional defects exposed by the isolated real-Windows run:
+      Windows DACL-aware trace validation, SQLite/MemoryStore closure before
+      recursive cleanup, LF-stable runtime output/manifests, and shell-free
+      invocation of the exact npm CLI used by the release gate.
+- [x] Close Tianxuan's post-Windows P1 findings. Commit
+      `70c07ebd207146f86241cfbbbad929b518bb0e4d` hashes canonical `HEAD` Git
+      blobs instead of platform working-tree bytes. Commit
+      `fc8e5c23d1460a4ceb3c93d5548f2747a9a75624` verifies the trusted parent,
+      opens without following symlinks, binds pre/open/post identity, and
+      reads the trace through that same private handle.
+- [x] Generate and verify canonical evidence at independently audited source/
+      evidence HEAD `df0f80e3105bc6101a6fd78d0eb11a49983390cf`:
+      both Linux gates passed 385 total / 383 passed / 0 failed / 2 platform
+      skips, 124/124 recall, 200k FTS, vulnerabilities 0, 42-component SBOM,
+      186-file pack, and all three packed smokes. Git-blob v2 release-input
+      digest is `4fb40d68eba161e1f20c53f228a16587d1dee3449d6d13e2030c4b8b534e9f11`
+      across 559 files; runtime digest is
+      `ae1892b1622eacc9db7c207179444696abc8274bc464e79d440af27a6e9cb4a1`.
+- [x] Receive Tianxuan's exact `df0f80e` focused closure. Both P1 findings and
+      exact-candidate provenance are CLOSED; source/material verdict is GO.
+      One non-blocking P3 remains: a failed same-inode mode race can report the
+      pre-open mode even though the private read still fails closed.
 - [ ] Pass the same final source gate on the authorized real Windows Node 24
-      client. Real-Windows testing found and fixed additional POSIX-mode/ACL,
-      SQLite-handle, OAuth rename-race, path-separator, and output-DACL defects;
-      the final focused rerun was interrupted when the client became unreachable.
-      A single bounded reconnect at final HEAD timed out on 2026-07-16; no
-      continuous polling was performed.
+      client at exact current source/evidence candidate `df0f80e`. An earlier
+      candidate reached 382 total / 374 passed / 0 failed / 8 Windows skips,
+      typecheck, vector-repair, build, 124/124 recall, 200k FTS, byte-identical
+      runtime identity, and packed runtime/LanceDB smokes before an npm-audit
+      transport failure; the audit child-process defect was fixed and its
+      standalone Windows check returned vulnerabilities 0. A later full run
+      lost SSH before returning a final exit code. None of those partial runs
+      is accepted as the exact `df0f80e` Windows gate.
 - [ ] Remove only the clearly owned Windows audit roots after the client is
       reachable, then verify each path is absent. Do not touch user-owned or
       ownership-unclear files.

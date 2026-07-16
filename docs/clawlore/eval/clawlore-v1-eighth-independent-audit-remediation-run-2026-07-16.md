@@ -203,6 +203,43 @@ confirmed the exact `da16172` worktree stayed clean and unchanged. Its release
 verdict remains NO-GO solely because the exact Windows Node 24 gate and owned
 Windows audit-root cleanup are unfinished.
 
+## Post-eighth Windows findings and P1 closure
+
+The restored authorized work computer ran isolated Node 24 tests without
+changing its system Node, persistent environment, services, software, or user
+files. Windows semantics exposed DACL-versus-mode assumptions, open SQLite
+handles during cleanup, CRLF byte identity in reused checkouts, and PATH npm in
+the supply-chain audit. The corresponding focused source fixes passed Linux
+regressions and real-Windows partial gates. A fresh Windows checkout proved all
+173 runtime-identity files byte-equal to Git and reproduced Linux runtime
+digest `82e894c689b7f7873c30cadbc6ab27b722eb1b7bedb897704d5e7515271e5fc5`
+before the later hardened private-read change.
+
+Tianxuan's independent review of exact
+`d4f778134603d348cb7874eb2674d1951d5235a5` found two P1 source blockers:
+release-input identity used platform working-tree bytes, and shadow observation
+verified then re-resolved a trace pathname. Commit
+`70c07ebd207146f86241cfbbbad929b518bb0e4d` replaces the former with canonical
+Git-blob identity. Commit `fc8e5c23d1460a4ceb3c93d5548f2747a9a75624`
+adds the trusted-parent, no-follow, pre/open/post identity-bound same-handle
+read and a forced replacement-race regression.
+
+Evidence-write and normal-mode Linux gates both passed at exact evidence HEAD
+`df0f80e3105bc6101a6fd78d0eb11a49983390cf`: 385 total / 383 passed /
+0 failed / two platform skips; typecheck, build, vector repair, 124/124 recall,
+200,000-row FTS, vulnerabilities 0, 42-component SBOM, 186-file pack, and all
+three packed smokes. Git-blob v2 release-input identity is
+`4fb40d68eba161e1f20c53f228a16587d1dee3449d6d13e2030c4b8b534e9f11`
+over 559 files; hardened runtime identity is
+`ae1892b1622eacc9db7c207179444696abc8274bc464e79d440af27a6e9cb4a1`.
+
+Tianxuan's exact `df0f80e` focused closure independently recomputed the two
+identities, closed both P1 findings and exact-candidate provenance, and issued
+a source/material GO with no remaining blocker. One P3 diagnostic issue is
+accepted as non-blocking for this candidate: a same-inode permission race can
+report the pre-open mode, while the opened-handle read still fails closed and
+parses zero samples.
+
 ## Windows status and live boundary
 
 The authorized Windows work computer was reachable over Tailscale and accepted
@@ -217,10 +254,14 @@ durable rewrite suite and the initial unsafe-rewrite cases before the client
 disappeared from the tailnet.
 
 No live Windows plugin, service, system configuration, or user data was
-changed, but isolated audit directories were changed and remain to be removed
-when the authorized client is reachable. The exact final Windows source gate
-therefore remains pending. This report does not claim cross-platform release
-acceptance.
+changed. An earlier candidate passed 382 tests with 374 passed / 0 failed /
+8 Windows skips, typecheck, vector repair, build, 124/124 recall, 200,000-row
+FTS, and packed runtime/LanceDB smokes before the audit endpoint failed. The
+pinned audit path then passed a standalone Windows vulnerabilities-0 check. A
+later full run lost SSH without returning a final exit code, and the client
+became unreachable before exact `df0f80e` could run. Isolated audit directories
+remain to be removed when the authorized client is reachable. This report does
+not claim cross-platform release acceptance.
 
 No candidate file, live SQLite/LanceDB data, plugin config, memory slot, or V2
 control was changed. No Gateway restart, push, tag, release, or deployment was
