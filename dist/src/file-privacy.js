@@ -231,7 +231,13 @@ export function verifyPrivatePath(path, options = {}) {
 }
 export function ensurePrivateDirectory(path, options = {}) {
     if (existsSync(path)) {
-        verifyPrivatePath(path, { ...options, kind: "directory" });
+        // The caller is declaring `path` itself to be a dedicated private leaf.
+        // A freshly-created platform temp or application directory may already
+        // exist with a safe inherited ACL/mode, so validate its trust boundary
+        // before tightening only this leaf. Never apply this to an ancestor found
+        // while walking a missing suffix below.
+        verifyTrustedAncestorDirectory(path, options);
+        enforcePrivatePath(path, { ...options, kind: "directory" });
         return;
     }
     const missing = [];

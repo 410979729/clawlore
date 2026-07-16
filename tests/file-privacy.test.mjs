@@ -59,6 +59,19 @@ test("private directory creation accepts a non-writable 0755 ancestor without re
   }
 });
 
+test("an existing dedicated POSIX leaf is tightened after its trust boundary is validated", {
+  skip: process.platform === "win32",
+}, () => {
+  const root = mkdtempSync(join(tmpdir(), "clawlore-private-existing-posix-"));
+  try {
+    chmodSync(root, 0o755);
+    ensurePrivateDirectory(root, { platform: "linux" });
+    assert.equal(lstatSync(root).mode & 0o777, 0o700);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("private directory creation rejects a group-writable ancestor without rewriting it", {
   skip: process.platform === "win32",
 }, () => {
@@ -196,6 +209,41 @@ test("Windows directory creation accepts trusted inherited ancestor ACLs and har
       join(root, "memory"),
       nested,
     ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an existing dedicated Windows leaf is tightened after trusted-ancestor validation", () => {
+  const root = mkdtempSync(join(tmpdir(), "clawlore-private-existing-windows-"));
+  const currentSid = "S-1-5-21-1000";
+  const modes = [];
+  const fakeExec = (command, args, options = {}) => {
+    if (command === "whoami.exe") return `"fixture","${currentSid}"\r\n`;
+    assert.equal(command, "powershell.exe");
+    const mode = options.env.CLAWLORE_PRIVATE_MODE;
+    modes.push(mode);
+    if (mode === "verify") {
+      return JSON.stringify({
+        ownerSid: currentSid,
+        protected: false,
+        access: [
+          { sid: currentSid, type: "Allow", rights: "FullControl", inherited: true },
+          { sid: "S-1-5-18", type: "Allow", rights: "FullControl", inherited: true },
+          { sid: "S-1-5-32-544", type: "Allow", rights: "FullControl", inherited: true },
+          { sid: "S-1-5-32-545", type: "Allow", rights: "ReadAndExecute", inherited: true },
+        ],
+      });
+    }
+    return JSON.stringify({
+      ownerSid: currentSid,
+      protected: true,
+      access: [{ sid: currentSid, type: "Allow", rights: "FullControl", inherited: false }],
+    });
+  };
+  try {
+    ensurePrivateDirectory(root, { platform: "win32", execFile: fakeExec });
+    assert.deepEqual(modes, ["verify", "enforce"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
