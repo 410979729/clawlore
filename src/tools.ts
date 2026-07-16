@@ -343,7 +343,7 @@ async function retrieveWithRetry(
 async function resolveMemoryId(
   context: ToolContext,
   memoryRef: string,
-  scopeFilter: string[],
+  scopeFilter?: string[],
 ): Promise<
   | { ok: true; id: string }
   | { ok: false; message: string; details?: Record<string, unknown> }
@@ -1734,7 +1734,7 @@ export function registerMemoryDebugTool(
             const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_debug");
             if (accessResolution.ok === false) return accessResolution.response;
             const safeLimit = clampInt(limit, 1, 20);
-            let scopeFilter = accessResolution.access.scopeFilter ?? [];
+            let scopeFilter = accessResolution.access.scopeFilter;
             if (scope) {
               if (accessResolution.access.isAccessible(scope)) {
                 scopeFilter = [scope];
@@ -1865,7 +1865,7 @@ export function registerMemoryListTool(
           if (accessResolution.ok === false) return accessResolution.response;
 
           // Determine accessible scopes
-          let scopeFilter = accessResolution.access.scopeFilter ?? [];
+          let scopeFilter = accessResolution.access.scopeFilter;
           if (scope) {
             if (accessResolution.access.isAccessible(scope)) {
               scopeFilter = [scope];
@@ -2020,7 +2020,7 @@ export function registerMemoryContextTool(
             const agentId = agentResolution.agentId;
             const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_context");
             if (accessResolution.ok === false) return accessResolution.response;
-            let scopeFilter = accessResolution.access.scopeFilter ?? [];
+            let scopeFilter = accessResolution.access.scopeFilter;
             if (scope) {
               if (!accessResolution.access.isAccessible(scope)) {
                 return {
@@ -2134,7 +2134,7 @@ export function registerMemoryInspectTool(
             const agentId = agentResolution.agentId;
             const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_inspect");
             if (accessResolution.ok === false) return accessResolution.response;
-            let scopeFilter = accessResolution.access.scopeFilter ?? [];
+            let scopeFilter = accessResolution.access.scopeFilter;
             if (scope) {
               if (!accessResolution.access.isAccessible(scope)) {
                 return {
@@ -2225,7 +2225,7 @@ export function registerMemoryGovernTool(
           const agentId = agentResolution.agentId;
           const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_govern");
           if (accessResolution.ok === false) return accessResolution.response;
-          let scopeFilter = accessResolution.access.scopeFilter ?? [];
+          let scopeFilter = accessResolution.access.scopeFilter;
           if (scope) {
             if (!accessResolution.access.isAccessible(scope)) {
               return {
@@ -2329,7 +2329,13 @@ export function registerMemoryPromoteTool(
           const agentId = agentResolution.agentId;
           const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_promote");
           if (accessResolution.ok === false) return accessResolution.response;
-          let scopeFilter = accessResolution.access.scopeFilter ?? [];
+          let scopeFilter = accessResolution.access.scopeFilter;
+          if (!scope && scopeFilter === undefined) {
+            return {
+              content: [{ type: "text", text: "System bypass callers must provide an explicit write scope." }],
+              details: { error: "explicit_scope_required" },
+            };
+          }
           if (scope) {
             if (!accessResolution.access.isAccessible(scope)) {
               return {
@@ -2436,7 +2442,13 @@ export function registerMemoryArchiveTool(
           const agentId = agentResolution.agentId;
           const accessResolution = requireRuntimeMemoryAccess(runtimeContext, agentId, toolCtx, runtimeCtx, "memory_archive");
           if (accessResolution.ok === false) return accessResolution.response;
-          let scopeFilter = accessResolution.access.scopeFilter ?? [];
+          let scopeFilter = accessResolution.access.scopeFilter;
+          if (!scope && scopeFilter === undefined) {
+            return {
+              content: [{ type: "text", text: "System bypass callers must provide an explicit write scope." }],
+              details: { error: "explicit_scope_required" },
+            };
+          }
           if (scope) {
             if (!accessResolution.access.isAccessible(scope)) {
               return {

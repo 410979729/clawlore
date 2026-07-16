@@ -7,6 +7,7 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
+  readSync,
   readFileSync,
   readdirSync,
   realpathSync,
@@ -35,11 +36,12 @@ export interface LegacyAuthorityMigrationPlan {
 }
 
 export interface LegacyAuthorityMigrationReceipt {
-  version: 2;
+  version: 3;
   status: "prepared" | "completed" | "failed";
   migrationId: string;
   sourceDatabase: string;
   backupDatabase: string;
+  receiptFile: string;
   backupSha256: string;
   sourceSnapshotSha256: string;
   sourceTruthRows: number;
@@ -57,6 +59,8 @@ interface InternalMigrationEvidence {
   sourceTruthRows: number;
   backupSha256: string;
   sourceSnapshotSha256: string;
+  preparedAt: string;
+  backupDurableAt: string;
   completedAt: number;
 }
 
@@ -144,7 +148,7 @@ function preparePrivateLeafDirectory(directory: string): boolean {
 }
 
 function fsyncFileAndParent(path: string): void {
-  const fd = openSync(path, "r");
+  const fd = openSync(path, "r+");
   try { fsyncSync(fd); } finally { closeSync(fd); }
   if (process.platform !== "win32") {
     const directoryFd = openSync(dirname(path), "r");
@@ -162,7 +166,8 @@ function readInternalMigrationEvidence(sqlitePath: string): InternalMigrationEvi
   try {
     const row = db.prepare(`
       SELECT m.migration_id, m.source_truth_rows, m.backup_sha256,
-             m.source_snapshot_sha256, m.completed_at
+             m.source_snapshot_sha256, m.prepared_at, m.backup_durable_at,
+             m.completed_at
       FROM clawlore_sql_truth_authority AS a
       JOIN clawlore_sql_truth_migrations AS m ON m.migration_id = a.migration_id
       WHERE a.singleton = 1 AND a.origin = 'legacy-upgrade'
@@ -172,14 +177,24 @@ function readInternalMigrationEvidence(sqlitePath: string): InternalMigrationEvi
       source_truth_rows?: number;
       backup_sha256?: string;
       source_snapshot_sha256?: string;
+      prepared_at?: string;
+      backup_durable_at?: string;
       completed_at?: number;
     } | undefined;
-    if (!row?.migration_id || !row.backup_sha256 || !row.source_snapshot_sha256) return null;
+    if (
+      !row?.migration_id ||
+      !row.backup_sha256 ||
+      !row.source_snapshot_sha256 ||
+      !isIsoTimestamp(row.prepared_at) ||
+      !isIsoTimestamp(row.backup_durable_at)
+    ) return null;
     return {
       migrationId: row.migration_id,
       sourceTruthRows: Number(row.source_truth_rows),
       backupSha256: row.backup_sha256,
       sourceSnapshotSha256: row.source_snapshot_sha256,
+      preparedAt: row.prepared_at,
+      backupDurableAt: row.backup_durable_at,
       completedAt: Number(row.completed_at),
     };
   } finally {
@@ -193,25 +208,101 @@ async function sha256File(path: string): Promise<string> {
   return hash.digest("hex");
 }
 
-function writePrivateJsonAtomic(path: string, value: unknown): void {
+function sha256FileSync(path: string): string {
+  const hash = createHash("sha256");
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  const fd = openSync(path, "r");
+  try {
+    let bytesRead = 0;
+    do {
+      bytesRead = readSync(fd, buffer, 0, buffer.length, null);
+      if (bytesRead > 0) hash.update(buffer.subarray(0, bytesRead));
+    } while (bytesRead > 0);
+  } finally {
+    closeSync(fd);
+  }
+  return hash.digest("hex");
+}
+
+function isIsoTimestamp(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) {
+    return false;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString() === value;
+}
+
+function completedExternalReceiptMatches(
+  paths: CanonicalMigrationPaths,
+  internal: InternalMigrationEvidence,
+): boolean {
+  try {
+    verifyPrivatePath(paths.backupPath, { kind: "file" });
+    verifyPrivatePath(paths.receiptPath, { kind: "file" });
+    const parsed = JSON.parse(readFileSync(paths.receiptPath, "utf8")) as Partial<LegacyAuthorityMigrationReceipt>;
+    if (
+      parsed.version !== 3 ||
+      parsed.status !== "completed" ||
+      parsed.migrationId !== internal.migrationId ||
+      parsed.sourceDatabase !== basename(paths.sqlitePath) ||
+      parsed.backupDatabase !== basename(paths.backupPath) ||
+      parsed.receiptFile !== basename(paths.receiptPath) ||
+      parsed.backupSha256 !== internal.backupSha256 ||
+      parsed.sourceSnapshotSha256 !== internal.sourceSnapshotSha256 ||
+      parsed.sourceTruthRows !== internal.sourceTruthRows ||
+      parsed.lockProtocol !== "sqlite-begin-immediate-snapshot-digest" ||
+      parsed.preparedAt !== internal.preparedAt ||
+      parsed.backupDurableAt !== internal.backupDurableAt ||
+      parsed.completedAt !== new Date(internal.completedAt).toISOString() ||
+      JSON.stringify(parsed.postInspection) !== JSON.stringify(SqlTruthStore.inspectAuthority(paths.sqlitePath)) ||
+      (parsed.recoveredAt !== undefined && !isIsoTimestamp(parsed.recoveredAt))
+    ) {
+      return false;
+    }
+    if (sha256FileSync(paths.backupPath) !== internal.backupSha256) return false;
+    const backupInspection = SqlTruthStore.inspectAuthority(paths.backupPath);
+    return backupInspection.status === "legacy" &&
+      backupInspection.truthRows === internal.sourceTruthRows &&
+      SqlTruthStore.legacySnapshotDigest(paths.backupPath) === internal.sourceSnapshotSha256;
+  } catch {
+    return false;
+  }
+}
+
+function writePrivateJsonAtomic(
+  path: string,
+  value: unknown,
+  faultInjector?: (point: string) => void,
+  phase = "receipt",
+): void {
   const directory = dirname(path);
   verifyPrivatePath(directory, { kind: "directory" });
   const temporary = join(
     directory,
     `.${basename(path)}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`,
   );
+  let fd: number | null = null;
   try {
-    writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx", mode: 0o600 });
+    fd = openSync(temporary, "wx+", 0o600);
+    writeFileSync(fd, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8" });
     enforcePrivatePath(temporary, { kind: "file" });
-    const fd = openSync(temporary, "r");
-    try { fsyncSync(fd); } finally { closeSync(fd); }
+    faultInjector?.(`${phase}_before_temp_fsync`);
+    fsyncSync(fd);
+    faultInjector?.(`${phase}_after_temp_fsync`);
+    closeSync(fd);
+    fd = null;
+    faultInjector?.(`${phase}_before_rename`);
     renameSync(temporary, path);
     enforcePrivatePath(path, { kind: "file" });
     if (process.platform !== "win32") {
       const dirFd = openSync(directory, "r");
       try { fsyncSync(dirFd); } finally { closeSync(dirFd); }
     }
+    faultInjector?.(`${phase}_after_rename`);
   } finally {
+    if (fd !== null) {
+      try { closeSync(fd); } catch {}
+    }
     rmSync(temporary, { force: true });
   }
 }
@@ -258,20 +349,14 @@ export function inspectLegacyAuthorityMigration(params: {
     if (!internal || !existsSync(paths.backupPath)) {
       return { status: "blocked", reason: "source_authority_valid", ...output };
     }
-    let externalStatus: string | null = null;
-    if (existsSync(paths.receiptPath)) {
-      try {
-        externalStatus = String(JSON.parse(readFileSync(paths.receiptPath, "utf8")).status || "");
-      } catch {
-        externalStatus = "unreadable";
-      }
-    }
-    if (externalStatus === "completed") {
+    if (existsSync(paths.receiptPath) && completedExternalReceiptMatches(paths, internal)) {
       return { status: "blocked", reason: "migration_already_completed", ...output };
     }
     return {
       status: "recoverable",
-      reason: "internal_migration_committed_external_receipt_recoverable",
+      reason: existsSync(paths.receiptPath)
+        ? "external_receipt_corrupt_recoverable"
+        : "internal_migration_committed_external_receipt_recoverable",
       ...output,
       truthRows: internal.sourceTruthRows,
     };
@@ -297,7 +382,7 @@ export async function migrateLegacySqlAuthority(params: {
   const paths = canonicalMigrationPaths(params);
   const plan = inspectLegacyAuthorityMigration(params);
   if (plan.status === "recoverable") {
-    return recoverLegacySqlAuthorityReceipt(paths);
+    return recoverLegacySqlAuthorityReceipt(paths, params.faultInjector);
   }
   if (plan.status !== "ready" || plan.truthRows === null) {
     throw new Error(`CLAWLORE_SQL_TRUTH_LEGACY_UPGRADE_REFUSED: ${plan.reason}`);
@@ -340,11 +425,12 @@ export async function migrateLegacySqlAuthority(params: {
   const preparedAt = new Date().toISOString();
   const backupDurableAt = new Date().toISOString();
   let receipt: LegacyAuthorityMigrationReceipt = {
-    version: 2,
+    version: 3,
     status: "prepared",
     migrationId,
     sourceDatabase: basename(paths.sqlitePath),
     backupDatabase: basename(paths.backupPath),
+    receiptFile: basename(paths.receiptPath),
     backupSha256,
     sourceSnapshotSha256,
     sourceTruthRows: plan.truthRows,
@@ -352,7 +438,7 @@ export async function migrateLegacySqlAuthority(params: {
     backupDurableAt,
     lockProtocol: "sqlite-begin-immediate-snapshot-digest",
   };
-  writePrivateJsonAtomic(paths.receiptPath, receipt);
+  writePrivateJsonAtomic(paths.receiptPath, receipt, params.faultInjector, "prepared_receipt");
 
   try {
     const completedAt = Date.now();
@@ -363,6 +449,8 @@ export async function migrateLegacySqlAuthority(params: {
         backupSha256,
         sourceSnapshotSha256,
         sourceTruthRows: plan.truthRows,
+        preparedAt,
+        backupDurableAt,
         completedAt,
       },
       params.faultInjector,
@@ -374,13 +462,13 @@ export async function migrateLegacySqlAuthority(params: {
       postInspection,
     };
     params.faultInjector?.("external_receipt_before_completed_write");
-    writePrivateJsonAtomic(paths.receiptPath, receipt);
+    writePrivateJsonAtomic(paths.receiptPath, receipt, params.faultInjector, "completed_receipt");
     return receipt;
   } catch (error) {
     const internal = readInternalMigrationEvidence(paths.sqlitePath);
     if (internal?.migrationId === migrationId) {
       try {
-        return await recoverLegacySqlAuthorityReceipt(paths);
+        return await recoverLegacySqlAuthorityReceipt(paths, params.faultInjector);
       } catch (recoveryError) {
         throw new Error(
           "CLAWLORE_SQL_TRUTH_MIGRATION_RECEIPT_RECOVERY_REQUIRED: database migration committed but external receipt needs reconciliation",
@@ -418,6 +506,7 @@ export async function migrateLegacySqlAuthority(params: {
 
 async function recoverLegacySqlAuthorityReceipt(
   paths: CanonicalMigrationPaths,
+  faultInjector?: (point: string) => void,
 ): Promise<LegacyAuthorityMigrationReceipt> {
   const internal = readInternalMigrationEvidence(paths.sqlitePath);
   if (!internal) {
@@ -439,30 +528,23 @@ async function recoverLegacySqlAuthorityReceipt(
   ) {
     throw new Error("CLAWLORE_SQL_TRUTH_MIGRATION_RECEIPT_RECOVERY_REFUSED: backup snapshot mismatch");
   }
-  let prior: Partial<LegacyAuthorityMigrationReceipt> = {};
-  if (existsSync(paths.receiptPath)) {
-    try { prior = JSON.parse(readFileSync(paths.receiptPath, "utf8")); } catch {}
-  }
   const receipt: LegacyAuthorityMigrationReceipt = {
-    version: 2,
+    version: 3,
     status: "completed",
     migrationId: internal.migrationId,
     sourceDatabase: basename(paths.sqlitePath),
     backupDatabase: basename(paths.backupPath),
+    receiptFile: basename(paths.receiptPath),
     backupSha256: internal.backupSha256,
     sourceSnapshotSha256: internal.sourceSnapshotSha256,
     sourceTruthRows: internal.sourceTruthRows,
-    preparedAt: typeof prior.preparedAt === "string"
-      ? prior.preparedAt
-      : new Date(statSync(paths.backupPath).mtimeMs).toISOString(),
-    backupDurableAt: typeof prior.backupDurableAt === "string"
-      ? prior.backupDurableAt
-      : new Date(statSync(paths.backupPath).mtimeMs).toISOString(),
+    preparedAt: internal.preparedAt,
+    backupDurableAt: internal.backupDurableAt,
     lockProtocol: "sqlite-begin-immediate-snapshot-digest",
     completedAt: new Date(internal.completedAt).toISOString(),
     recoveredAt: new Date().toISOString(),
     postInspection: SqlTruthStore.inspectAuthority(paths.sqlitePath),
   };
-  writePrivateJsonAtomic(paths.receiptPath, receipt);
+  writePrivateJsonAtomic(paths.receiptPath, receipt, faultInjector, "recovered_receipt");
   return receipt;
 }

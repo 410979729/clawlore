@@ -1,0 +1,47 @@
+name: release-gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - feature/clawlore-identity
+
+permissions:
+  contents: read
+
+jobs:
+  source-gate:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+        node:
+          - 24.14.0
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Prepare a trusted Windows test temp root
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $path = Join-Path $env:USERPROFILE ".clawlore-ci-temp"
+          New-Item -ItemType Directory -Path $path -Force | Out-Null
+          "TEMP=$path" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "TMP=$path" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Install locked dependencies
+        run: npm ci --include=dev
+      - name: Install the supported OpenClaw host fixture
+        run: npm install --prefix "${{ runner.temp }}/clawlore-openclaw-host" --ignore-scripts --no-audit --no-fund openclaw@2026.7.1-beta.2
+      - name: Run the standard source release gate
+        run: npm run release:gate:source
+        env:
+          OPENCLAW_PACKAGE_DIR: ${{ runner.temp }}/clawlore-openclaw-host/node_modules/openclaw
+          OPENCLAW_CLI: ${{ runner.temp }}/clawlore-openclaw-host/node_modules/openclaw/openclaw.mjs

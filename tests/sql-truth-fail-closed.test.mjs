@@ -345,6 +345,42 @@ for (const mutation of [
         BEFORE INSERT ON memory_truth BEGIN SELECT 1; END;`);
     },
   },
+  {
+    name: "an unexpected AFTER INSERT trigger",
+    apply(db) {
+      db.exec(`CREATE TRIGGER unexpected_delete_after_insert
+        AFTER INSERT ON memory_truth
+        BEGIN DELETE FROM memory_truth WHERE id = NEW.id; END;`);
+    },
+  },
+  {
+    name: "an unexpected BEFORE UPDATE trigger",
+    apply(db) {
+      db.exec(`CREATE TRIGGER unexpected_ignore_before_update
+        BEFORE UPDATE ON memory_truth
+        BEGIN SELECT RAISE(IGNORE); END;`);
+    },
+  },
+  {
+    name: "an unexpected BEFORE DELETE trigger",
+    apply(db) {
+      db.exec(`CREATE TRIGGER unexpected_ignore_before_delete
+        BEFORE DELETE ON memory_truth
+        BEGIN SELECT RAISE(IGNORE); END;`);
+    },
+  },
+  {
+    name: "an unexpected protected-table index",
+    apply(db) {
+      db.exec("CREATE INDEX unexpected_memory_truth_text ON memory_truth(text)");
+    },
+  },
+  {
+    name: "an unexpected ClawLore namespace view",
+    apply(db) {
+      db.exec("CREATE VIEW clawlore_unexpected_truth_view AS SELECT id FROM memory_truth");
+    },
+  },
 ]) test(`marked authority rejects ${mutation.name} despite matching object names`, () => {
   const dir = mkdtempSync(join(tmpdir(), "clawlore-truth-fingerprint-"));
   const sqlitePath = join(dir, "memory.sqlite3");
@@ -359,6 +395,103 @@ for (const mutation of [
     const inspection = SqlTruthStore.inspectAuthority(sqlitePath);
     assert.equal(inspection.status, "untrusted");
     assert.equal(inspection.reason, "authority_schema_fingerprint_mismatch");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("every valid authority fixture preserves CRUD, FTS, and durable state", () => {
+  const dir = mkdtempSync(join(tmpdir(), "clawlore-truth-valid-crud-"));
+  const sqlitePath = join(dir, "memory.sqlite3");
+  try {
+    const store = new SqlTruthStore(sqlitePath);
+    store.open();
+    const original = { ...staleEntry, text: "valid authority durable insert", scope: "agent:main" };
+    store.upsert(original);
+    assert.equal(store.getById(original.id)?.text, original.text);
+    assert.equal(store.search("durable insert", 5, ["agent:main"])[0]?.entry.id, original.id);
+    const updated = { ...original, text: "valid authority durable update", timestamp: 2 };
+    store.upsert(updated);
+    assert.equal(store.getById(updated.id)?.text, updated.text);
+    assert.deepEqual(store.ftsIntegrityReport(), {
+      truthRows: 1,
+      ftsRows: 1,
+      staleFtsRows: 0,
+      missingFtsRows: 0,
+      duplicateFtsExtraRows: 0,
+      healthy: true,
+    });
+    store.delete(updated.id);
+    assert.equal(store.getById(updated.id), null);
+    assert.equal(store.count(), 0);
+    assert.equal(store.ftsIntegrityReport().healthy, true);
+    store.close();
+    assert.equal(SqlTruthStore.inspectAuthority(sqlitePath).status, "valid");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("legacy authority migration preserves compatible vector repair debt", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "clawlore-truth-repair-migrate-"));
+  const sqlitePath = join(dir, "memory.sqlite3");
+  const backupPath = join(dir, "backups", "memory.sqlite3");
+  const receiptPath = join(dir, "receipts", "receipt.json");
+  try {
+    createLegacyAuthority(sqlitePath);
+    const db = new DatabaseSync(sqlitePath);
+    db.exec(`CREATE TABLE vector_companion_repair_outbox (
+      memory_id TEXT PRIMARY KEY,
+      action TEXT NOT NULL CHECK(action IN ('upsert', 'delete')),
+      operation TEXT NOT NULL,
+      last_error TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 1,
+      created_at REAL NOT NULL,
+      updated_at REAL NOT NULL
+    );
+    CREATE INDEX idx_vector_companion_repair_updated_at
+      ON vector_companion_repair_outbox(updated_at ASC);`);
+    db.prepare(`INSERT INTO vector_companion_repair_outbox (
+      memory_id, action, operation, last_error, attempts, created_at, updated_at
+    ) VALUES (?, 'upsert', 'legacy-repair', 'pending', 3, 10, 20)`).run(staleEntry.id);
+    db.close();
+
+    const receipt = await migrateLegacySqlAuthority({ sqlitePath, backupPath, receiptPath });
+    assert.equal(receipt.status, "completed");
+    const upgraded = new SqlTruthStore(sqlitePath);
+    upgraded.open({ allowCreate: false });
+    assert.deepEqual(upgraded.listVectorRepairDebt(), [{
+      memoryId: staleEntry.id,
+      action: "upsert",
+      operation: "legacy-repair",
+      attempts: 3,
+      createdAt: 10,
+      updatedAt: 20,
+    }]);
+    upgraded.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("legacy authority migration rejects an incompatible vector repair outbox", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "clawlore-truth-repair-incompatible-"));
+  const sqlitePath = join(dir, "memory.sqlite3");
+  const backupPath = join(dir, "backups", "memory.sqlite3");
+  const receiptPath = join(dir, "receipts", "receipt.json");
+  try {
+    createLegacyAuthority(sqlitePath);
+    const db = new DatabaseSync(sqlitePath);
+    db.exec("CREATE TABLE vector_companion_repair_outbox (memory_id TEXT PRIMARY KEY, action TEXT)");
+    db.close();
+    const inspection = SqlTruthStore.inspectAuthority(sqlitePath);
+    assert.equal(inspection.status, "untrusted");
+    assert.equal(inspection.reason, "legacy_repair_outbox_incompatible");
+    assert.equal(inspectLegacyAuthorityMigration({ sqlitePath, backupPath, receiptPath }).status, "blocked");
+    await assert.rejects(
+      migrateLegacySqlAuthority({ sqlitePath, backupPath, receiptPath }),
+      /LEGACY_UPGRADE_REFUSED/,
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -474,6 +607,39 @@ test("authority migration cleans pre-receipt backup failures and remains retryab
   }
 });
 
+for (const faultPoint of ["prepared_receipt_before_temp_fsync", "prepared_receipt_after_temp_fsync"]) {
+  test(`authority migration cleans ${faultPoint} and remains retryable`, async () => {
+    const dir = mkdtempSync(join(tmpdir(), "clawlore-truth-receipt-sync-fault-"));
+    const sqlitePath = join(dir, "memory.sqlite3");
+    const backupDirectory = join(dir, "backups");
+    const receiptDirectory = join(dir, "receipts");
+    const backupPath = join(backupDirectory, "backup.sqlite3");
+    const receiptPath = join(receiptDirectory, "receipt.json");
+    try {
+      createLegacyAuthority(sqlitePath);
+      await assert.rejects(
+        migrateLegacySqlAuthority({
+          sqlitePath,
+          backupPath,
+          receiptPath,
+          faultInjector(point) {
+            if (point === faultPoint) throw new Error(`fixture_${faultPoint}`);
+          },
+        }),
+        new RegExp(`fixture_${faultPoint}`),
+      );
+      assert.equal(SqlTruthStore.inspectAuthority(sqlitePath).status, "legacy");
+      assert.equal(existsSync(backupPath), false);
+      assert.equal(existsSync(receiptPath), false);
+      assert.equal(existsSync(backupDirectory), false);
+      assert.equal(existsSync(receiptDirectory), false);
+      assert.equal(inspectLegacyAuthorityMigration({ sqlitePath, backupPath, receiptPath }).status, "ready");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
+
 test("authority migration aborts when source content changes after the durable backup", async () => {
   const dir = mkdtempSync(join(tmpdir(), "clawlore-truth-migration-drift-"));
   const sqlitePath = join(dir, "memory.sqlite3");
@@ -531,6 +697,56 @@ test("authority migration reconstructs a completed external receipt from committ
     const persisted = JSON.parse(readFileSync(receiptPath, "utf8"));
     assert.equal(persisted.status, "completed");
     assert.equal(persisted.migrationId, receipt.migrationId);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("authority migration rebuilds every malformed completed external receipt field", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "clawlore-truth-migration-receipt-bind-"));
+  const sqlitePath = join(dir, "memory.sqlite3");
+  const backupPath = join(dir, "backups", "memory.sqlite3");
+  const receiptPath = join(dir, "receipts", "receipt.json");
+  try {
+    createLegacyAuthority(sqlitePath);
+    const original = await migrateLegacySqlAuthority({ sqlitePath, backupPath, receiptPath });
+    const corruptions = [
+      ["version", 2],
+      ["migrationId", "wrong-migration-id"],
+      ["sourceDatabase", "wrong-source.sqlite3"],
+      ["backupDatabase", "wrong-backup.sqlite3"],
+      ["receiptFile", "wrong-receipt.json"],
+      ["backupSha256", "0".repeat(64)],
+      ["sourceSnapshotSha256", "f".repeat(64)],
+      ["sourceTruthRows", 999],
+      ["completedAt", "2020-01-01T00:00:00.000Z"],
+      ["preparedAt", "2020-01-01T00:00:00.000Z"],
+      ["backupDurableAt", "2020-01-01T00:00:01.000Z"],
+      ["lockProtocol", "wrong-lock"],
+      ["postInspection", { status: "valid", truthRows: 999 }],
+    ];
+    for (const [field, value] of corruptions) {
+      writeFileSync(receiptPath, `${JSON.stringify({ ...original, [field]: value }, null, 2)}\n`);
+      const plan = inspectLegacyAuthorityMigration({ sqlitePath, backupPath, receiptPath });
+      assert.equal(plan.status, "recoverable", field);
+      assert.equal(plan.reason, "external_receipt_corrupt_recoverable", field);
+      const recovered = await migrateLegacySqlAuthority({ sqlitePath, backupPath, receiptPath });
+      assert.equal(recovered.status, "completed", field);
+      assert.equal(recovered.version, 3, field);
+      assert.equal(recovered.migrationId, original.migrationId, field);
+      assert.equal(
+        inspectLegacyAuthorityMigration({ sqlitePath, backupPath, receiptPath }).reason,
+        "migration_already_completed",
+        field,
+      );
+    }
+    writeFileSync(receiptPath, "{\"status\":\"completed\"");
+    assert.equal(
+      inspectLegacyAuthorityMigration({ sqlitePath, backupPath, receiptPath }).status,
+      "recoverable",
+    );
+    const recovered = await migrateLegacySqlAuthority({ sqlitePath, backupPath, receiptPath });
+    assert.equal(recovered.status, "completed");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

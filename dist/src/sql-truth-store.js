@@ -11,7 +11,7 @@ function runSql(db, statement) {
 const SQL_TRUTH_AUTHORITY_TABLE = "clawlore_sql_truth_authority";
 const SQL_TRUTH_MIGRATION_TABLE = "clawlore_sql_truth_migrations";
 const SQL_TRUTH_AUTHORITY_ID = "clawlore-sql-truth";
-const SQL_TRUTH_AUTHORITY_SCHEMA_VERSION = 3;
+const SQL_TRUTH_AUTHORITY_SCHEMA_VERSION = 4;
 const REQUIRED_TRUTH_COLUMNS = [
     "id",
     "text",
@@ -40,6 +40,8 @@ const REQUIRED_MIGRATION_COLUMNS = [
     "source_truth_rows",
     "backup_sha256",
     "source_snapshot_sha256",
+    "prepared_at",
+    "backup_durable_at",
     "completed_at",
 ];
 const TRUTH_TABLE_SQL = `CREATE TABLE IF NOT EXISTS memory_truth (
@@ -89,6 +91,8 @@ const MIGRATION_TABLE_SQL = `CREATE TABLE IF NOT EXISTS ${SQL_TRUTH_MIGRATION_TA
   source_truth_rows INTEGER NOT NULL,
   backup_sha256 TEXT NOT NULL,
   source_snapshot_sha256 TEXT NOT NULL,
+  prepared_at TEXT NOT NULL,
+  backup_durable_at TEXT NOT NULL,
   completed_at REAL NOT NULL
 )`;
 const ACTIVE_FACT_INSERT_TRIGGER_SQL = `CREATE TRIGGER IF NOT EXISTS memory_truth_single_active_fact_insert
@@ -153,11 +157,53 @@ function schemaFingerprintFromObjects(objects) {
     return hash.digest("hex");
 }
 const SQL_TRUTH_SCHEMA_FINGERPRINT = schemaFingerprintFromObjects([...EXPECTED_SCHEMA_OBJECTS]);
+const PROTECTED_SCHEMA_TABLES = [
+    "memory_truth",
+    "memory_truth_fts",
+    "vector_companion_repair_outbox",
+    SQL_TRUTH_AUTHORITY_TABLE,
+    SQL_TRUTH_MIGRATION_TABLE,
+];
+function legacyRepairOutboxStatus(db) {
+    const table = db.prepare("SELECT type, sql FROM sqlite_master WHERE name = 'vector_companion_repair_outbox'").get();
+    if (!table)
+        return "absent";
+    if (table.type !== "table" ||
+        normalizeSchemaSql(String(table.sql || "")) !== normalizeSchemaSql(REPAIR_TABLE_SQL)) {
+        return "incompatible";
+    }
+    const index = db.prepare("SELECT type, sql FROM sqlite_master WHERE name = 'idx_vector_companion_repair_updated_at'").get();
+    if (index &&
+        (index.type !== "index" || normalizeSchemaSql(String(index.sql || "")) !== normalizeSchemaSql(REPAIR_INDEX_SQL))) {
+        return "incompatible";
+    }
+    const unexpectedTrigger = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'vector_companion_repair_outbox' LIMIT 1").get();
+    return unexpectedTrigger ? "incompatible" : "compatible";
+}
 function actualSchemaFingerprint(db) {
     const names = EXPECTED_SCHEMA_OBJECTS.map(([name]) => name);
     const placeholders = names.map(() => "?").join(",");
     const rows = db.prepare(`SELECT name, type, sql FROM sqlite_master WHERE name IN (${placeholders})`).all(...names);
     if (rows.length !== EXPECTED_SCHEMA_OBJECTS.length || rows.some((row) => !row.sql))
+        return null;
+    const protectedPlaceholders = PROTECTED_SCHEMA_TABLES.map(() => "?").join(",");
+    const unexpected = db.prepare(`
+    SELECT name, type, tbl_name
+    FROM sqlite_master
+    WHERE name NOT IN (${placeholders})
+      AND (
+        (type = 'trigger' AND (tbl_name IN (${protectedPlaceholders}) OR tbl_name LIKE 'memory_truth_fts%'))
+        OR (type = 'index' AND sql IS NOT NULL
+            AND (tbl_name IN (${protectedPlaceholders}) OR tbl_name LIKE 'memory_truth_fts%'))
+        OR (type = 'view' AND (
+          name LIKE 'clawlore_%' OR
+          name LIKE 'memory_truth%' OR
+          name LIKE 'vector_companion%'
+        ))
+      )
+    LIMIT 1
+  `).get(...names, ...PROTECTED_SCHEMA_TABLES, ...PROTECTED_SCHEMA_TABLES);
+    if (unexpected?.name)
         return null;
     return schemaFingerprintFromObjects(rows.map((row) => [row.name, row.type, String(row.sql)]));
 }
@@ -174,6 +220,17 @@ function legacySnapshotDigestFromDb(db) {
     for (const row of db.prepare(`SELECT memory_id,text,metadata_text
     FROM memory_truth_fts ORDER BY memory_id,text,metadata_text`).iterate()) {
         hash.update(`${JSON.stringify(row)}\n`);
+    }
+    const repairOutboxStatus = legacyRepairOutboxStatus(db);
+    if (repairOutboxStatus === "incompatible") {
+        throw new Error("CLAWLORE_SQL_TRUTH_LEGACY_SNAPSHOT_REFUSED: repair outbox contract is incompatible");
+    }
+    hash.update(`vector_companion_repair_outbox\u0000${repairOutboxStatus}\n`);
+    if (repairOutboxStatus === "compatible") {
+        for (const row of db.prepare(`SELECT memory_id,action,operation,last_error,attempts,created_at,updated_at
+      FROM vector_companion_repair_outbox ORDER BY memory_id`).iterate()) {
+            hash.update(`${JSON.stringify(row)}\n`);
+        }
     }
     return hash.digest("hex");
 }
@@ -347,6 +404,14 @@ export class SqlTruthStore {
             const truthRows = Number(db.prepare("SELECT COUNT(*) AS count FROM memory_truth").get()?.count || 0);
             const authorityObject = objects.get(SQL_TRUTH_AUTHORITY_TABLE);
             if (!authorityObject) {
+                if (legacyRepairOutboxStatus(db) === "incompatible") {
+                    return {
+                        status: "untrusted",
+                        schemaVersion: null,
+                        truthRows,
+                        reason: "legacy_repair_outbox_incompatible",
+                    };
+                }
                 return {
                     status: truthRows > 0 ? "legacy" : "untrusted",
                     schemaVersion: null,
@@ -967,13 +1032,20 @@ export class SqlTruthStore {
     }
     canonicalizeLegacySchema() {
         const db = this.requireDb();
+        const repairOutboxStatus = legacyRepairOutboxStatus(db);
+        if (repairOutboxStatus === "incompatible") {
+            throw new Error("CLAWLORE_SQL_TRUTH_LEGACY_UPGRADE_REFUSED: repair outbox contract is incompatible");
+        }
+        const preserveRepairOutbox = repairOutboxStatus === "compatible";
         runSql(db, `
       DROP TRIGGER IF EXISTS memory_truth_single_active_fact_insert;
       DROP TRIGGER IF EXISTS memory_truth_single_active_fact_update;
       DROP INDEX IF EXISTS idx_memory_truth_scope_timestamp;
       DROP INDEX IF EXISTS idx_memory_truth_category_timestamp;
       DROP INDEX IF EXISTS idx_vector_companion_repair_updated_at;
-      DROP TABLE IF EXISTS vector_companion_repair_outbox;
+      ${preserveRepairOutbox
+            ? "ALTER TABLE vector_companion_repair_outbox RENAME TO vector_companion_repair_outbox_legacy_upgrade_source;"
+            : "DROP TABLE IF EXISTS vector_companion_repair_outbox;"}
       DROP TABLE IF EXISTS ${SQL_TRUTH_AUTHORITY_TABLE};
       DROP TABLE IF EXISTS ${SQL_TRUTH_MIGRATION_TABLE};
       DROP TABLE memory_truth_fts;
@@ -986,6 +1058,15 @@ export class SqlTruthStore {
       FROM memory_truth_legacy_upgrade_source;
       DROP TABLE memory_truth_legacy_upgrade_source;
       ${FTS_TABLE_SQL};
+      ${preserveRepairOutbox ? `
+        ${REPAIR_TABLE_SQL};
+        INSERT INTO vector_companion_repair_outbox (
+          memory_id, action, operation, last_error, attempts, created_at, updated_at
+        )
+        SELECT memory_id, action, operation, last_error, attempts, created_at, updated_at
+        FROM vector_companion_repair_outbox_legacy_upgrade_source;
+        DROP TABLE vector_companion_repair_outbox_legacy_upgrade_source;
+      ` : ""}
     `);
     }
     ensureSchema(marker) {
@@ -1004,8 +1085,9 @@ export class SqlTruthStore {
                     throw new Error("CLAWLORE_SQL_TRUTH_LEGACY_UPGRADE_REFUSED: migration evidence missing");
                 }
                 db.prepare(`INSERT INTO ${SQL_TRUTH_MIGRATION_TABLE} (
-             migration_id, source_truth_rows, backup_sha256, source_snapshot_sha256, completed_at
-           ) VALUES (?, ?, ?, ?, ?)`).run(evidence.migrationId, evidence.sourceTruthRows, evidence.backupSha256, evidence.sourceSnapshotSha256, evidence.completedAt);
+             migration_id, source_truth_rows, backup_sha256, source_snapshot_sha256,
+             prepared_at, backup_durable_at, completed_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?)`).run(evidence.migrationId, evidence.sourceTruthRows, evidence.backupSha256, evidence.sourceSnapshotSha256, evidence.preparedAt, evidence.backupDurableAt, evidence.completedAt);
             }
             this.injectFault("schema_before_authority_marker");
             db.prepare(`

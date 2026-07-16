@@ -1,6 +1,10 @@
 # Changelog
 
-## 1.2.0
+## Unreleased
+
+No changes yet.
+
+## 1.2.0 - 2026-07-16
 
 - Renamed the canonical package, manifest id, product name, repository metadata,
   config root, and primary CLI from Scope Recall to ClawLore.
@@ -49,8 +53,6 @@
   verification and paths containing spaces or non-ASCII text.
 - Made release-gate scripts cross-platform Node entry points, added a packed
   native LanceDB reopen/delete smoke, and enabled strict TypeScript checking.
-
-## Unreleased
 
 - Added Tianji's independent Scope Recall roadmap, documenting that the
   OpenClaw plugin may borrow from Yuheng/Hermes without remaining lockstep.

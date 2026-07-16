@@ -48,6 +48,48 @@ function runCapture(command, args, options = {}) {
   return result.stdout || "";
 }
 
+function runOpenClawCapture(command, args, options = {}) {
+  if (/\.(?:c?js|mjs)$/i.test(command)) {
+    return runCapture(process.execPath, [command, ...args], options);
+  }
+  return runCapture(command, args, options);
+}
+
+async function releaseInputIdentity({ gitRoot, sourceRoot, diffPathspec }) {
+  const tracked = runCapture("git", ["ls-files", "-z", "--", diffPathspec || "."])
+    .split("\0")
+    .filter(Boolean);
+  const hash = createHash("sha256");
+  let fileCount = 0;
+  for (const gitRelative of tracked.sort()) {
+    const absolute = resolve(gitRoot, gitRelative);
+    const sourceRelative = relative(sourceRoot, absolute).replaceAll("\\", "/");
+    if (!sourceRelative || sourceRelative.startsWith("../")) continue;
+    if (
+      sourceRelative === "TODO-clawlore.md" ||
+      sourceRelative === "docs/clawlore/project-handoff.md" ||
+      sourceRelative.startsWith("docs/clawlore/eval/")
+    ) {
+      continue;
+    }
+    const content = await readFile(absolute);
+    hash.update(`${sourceRelative}\u0000${content.length}\u0000`);
+    hash.update(content);
+    hash.update("\n");
+    fileCount++;
+  }
+  return {
+    algorithm: "sha256-tracked-release-inputs-v1",
+    digest: hash.digest("hex"),
+    fileCount,
+    excludedAuditLedger: [
+      "TODO-clawlore.md",
+      "docs/clawlore/project-handoff.md",
+      "docs/clawlore/eval/",
+    ],
+  };
+}
+
 function parseJsonWithPreamble(raw, label) {
   const start = raw.indexOf("{");
   if (start < 0) {
@@ -94,10 +136,20 @@ if (packageJson.version !== manifest.version) {
 const releaseScriptContract = packageJson.clawloreRelease;
 if (
   releaseScriptContract?.scriptPolicy !== "all-except-published-runtime-scripts-are-source-checkout-only" ||
+  typeof releaseScriptContract?.evidenceFile !== "string" ||
+  !releaseScriptContract.evidenceFile.startsWith("docs/clawlore/eval/") ||
   !Array.isArray(releaseScriptContract?.publishedRuntimeScripts) ||
   releaseScriptContract.publishedRuntimeScripts.length === 0
 ) {
   throw new Error("release gate failed: package script publication contract is missing or invalid");
+}
+if (
+  packageJson.engines?.node !== ">=24.0.0 <25" ||
+  JSON.stringify(packageJson.os) !== JSON.stringify(["linux", "win32"]) ||
+  packageJson.peerDependencies?.openclaw !== ">=2026.7.1-beta.2 <2027" ||
+  packageJson.peerDependenciesMeta?.openclaw?.optional !== true
+) {
+  throw new Error("release gate failed: Node/OpenClaw/OS compatibility contract is missing or invalid");
 }
 for (const scriptName of releaseScriptContract.publishedRuntimeScripts) {
   if (typeof packageJson.scripts?.[scriptName] !== "string") {
@@ -173,6 +225,7 @@ const requiredFiles = [
   "scripts/packed-runtime-smoke.mjs",
   "scripts/packed-lancedb-smoke.mjs",
   "scripts/smoke-vector-repair.mjs",
+  releaseScriptContract.evidenceFile,
 ];
 
 for (const file of requiredFiles) {
@@ -184,6 +237,15 @@ for (const file of requiredFiles) {
 const packageLock = JSON.parse(await readFile("package-lock.json", "utf8"));
 if (packageLock.lockfileVersion < 3 || packageLock.packages?.[""]?.version !== packageJson.version) {
   throw new Error("release gate failed: package-lock.json is stale or not lockfileVersion 3+");
+}
+const lockRoot = packageLock.packages?.[""];
+if (
+  lockRoot?.engines?.node !== packageJson.engines.node ||
+  JSON.stringify(lockRoot?.os) !== JSON.stringify(packageJson.os) ||
+  lockRoot?.peerDependencies?.openclaw !== packageJson.peerDependencies.openclaw ||
+  lockRoot?.peerDependenciesMeta?.openclaw?.optional !== true
+) {
+  throw new Error("release gate failed: package-lock compatibility metadata is stale");
 }
 
 const testFiles = (await exists("tests"))
@@ -483,7 +545,7 @@ if (!sourceOnly && !enabledByEnvironment("CLAWLORE_SKIP_RUNTIME_SMOKE", "SCOPE_R
     OPENCLAW_CONFIG_PATH: configPath,
   };
   const inspect = parseJsonWithPreamble(
-    runCapture(openclawCli, ["plugins", "inspect", "clawlore", "--json"], { env: runtimeEnv }),
+    runOpenClawCapture(openclawCli, ["plugins", "inspect", "clawlore", "--json"], { env: runtimeEnv }),
     "OpenClaw plugin inspect",
   );
   if (
@@ -503,7 +565,7 @@ if (!sourceOnly && !enabledByEnvironment("CLAWLORE_SKIP_RUNTIME_SMOKE", "SCOPE_R
     throw new Error("release gate failed: OpenClaw inspect rootDir does not match the verified live extension");
   }
   const doctor = parseJsonWithPreamble(
-    runCapture(openclawCli, ["clawlore", "doctor", "--json", "--quiet"], { env: runtimeEnv }),
+    runOpenClawCapture(openclawCli, ["clawlore", "doctor", "--json", "--quiet"], { env: runtimeEnv }),
     "OpenClaw ClawLore doctor",
   );
   if (doctor.ok !== true) {
@@ -621,8 +683,8 @@ try {
     OPENCLAW_CONFIG_PATH: isolatedConfig,
     npm_config_registry: "https://registry.npmjs.org",
   };
-  runCapture(packedOpenClawCli, ["config", "set", "gateway.mode", "local"], { env: isolatedRuntimeEnv });
-  runCapture(packedOpenClawCli, ["config", "set", "gateway.port", "29999", "--strict-json"], { env: isolatedRuntimeEnv });
+  runOpenClawCapture(packedOpenClawCli, ["config", "set", "gateway.mode", "local"], { env: isolatedRuntimeEnv });
+  runOpenClawCapture(packedOpenClawCli, ["config", "set", "gateway.port", "29999", "--strict-json"], { env: isolatedRuntimeEnv });
   const isolatedPluginEntry = JSON.stringify({
     enabled: true,
     config: {
@@ -632,15 +694,15 @@ try {
       enableManagementTools: true,
     },
   });
-  runCapture(
+  runOpenClawCapture(
     packedOpenClawCli,
     ["config", "set", "plugins.entries.clawlore", isolatedPluginEntry, "--strict-json"],
     { env: isolatedRuntimeEnv },
   );
-  runCapture(packedOpenClawCli, ["plugins", "install", tarball], { env: isolatedRuntimeEnv });
-  runCapture(packedOpenClawCli, ["config", "set", "plugins.slots.memory", "clawlore"], { env: isolatedRuntimeEnv });
+  runOpenClawCapture(packedOpenClawCli, ["plugins", "install", tarball], { env: isolatedRuntimeEnv });
+  runOpenClawCapture(packedOpenClawCli, ["config", "set", "plugins.slots.memory", "clawlore"], { env: isolatedRuntimeEnv });
   const packedInspect = parseJsonWithPreamble(
-    runCapture(packedOpenClawCli, ["plugins", "inspect", "clawlore", "--json"], { env: isolatedRuntimeEnv }),
+    runOpenClawCapture(packedOpenClawCli, ["plugins", "inspect", "clawlore", "--json"], { env: isolatedRuntimeEnv }),
     "installed-tarball OpenClaw inspect",
   );
   if (
@@ -653,16 +715,16 @@ try {
   ) {
     throw new Error("release gate failed: installed tarball did not load through the real OpenClaw CLI");
   }
-  runCapture(packedOpenClawCli, ["clawlore", "experience", "debt", "--json"], { env: isolatedRuntimeEnv });
+  runOpenClawCapture(packedOpenClawCli, ["clawlore", "experience", "debt", "--json"], { env: isolatedRuntimeEnv });
   const packedDoctor = parseJsonWithPreamble(
-    runCapture(packedOpenClawCli, ["clawlore", "doctor", "--json", "--quiet"], { env: isolatedRuntimeEnv }),
+    runOpenClawCapture(packedOpenClawCli, ["clawlore", "doctor", "--json", "--quiet"], { env: isolatedRuntimeEnv }),
     "installed-tarball OpenClaw doctor",
   );
   if (packedDoctor.ok !== true) {
     throw new Error("release gate failed: installed-tarball OpenClaw doctor did not report ok=true");
   }
   for (const command of ["clawlore", "scope-recall", "memory-pro"]) {
-    const versionOutput = runCapture(packedOpenClawCli, [command, "version"], { env: isolatedRuntimeEnv });
+    const versionOutput = runOpenClawCapture(packedOpenClawCli, [command, "version"], { env: isolatedRuntimeEnv });
     if (!versionOutput.includes(packageJson.version)) {
       throw new Error(`release gate failed: installed-tarball ${command} version smoke failed`);
     }
@@ -680,21 +742,76 @@ console.log(`release gate SBOM ok: ${sbom.components.length} components sha256=$
 run("node", ["scripts/supply-chain-audit.mjs"]);
 console.log(`release gate pack filename/content scan ok: ${packFiles.length} files`);
 const releaseEvidence = {
-  schema: "clawlore.release-evidence.v1",
+  schema: "clawlore.release-evidence.v2",
   package: `${packageJson.name}@${packageJson.version}`,
-  commit: gitCommit,
+  observedCommit: gitCommit,
+  releaseInput: await releaseInputIdentity({ gitRoot, sourceRoot, diffPathspec }),
   runtimeDigest: candidateIdentity.digest,
   sourceOnly,
   dirty: gitDirty,
   packFileCount: packFiles.length,
-  sbomComponentCount: sbom.components.length,
-  sbomSha256: sbomDigest,
+  packageLockSha256: createHash("sha256").update(await readFile("package-lock.json")).digest("hex"),
+  sbom: {
+    format: sbom.bomFormat,
+    specVersion: sbom.specVersion,
+    tool: "npm sbom --package-lock-only --sbom-format cyclonedx",
+    toolVersion: runCapture("npm", ["--version"]).trim(),
+    componentCount: sbom.components.length,
+    sha256: sbomDigest,
+  },
+  toolchain: {
+    node: process.version,
+    npm: runCapture("npm", ["--version"]).trim(),
+    os: process.platform,
+    arch: process.arch,
+  },
+  compatibility: {
+    node: packageJson.engines.node,
+    os: packageJson.os,
+    openclawPeer: packageJson.peerDependencies.openclaw,
+  },
   supplyChainRegistry: "https://registry.npmjs.org",
   packedRuntimeSmoke: true,
   packedLanceDbSmoke: true,
   packedOpenClawCliSmoke: true,
+  allowedPlatformVariance: [
+    "observedCommit",
+    "sbom.componentCount",
+    "sbom.sha256",
+    "sbom.toolVersion",
+    "toolchain.node",
+    "toolchain.npm",
+    "toolchain.os",
+    "toolchain.arch",
+  ],
 };
 const evidenceJson = `${JSON.stringify(releaseEvidence, null, 2)}\n`;
+const canonicalEvidencePath = resolve(releaseScriptContract.evidenceFile);
+const writeCanonicalEvidence = enabledByEnvironment("CLAWLORE_WRITE_RELEASE_EVIDENCE");
+if (writeCanonicalEvidence) {
+  await writeFile(canonicalEvidencePath, evidenceJson, { encoding: "utf8", mode: 0o600 });
+} else {
+  const checkedEvidence = JSON.parse(await readFile(canonicalEvidencePath, "utf8"));
+  const stableEvidence = (value) => ({
+    schema: value.schema,
+    package: value.package,
+    releaseInput: value.releaseInput,
+    runtimeDigest: value.runtimeDigest,
+    sourceOnly: value.sourceOnly,
+    dirty: value.dirty,
+    packFileCount: value.packFileCount,
+    packageLockSha256: value.packageLockSha256,
+    compatibility: value.compatibility,
+    supplyChainRegistry: value.supplyChainRegistry,
+    packedRuntimeSmoke: value.packedRuntimeSmoke,
+    packedLanceDbSmoke: value.packedLanceDbSmoke,
+    packedOpenClawCliSmoke: value.packedOpenClawCliSmoke,
+    allowedPlatformVariance: value.allowedPlatformVariance,
+  });
+  if (JSON.stringify(stableEvidence(checkedEvidence)) !== JSON.stringify(stableEvidence(releaseEvidence))) {
+    throw new Error("release gate failed: checked-in release evidence does not match current release inputs");
+  }
+}
 const evidencePath = String(process.env.CLAWLORE_RELEASE_EVIDENCE_PATH || "").trim();
 if (evidencePath) {
   await writeFile(resolve(evidencePath), evidenceJson, { encoding: "utf8", mode: 0o600 });

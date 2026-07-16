@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, lstatSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -10,7 +10,9 @@ const { createJiti } = require("jiti");
 const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: false });
 const { enforcePrivatePath, ensurePrivateDirectory, verifyPrivatePath } = jiti("../src/file-privacy.ts");
 
-test("POSIX private path adapter tightens file and directory modes", () => {
+test("POSIX private path adapter tightens file and directory modes", {
+  skip: process.platform === "win32",
+}, () => {
   const dir = mkdtempSync(join(tmpdir(), "clawlore-private-path-"));
   const file = join(dir, "secret.json");
   try {
@@ -42,17 +44,32 @@ test("private directory creation builds only the missing dedicated suffix", {
   }
 });
 
-test("private directory creation rejects an existing public ancestor without rewriting it", {
+test("private directory creation accepts a non-writable 0755 ancestor without rewriting it", {
   skip: process.platform === "win32",
 }, () => {
   const root = mkdtempSync(join(tmpdir(), "clawlore-private-public-parent-"));
   try {
     chmodSync(root, 0o755);
+    ensurePrivateDirectory(join(root, "memory", "clawlore"), { platform: "linux" });
+    assert.equal(lstatSync(root).mode & 0o777, 0o755);
+    assert.equal(lstatSync(join(root, "memory")).mode & 0o777, 0o700);
+    assert.equal(lstatSync(join(root, "memory", "clawlore")).mode & 0o777, 0o700);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("private directory creation rejects a group-writable ancestor without rewriting it", {
+  skip: process.platform === "win32",
+}, () => {
+  const root = mkdtempSync(join(tmpdir(), "clawlore-private-writable-parent-"));
+  try {
+    chmodSync(root, 0o775);
     assert.throws(
       () => ensurePrivateDirectory(join(root, "memory", "clawlore"), { platform: "linux" }),
-      /CLAWLORE_PRIVATE_PATH_MODE_INVALID/,
+      /CLAWLORE_PRIVATE_PATH_ANCESTOR_WRITABLE/,
     );
-    assert.equal(lstatSync(root).mode & 0o777, 0o755);
+    assert.equal(lstatSync(root).mode & 0o777, 0o775);
     assert.equal(existsSync(join(root, "memory")), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -131,16 +148,80 @@ test("Windows private path verification uses the same real-process encoded comma
 test("Windows real PowerShell ACL helper accepts structured environment inputs", {
   skip: process.platform !== "win32",
 }, () => {
-  const dir = mkdtempSync(join(tmpdir(), "clawlore real acl 中文 [fixture] "));
-  const file = join(dir, "secret file.json");
+  const dir = mkdtempSync(join(homedir(), "clawlore real acl 中文 [fixture] "));
+  const privateDir = join(dir, "memory", "clawlore");
+  const file = join(privateDir, "secret file.json");
   try {
+    ensurePrivateDirectory(privateDir, { platform: "win32" });
     writeFileSync(file, "fixture\n");
-    enforcePrivatePath(dir, { platform: "win32", kind: "directory" });
     enforcePrivatePath(file, { platform: "win32", kind: "file" });
-    verifyPrivatePath(dir, { platform: "win32", kind: "directory" });
+    verifyPrivatePath(privateDir, { platform: "win32", kind: "directory" });
     verifyPrivatePath(file, { platform: "win32", kind: "file" });
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("Windows directory creation accepts trusted inherited ancestor ACLs and hardens only the suffix", () => {
+  const root = mkdtempSync(join(tmpdir(), "clawlore-private-windows-ancestor-"));
+  const nested = join(root, "memory", "clawlore");
+  const calls = [];
+  try {
+    const fakeExec = (command, _args, options) => {
+      if (command === "whoami.exe") return '"HOST\\joy","S-1-5-21-1000"\r\n';
+      if (command !== "powershell.exe") throw new Error(`unexpected command ${command}`);
+      calls.push({ path: options.env.CLAWLORE_PRIVATE_PATH, mode: options.env.CLAWLORE_PRIVATE_MODE });
+      if (options.env.CLAWLORE_PRIVATE_MODE === "verify") {
+        return JSON.stringify({
+          ownerSid: "S-1-5-21-1000",
+          protected: false,
+          access: [
+            { sid: "S-1-5-21-1000", type: "Allow", rights: "FullControl", inherited: true },
+            { sid: "S-1-5-18", type: "Allow", rights: "FullControl", inherited: true },
+            { sid: "S-1-5-32-544", type: "Allow", rights: "FullControl", inherited: true },
+            { sid: "S-1-5-32-545", type: "Allow", rights: "ReadAndExecute, Synchronize", inherited: true },
+          ],
+        });
+      }
+      return JSON.stringify({
+        ownerSid: "S-1-5-21-1000",
+        protected: true,
+        access: [{ sid: "S-1-5-21-1000", type: "Allow", rights: "FullControl", inherited: false }],
+      });
+    };
+    ensurePrivateDirectory(nested, { platform: "win32", execFile: fakeExec });
+    assert.equal(existsSync(nested), true);
+    assert.deepEqual(calls.filter((call) => call.mode === "verify").map((call) => call.path), [root]);
+    assert.deepEqual(calls.filter((call) => call.mode === "enforce").map((call) => call.path), [
+      join(root, "memory"),
+      nested,
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Windows directory creation rejects an ancestor writable by an untrusted principal", () => {
+  const root = mkdtempSync(join(tmpdir(), "clawlore-private-windows-untrusted-"));
+  try {
+    const fakeExec = (command) => {
+      if (command === "whoami.exe") return '"HOST\\joy","S-1-5-21-1000"\r\n';
+      return JSON.stringify({
+        ownerSid: "S-1-5-21-1000",
+        protected: false,
+        access: [
+          { sid: "S-1-5-21-1000", type: "Allow", rights: "FullControl", inherited: true },
+          { sid: "S-1-5-32-545", type: "Allow", rights: "Modify", inherited: true },
+        ],
+      });
+    };
+    assert.throws(
+      () => ensurePrivateDirectory(join(root, "memory", "clawlore"), { platform: "win32", execFile: fakeExec }),
+      /CLAWLORE_WINDOWS_ACL_ANCESTOR_UNTRUSTED/,
+    );
+    assert.equal(existsSync(join(root, "memory")), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

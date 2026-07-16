@@ -107,6 +107,68 @@ function createWritableToolMap(toolCtx = {}, options = {}) {
   return { tools, stored, retrieved };
 }
 
+function createSystemBypassToolMap() {
+  const tools = new Map();
+  const readScopes = [];
+  const writeScopes = [];
+  const entry = {
+    id: "90000000-0000-4000-8000-000000000001",
+    text: "system bypass fixture",
+    vector: [],
+    category: "fact",
+    scope: "agent:main",
+    importance: 1,
+    timestamp: 1,
+    metadata: "{}",
+  };
+  const api = {
+    registerTool(factory, meta) {
+      tools.set(meta.name, factory({ agentId: "system" }));
+    },
+  };
+  const context = {
+    retriever: {
+      async retrieve(params) {
+        readScopes.push(["retrieve", params.scopeFilter]);
+        return [];
+      },
+      async retrieveWithTrace(params) {
+        readScopes.push(["debug", params.scopeFilter]);
+        return { results: [], trace: { mode: "hybrid", totalMs: 0, stages: [] } };
+      },
+    },
+    store: {
+      async list(scopeFilter) {
+        readScopes.push(["list", scopeFilter]);
+        return [];
+      },
+      async getById(_id, scopeFilter) {
+        readScopes.push(["getById", scopeFilter]);
+        return entry;
+      },
+      async patchMetadata(_id, _patch, scopeFilter) {
+        writeScopes.push(scopeFilter);
+        return entry;
+      },
+      async store() { return entry; },
+      async update() { return entry; },
+      async vectorSearch() { return []; },
+    },
+    scopeManager: {
+      getScopeFilter() { return undefined; },
+      getDefaultScope() { throw new Error("system bypass must not resolve a default write scope"); },
+      isAccessible() { return true; },
+    },
+    embedder: { embedPassage: async () => [0.1, 0.2, 0.3] },
+    principalIsolation: { enabled: false },
+  };
+  registerAllMemoryTools(api, context, {
+    enableManagementTools: true,
+    enableSelfImprovementTools: false,
+  });
+  return { tools, readScopes, writeScopes, entry };
+}
+
 test("different private principals receive disjoint scopes and only an allowlisted owner can read legacy agent scope", () => {
   const scopeManager = {
     getDefaultScope: (agentId) => `agent:${agentId}`,
@@ -131,6 +193,41 @@ test("different private principals receive disjoint scopes and only an allowlist
   assert.equal(stranger.isAccessible("agent:main"), false);
   assert.equal(owner.isAccessible(stranger.defaultScope), false);
   assert.equal(stranger.isAccessible(owner.defaultScope), false);
+});
+
+test("system bypass stays unfiltered for read tools and requires explicit scopes for writes", async () => {
+  const { tools, readScopes, writeScopes, entry } = createSystemBypassToolMap();
+  const signal = new AbortController().signal;
+  const runtime = { agentId: "system" };
+  await tools.get("memory_debug").execute("call", { query: "fixture" }, signal, undefined, runtime);
+  await tools.get("memory_list").execute("call", {}, signal, undefined, runtime);
+  await tools.get("memory_context").execute("call", {}, signal, undefined, runtime);
+  await tools.get("memory_inspect").execute("call", { memoryId: entry.id }, signal, undefined, runtime);
+  await tools.get("memory_govern").execute("call", {}, signal, undefined, runtime);
+  assert.equal(readScopes.length, 5);
+  for (const [tool, scopeFilter] of readScopes) {
+    assert.equal(scopeFilter, undefined, tool);
+  }
+
+  for (const name of ["memory_promote", "memory_archive"]) {
+    const denied = await tools.get(name).execute(
+      "call",
+      { memoryId: entry.id },
+      signal,
+      undefined,
+      runtime,
+    );
+    assert.equal(denied.details.error, "explicit_scope_required", name);
+    const allowed = await tools.get(name).execute(
+      "call",
+      { memoryId: entry.id, scope: "agent:main" },
+      signal,
+      undefined,
+      runtime,
+    );
+    assert.equal(allowed.details.id, entry.id, name);
+  }
+  assert.deepEqual(writeScopes, [["agent:main"], ["agent:main"]]);
 });
 
 test("group boundary denies all core memory tools before retrieval, embedding, or DB writes", async () => {
@@ -515,10 +612,16 @@ test("operator CLI exposes Yuheng 1.6 governance function surface", () => {
 test("release gate includes source/live separation and OpenClaw runtime smoke", () => {
   const gate = readFileSync(new URL("../scripts/release-gate.mjs", import.meta.url), "utf8");
   const wrapper = readFileSync(new URL("../scripts/run-release-gate.mjs", import.meta.url), "utf8");
+  const workflow = readFileSync(new URL("../.github/workflows/release-gate.yml", import.meta.url), "utf8");
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const indexSource = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
   assert.equal(packageJson.scripts["release:gate"], "node scripts/run-release-gate.mjs");
   assert.equal(packageJson.scripts["release:gate:source"], "node scripts/run-release-gate.mjs --source-only");
+  assert.equal(packageJson.engines.node, ">=24.0.0 <25");
+  assert.deepEqual(packageJson.os, ["linux", "win32"]);
+  assert.equal(packageJson.peerDependencies.openclaw, ">=2026.7.1-beta.2 <2027");
+  assert.equal(packageJson.peerDependenciesMeta.openclaw.optional, true);
+  assert.equal(packageJson.clawloreRelease.evidenceFile, "docs/clawlore/eval/clawlore-v1-release-evidence.json");
   assert.match(wrapper, /CLAWLORE_ALLOW_NESTED_GIT_ROOT/);
   assert.match(wrapper, /CLAWLORE_SOURCE_ONLY/);
   assert.match(wrapper, /shell:\s*false/);
@@ -546,6 +649,14 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   assert.match(gate, /packedRuntimeSmoke: true/);
   assert.match(gate, /installed-tarball OpenClaw inspect/);
   assert.match(gate, /packedOpenClawCliSmoke: true/);
+  assert.match(gate, /clawlore\.release-evidence\.v2/);
+  assert.match(gate, /packageLockSha256/);
+  assert.match(gate, /releaseInputIdentity/);
+  assert.match(gate, /checked-in release evidence does not match current release inputs/);
+  assert.match(gate, /runOpenClawCapture/);
+  assert.match(workflow, /ubuntu-latest/);
+  assert.match(workflow, /windows-latest/);
+  assert.match(workflow, /npm run release:gate:source/);
   assert.equal(
     packageJson.clawloreRelease.scriptPolicy,
     "all-except-published-runtime-scripts-are-source-checkout-only",

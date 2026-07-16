@@ -4,6 +4,21 @@
   "description": "ClawLore memory for OpenClaw: SQLite truth, scoped hybrid recall, conservative capture, and rebuildable vectors",
   "type": "module",
   "main": "dist/index.js",
+  "engines": {
+    "node": ">=24.0.0 <25"
+  },
+  "os": [
+    "linux",
+    "win32"
+  ],
+  "peerDependencies": {
+    "openclaw": ">=2026.7.1-beta.2 <2027"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
   "files": [
     "CHANGELOG.md",
     "CONTRIBUTING.md",
@@ -137,6 +152,7 @@
   "license": "MIT",
   "clawloreRelease": {
     "scriptPolicy": "all-except-published-runtime-scripts-are-source-checkout-only",
+    "evidenceFile": "docs/clawlore/eval/clawlore-v1-release-evidence.json",
     "publishedRuntimeScripts": [
       "smoke:packed-runtime"
     ]

@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 let cachedWindowsCurrentUserSid = null;
 const WINDOWS_ACL_SCRIPT = [
     "$ErrorActionPreference='Stop'",
+    "$ProgressPreference='SilentlyContinue'",
     "$path=$env:CLAWLORE_PRIVATE_PATH",
     "$sidText=$env:CLAWLORE_PRIVATE_SID",
     "$kind=$env:CLAWLORE_PRIVATE_KIND",
@@ -61,6 +62,57 @@ function assertWindowsPrivateAclReport(report, sid) {
         throw new Error("CLAWLORE_WINDOWS_ACL_VERIFICATION_FAILED");
     }
 }
+const WINDOWS_TRUSTED_ANCESTOR_SIDS = [
+    "S-1-5-18", // LocalSystem
+    "S-1-5-32-544", // BUILTIN\\Administrators
+];
+function windowsRuleAllowsWrite(rule) {
+    if (rule.type?.toLowerCase() !== "allow")
+        return false;
+    const rights = rule.rights?.trim() ?? "";
+    if (/\b(?:full\s*control|modify|write|write\s*data|create\s*files?|create\s*directories|append\s*data|delete(?:\s*subdirectories\s*and\s*files)?|change\s*permissions|take\s*ownership|write\s*attributes|write\s*extended\s*attributes)\b/i.test(rights)) {
+        return true;
+    }
+    if (!/^-?\d+$/.test(rights)) {
+        const readOnlyRights = new Set([
+            "read",
+            "readandexecute",
+            "readdata",
+            "listdirectory",
+            "readextendedattributes",
+            "executefile",
+            "traverse",
+            "readattributes",
+            "readpermissions",
+            "synchronize",
+            "genericread",
+        ]);
+        const tokens = rights.split(",").map((value) => value.replace(/\s+/g, "").toLowerCase()).filter(Boolean);
+        return tokens.length === 0 || tokens.some((token) => !readOnlyRights.has(token));
+    }
+    const numericRights = Number(rights);
+    if (!Number.isSafeInteger(numericRights))
+        return true;
+    const writeMask = 2 | 4 | 16 | 64 | 256 | 65_536 | 262_144 | 524_288;
+    const readOnlyMask = 1 | 8 | 32 | 128 | 131_072 | 1_048_576;
+    if ((numericRights & writeMask) !== 0)
+        return true;
+    return (numericRights & ~(writeMask | readOnlyMask)) !== 0;
+}
+function assertWindowsTrustedAncestorAclReport(report, sid) {
+    const trustedSids = new Set([
+        sid.toUpperCase(),
+        ...WINDOWS_TRUSTED_ANCESTOR_SIDS.map((value) => value.toUpperCase()),
+    ]);
+    const owner = report.ownerSid?.toUpperCase();
+    const hasUntrustedWriter = (report.access ?? []).some((rule) => {
+        const ruleSid = rule.sid?.toUpperCase();
+        return (!ruleSid || !trustedSids.has(ruleSid)) && windowsRuleAllowsWrite(rule);
+    });
+    if (!owner || !trustedSids.has(owner) || hasUntrustedWriter) {
+        throw new Error("CLAWLORE_WINDOWS_ACL_ANCESTOR_UNTRUSTED");
+    }
+}
 function windowsPrivateAcl(path, run, kind, mode) {
     const sid = windowsCurrentUserSid(run);
     const report = parseWindowsAclReport(String(run("powershell.exe", [
@@ -80,6 +132,47 @@ function windowsPrivateAcl(path, run, kind, mode) {
         },
     })).trim());
     assertWindowsPrivateAclReport(report, sid);
+}
+function verifyWindowsTrustedAncestorAcl(path, run) {
+    const sid = windowsCurrentUserSid(run);
+    const report = parseWindowsAclReport(String(run("powershell.exe", [
+        "-NoProfile",
+        "-NonInteractive",
+        "-EncodedCommand",
+        WINDOWS_ACL_ENCODED_COMMAND,
+    ], {
+        encoding: "utf8",
+        windowsHide: true,
+        env: {
+            ...process.env,
+            CLAWLORE_PRIVATE_PATH: path,
+            CLAWLORE_PRIVATE_SID: sid,
+            CLAWLORE_PRIVATE_KIND: "directory",
+            CLAWLORE_PRIVATE_MODE: "verify",
+        },
+    })).trim());
+    assertWindowsTrustedAncestorAclReport(report, sid);
+}
+function verifyTrustedAncestorDirectory(path, options) {
+    const status = lstatSync(path);
+    if (status.isSymbolicLink()) {
+        throw new Error("CLAWLORE_PRIVATE_PATH_SYMLINK_REJECTED");
+    }
+    if (!status.isDirectory()) {
+        throw new Error("CLAWLORE_PRIVATE_PATH_KIND_INVALID");
+    }
+    const platform = options.platform ?? process.platform;
+    if (platform === "win32") {
+        verifyWindowsTrustedAncestorAcl(path, options.execFile ?? execFileSync);
+        return;
+    }
+    const mode = status.mode & 0o777;
+    if ((mode & 0o022) !== 0) {
+        throw new Error(`CLAWLORE_PRIVATE_PATH_ANCESTOR_WRITABLE:${mode.toString(8)}`);
+    }
+    if (typeof process.getuid === "function" && status.uid !== process.getuid()) {
+        throw new Error("CLAWLORE_PRIVATE_PATH_OWNER_INVALID");
+    }
 }
 export function enforceWindowsPrivateAcl(path, run = execFileSync, kind = "file") {
     windowsPrivateAcl(path, run, kind, "enforce");
@@ -151,7 +244,7 @@ export function ensurePrivateDirectory(path, options = {}) {
         }
         existingAncestor = parent;
     }
-    verifyPrivatePath(existingAncestor, { ...options, kind: "directory" });
+    verifyTrustedAncestorDirectory(existingAncestor, options);
     for (const directory of missing.reverse()) {
         mkdirSync(directory, { recursive: false, mode: 0o700 });
         enforcePrivatePath(directory, { ...options, kind: "directory" });
