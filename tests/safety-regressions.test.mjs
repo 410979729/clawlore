@@ -3,6 +3,10 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import test from "node:test";
+import {
+  ALLOWED_PLATFORM_VARIANCE,
+  stableReleaseEvidenceMatches,
+} from "../scripts/release-evidence-contract.mjs";
 
 const require = createRequire(import.meta.url);
 const { createJiti } = require("jiti");
@@ -658,6 +662,7 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   assert.match(gate, /packageLockSha256/);
   assert.match(gate, /releaseInputIdentity/);
   assert.match(gate, /checked-in release evidence does not match current release inputs/);
+  assert.match(gate, /stableReleaseEvidenceMatches/);
   assert.match(gate, /runOpenClawCapture/);
   assert.match(gate, /npm_execpath/);
   assert.match(gate, /process\.execPath/);
@@ -678,6 +683,37 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   assert.ok(packageJson.files.includes("scripts/packed-runtime-smoke.mjs"));
   assert.match(indexSource, /diagnosticBuildTag = `\$\{DIAG_BUILD_TAG_PREFIX\}-\$\{pluginVersion\}`/);
   assert.doesNotMatch(indexSource, /scope-recall-openclaw-1\.0\.24/);
+});
+
+test("canonical release evidence compares stable SBOM metadata and only permits declared variance", () => {
+  const evidence = JSON.parse(readFileSync(
+    new URL("../docs/clawlore/eval/clawlore-v1-release-evidence.json", import.meta.url),
+    "utf8",
+  ));
+  assert.deepEqual(evidence.allowedPlatformVariance, ALLOWED_PLATFORM_VARIANCE);
+
+  const allowed = structuredClone(evidence);
+  allowed.observedCommit = "platform-specific-observation";
+  allowed.sbom.componentCount += 1;
+  allowed.sbom.sha256 = "platform-specific-sbom-digest";
+  allowed.sbom.toolVersion = "platform-specific-npm";
+  allowed.toolchain = {
+    node: "platform-node",
+    npm: "platform-npm",
+    os: "platform-os",
+    arch: "platform-arch",
+  };
+  assert.equal(stableReleaseEvidenceMatches(evidence, allowed), true);
+
+  for (const [field, value] of [
+    ["format", "NotCycloneDX"],
+    ["specVersion", "0.0"],
+    ["tool", "untrusted sbom tool"],
+  ]) {
+    const changed = structuredClone(allowed);
+    changed.sbom[field] = value;
+    assert.equal(stableReleaseEvidenceMatches(evidence, changed), false, field);
+  }
 });
 
 test("CLI metadata registration defers secret and database materialization until command execution", () => {

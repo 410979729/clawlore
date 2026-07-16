@@ -123,20 +123,39 @@ async function withFailingVectorDeleteOnly(store, action) {
   }
 }
 
+async function closeStoresBeforeRemoving(dir, stores) {
+  for (const store of stores) await store?.close();
+  rmSync(dir, { recursive: true, force: true });
+}
+
+test("test harness closes stores before recursively removing their directory", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "clawlore-test-cleanup-order-"));
+  const events = [];
+  await closeStoresBeforeRemoving(dir, [
+    { async close() { events.push(`first:${existsSync(dir)}`); } },
+    { async close() { events.push(`second:${existsSync(dir)}`); } },
+  ]);
+  assert.deepEqual(events, ["first:true", "second:true"]);
+  assert.equal(existsSync(dir), false);
+});
+
 for (const backend of BACKENDS) {
   test(`${backend}: stale deleted companion rows stay deleted across restart`, async () => {
     const dir = mkdtempSync(join(tmpdir(), `clawlore-sql-restart-delete-${backend}-`));
     const id = "09000000-0000-4000-8000-000000000009";
+    let first;
+    let second;
     try {
-      const first = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: backend });
+      first = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: backend });
       await first.importEntry(entry(id, "restart must not resurrect this memory"));
       assert.equal(await withFailingVectorDeleteOnly(first, () => first.delete(id)), true);
       const beforeRestartDb = await first.getSqlTruthDb();
       assert.equal(beforeRestartDb.prepare("SELECT COUNT(*) AS n FROM memory_truth WHERE id = ?").get(id).n, 0);
       assert.equal(beforeRestartDb.prepare("SELECT action FROM vector_companion_repair_outbox WHERE memory_id = ?").get(id).action, "delete");
       await first.close();
+      first = undefined;
 
-      const second = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: backend });
+      second = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: backend });
       assert.equal(await second.getById(id), null);
       assert.deepEqual(await second.vectorSearch([1, 0, 0, 0], 5, 0.1), []);
       assert.deepEqual(await second.bm25Search("restart must not resurrect", 5), []);
@@ -144,8 +163,9 @@ for (const backend of BACKENDS) {
       assert.equal(afterRestartDb.prepare("SELECT COUNT(*) AS n FROM memory_truth WHERE id = ?").get(id).n, 0);
       assert.equal(afterRestartDb.prepare("SELECT action FROM vector_companion_repair_outbox WHERE memory_id = ?").get(id).action, "delete");
       await second.close();
+      second = undefined;
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await closeStoresBeforeRemoving(dir, [second, first]);
     }
   });
 
@@ -153,21 +173,25 @@ for (const backend of BACKENDS) {
     const dir = mkdtempSync(join(tmpdir(), `clawlore-sql-missing-${backend}-`));
     const id = "08000000-0000-4000-8000-000000000008";
     const truthPath = join(dir, "memory.sqlite3");
+    let first;
+    let second;
     try {
-      const first = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: backend });
+      first = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: backend });
       await first.importEntry(entry(id, "companion is not a backup"));
       await first.close();
+      first = undefined;
       for (const path of [truthPath, `${truthPath}-wal`, `${truthPath}-shm`]) {
         rmSync(path, { force: true });
       }
 
-      const second = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: backend });
+      second = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: backend });
       await assert.rejects(second.getById(id), /CLAWLORE_SQL_TRUTH_MIGRATION_REQUIRED/);
       assert.equal(second.getDiagnostics().sqlTruth.errorCode, "SQL_TRUTH_MIGRATION_REQUIRED");
       assert.equal(existsSync(truthPath), false, "startup must not create an empty truth DB before failing closed");
       await second.close();
+      second = undefined;
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await closeStoresBeforeRemoving(dir, [second, first]);
     }
   });
 

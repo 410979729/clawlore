@@ -9,6 +9,10 @@ import {
   runtimeArtifactIdentity,
 } from "./release-artifact-identity.mjs";
 import { scanReleaseDirectory } from "./release-content-scan.mjs";
+import {
+  ALLOWED_PLATFORM_VARIANCE,
+  stableReleaseEvidenceMatches,
+} from "./release-evidence-contract.mjs";
 import { assertReleaseSourceState } from "./release-source-state.mjs";
 
 async function exists(path) {
@@ -787,16 +791,7 @@ const releaseEvidence = {
   packedRuntimeSmoke: true,
   packedLanceDbSmoke: true,
   packedOpenClawCliSmoke: true,
-  allowedPlatformVariance: [
-    "observedCommit",
-    "sbom.componentCount",
-    "sbom.sha256",
-    "sbom.toolVersion",
-    "toolchain.node",
-    "toolchain.npm",
-    "toolchain.os",
-    "toolchain.arch",
-  ],
+  allowedPlatformVariance: ALLOWED_PLATFORM_VARIANCE,
 };
 const evidenceJson = `${JSON.stringify(releaseEvidence, null, 2)}\n`;
 const canonicalEvidencePath = resolve(releaseScriptContract.evidenceFile);
@@ -805,23 +800,7 @@ if (writeCanonicalEvidence) {
   await writeFile(canonicalEvidencePath, evidenceJson, { encoding: "utf8", mode: 0o600 });
 } else {
   const checkedEvidence = JSON.parse(await readFile(canonicalEvidencePath, "utf8"));
-  const stableEvidence = (value) => ({
-    schema: value.schema,
-    package: value.package,
-    releaseInput: value.releaseInput,
-    runtimeDigest: value.runtimeDigest,
-    sourceOnly: value.sourceOnly,
-    dirty: value.dirty,
-    packFileCount: value.packFileCount,
-    packageLockSha256: value.packageLockSha256,
-    compatibility: value.compatibility,
-    supplyChainRegistry: value.supplyChainRegistry,
-    packedRuntimeSmoke: value.packedRuntimeSmoke,
-    packedLanceDbSmoke: value.packedLanceDbSmoke,
-    packedOpenClawCliSmoke: value.packedOpenClawCliSmoke,
-    allowedPlatformVariance: value.allowedPlatformVariance,
-  });
-  if (JSON.stringify(stableEvidence(checkedEvidence)) !== JSON.stringify(stableEvidence(releaseEvidence))) {
+  if (!stableReleaseEvidenceMatches(checkedEvidence, releaseEvidence)) {
     throw new Error("release gate failed: checked-in release evidence does not match current release inputs");
   }
 }
