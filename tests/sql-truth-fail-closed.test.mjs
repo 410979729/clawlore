@@ -10,6 +10,7 @@ const { createJiti } = require("jiti");
 const { DatabaseSync } = require("node:sqlite");
 const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: false });
 const { MemoryStore } = jiti("../src/store.ts");
+const { verifyPrivatePath } = jiti("../src/file-privacy.ts");
 const { SqlTruthStore } = jiti("../src/sql-truth-store.ts");
 const { SqliteBruteForceVectorStore } = jiti("../src/sqlite-vector-store.ts");
 const { inspectLegacyAuthorityMigration, migrateLegacySqlAuthority } = jiti("../src/sql-authority-migration.ts");
@@ -212,8 +213,8 @@ test("fresh install writes an authority marker and legacy upgrade requires backu
     assert.equal(receipt.status, "completed");
     assert.equal(receipt.sourceTruthRows, 1);
     assert.equal(existsSync(backupPath), true);
-    assert.equal(lstatSync(backupPath).mode & 0o777, 0o600);
-    assert.equal(lstatSync(receiptPath).mode & 0o777, 0o600);
+    verifyPrivatePath(backupPath, { kind: "file" });
+    verifyPrivatePath(receiptPath, { kind: "file" });
     assert.equal(JSON.parse(readFileSync(receiptPath, "utf8")).status, "completed");
     assert.equal(SqlTruthStore.inspectAuthority(legacyPath).status, "valid");
     const opened = new SqlTruthStore(legacyPath);
