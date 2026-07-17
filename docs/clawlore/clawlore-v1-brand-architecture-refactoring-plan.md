@@ -314,3 +314,27 @@ fixtures, denied and successful command-orchestration fixtures, source
 governance, strict typecheck/build, the complete regression suite, and both
 evidence-write and normal-mode Linux source gates. Exact identities and counts
 belong in the dated bundle-3 run report.
+
+## Fourth bounded bundle
+
+The fourth bundle extracts auto-capture policy and bounded conversation state
+without moving scope resolution, smart extraction, storage, or hook ownership:
+
+- move compatibility regex signals, exclusions, and category classification
+  into a domain policy module while preserving the public `index.ts` exports;
+- move ingress/session key alignment, user/optional-assistant message
+  normalization, pending-ingress consumption, history cursors, recent-context
+  carry-forward, and bounded-map eviction into one application state module;
+- characterize repeated agent-end delivery as zero new text when the normalized
+  snapshot has not grown, while treating a shorter reset snapshot as new input;
+- keep access resolution, rate limiting, low-value policy, compression, smart
+  extraction, regex persistence, Markdown dual-write, and hook registration in
+  the composition root for later bounded slices;
+- reduce the `index.ts` non-growth ceiling from 3,336 to 3,105 lines without
+  adding a reverse-dependency exception.
+
+Acceptance requires policy compatibility fixtures, ingress/session-key and
+message-shape fixtures, pending-ingress/repeated-snapshot/history-growth tests,
+bounded-state verification, source governance, strict typecheck/build, the
+complete regression suite, and both evidence-write and normal-mode Linux
+source gates. Exact identities and counts belong in the dated bundle-4 report.
