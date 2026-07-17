@@ -416,8 +416,12 @@ Linux source gate passed 403 total / 401 passed / 0 failed / two platform
 skips, typecheck, build, vector repair, 124/124 deterministic recall, the
 200,000-row FTS baseline, official-registry vulnerabilities 0, a 42-component
 SBOM, a 192-file package scan, and all three packed smokes. Documentation-bound
-evidence regeneration and normal-mode verification remain the final bundle-3
-closure steps.
+candidate `ac5e18b9c28e1696b95846d1b1b98fa8b1c94e4b` repeated the same
+complete evidence-write gate. Its release-input identity is
+`2f48eb41e55c8dc947ef8f2ed800cb83cb274cb35c6bab7ed8972ae375a59538`
+across 578 tracked inputs; runtime identity remains
+`0931f45e39dcbaf6a2497e5ec6ebc4bc5096b5ef302626099fd439dc24d8b821`.
+Normal-mode verification remains the final bundle-3 closure step.
 
 No extension was deployed, live configuration or data changed, Gateway
 restarted, Windows client contacted, repository pushed, tag created, or release

@@ -1,7 +1,7 @@
 # ClawLore v1 brand and architecture refactoring bundle 3 — 2026-07-17
 
-Status: evidence-write Linux source gate PASS; final documentation-bound
-evidence and normal-mode verification pending; source candidate only.
+Status: final documentation-bound evidence-write Linux source gate PASS;
+normal-mode verification pending; source candidate only.
 
 ## Decision
 
@@ -89,13 +89,18 @@ First evidence-write Linux source gate on code commit `799dbcf`:
 - npm pack filename/content scan: 192 files;
 - clean candidate state: `dirty=false`.
 
-The first release-input identity was
-`c7306fede5c1908c24417f03cc8483bdbebef2721fa9790dbd6d3149d6b5cb9b`
-across 578 tracked inputs. Runtime identity was
+Documentation-bound source/plan candidate:
+`ac5e18b9c28e1696b95846d1b1b98fa8b1c94e4b`.
+
+Final evidence-write release-input identity:
+`2f48eb41e55c8dc947ef8f2ed800cb83cb274cb35c6bab7ed8972ae375a59538`
+across 578 tracked inputs.
+
+Runtime identity:
 `0931f45e39dcbaf6a2497e5ec6ebc4bc5096b5ef302626099fd439dc24d8b821`.
-The stable plan update changes release input, so these are explicitly
-intermediate identities. Final documentation-bound evidence will replace them
-before normal-mode verification.
+
+Normal mode still must compare a clean evidence commit against these stable
+fields before bundle closure.
 
 ## Cleanup and remaining boundary
 
