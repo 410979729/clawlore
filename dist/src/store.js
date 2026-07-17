@@ -10,6 +10,7 @@ import { SqlTruthStore, } from "./sql-truth-store.js";
 import { SqliteBruteForceVectorStore } from "./sqlite-vector-store.js";
 import { diagnosticErrorSummary, diagnosticIdentifier } from "./diagnostic-redaction.js";
 import { ensurePrivateDirectory } from "./file-privacy.js";
+import { MemoryStoreFacade } from "./memory-store-facade.js";
 // ============================================================================
 // LanceDB Dynamic Import
 // ============================================================================
@@ -124,7 +125,7 @@ export function validateStoragePath(dbPath) {
 // Memory Store
 // ============================================================================
 const TABLE_NAME = "memories";
-export class MemoryStore {
+class MemoryStoreRuntime {
     config;
     db = null;
     table = null;
@@ -1623,5 +1624,11 @@ export class MemoryStore {
             timestamp: Number(row.timestamp),
             metadata: row.metadata || "{}",
         }));
+    }
+}
+/** Stable compatibility constructor over the canonical storage ports. */
+export class MemoryStore extends MemoryStoreFacade {
+    constructor(config, ports) {
+        super(ports ?? new MemoryStoreRuntime(config));
     }
 }

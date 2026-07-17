@@ -145,7 +145,7 @@ test("SQL truth search errors return fail-closed empty results with stable diagn
   try {
     store = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: "sqlite-bruteforce" });
     await store.importEntry(entry("d", "searchable durable truth"));
-    store.sqlTruthStore.search = () => { throw new Error("private path /home/a and token-shaped canary"); };
+    store.ports.sqlTruthStore.search = () => { throw new Error("private path /home/a and token-shaped canary"); };
     assert.deepEqual(await store.bm25Search("searchable", 5), []);
     const status = store.getFtsStatus();
     assert.match(status.lastError, /^SQL_TRUTH_SEARCH_FAILED:/);

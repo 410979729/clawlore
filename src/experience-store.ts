@@ -6,7 +6,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { redactSupportBundle } from "./v2/operator/support-bundle.js";
+import { redactSupportBundle } from "./application/support-bundle.js";
 
 // Use any to avoid TypeScript issues with experimental node:sqlite
 type DatabaseSync = any;

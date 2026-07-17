@@ -27,16 +27,16 @@ test("vector hydration expands beyond 200 stale companion rows within a bounded 
     };
     await store.importEntry(valid);
     for (let index = 0; index < 250; index++) {
-      store.sqliteVectorStore.upsert({
+      store.ports.sqliteVectorStore.upsert({
         ...valid,
         id: `stale-${String(index).padStart(4, "0")}`,
         text: `stale ${index}`,
         timestamp: 10_000 + index,
       });
     }
-    const originalSearch = store.sqliteVectorStore.search.bind(store.sqliteVectorStore);
+    const originalSearch = store.ports.sqliteVectorStore.search.bind(store.ports.sqliteVectorStore);
     const limits = [];
-    store.sqliteVectorStore.search = (...args) => {
+    store.ports.sqliteVectorStore.search = (...args) => {
       limits.push(args[1]);
       return originalSearch(...args);
     };
@@ -57,7 +57,7 @@ test("vector scan budget exhaustion is explicit in diagnostics", async () => {
   try {
     const store = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: "sqlite-bruteforce" });
     await store.getSqlTruthDb();
-    store.sqliteVectorStore.search = (_vector, limit) => Array.from({ length: limit }, (_, index) => ({
+    store.ports.sqliteVectorStore.search = (_vector, limit) => Array.from({ length: limit }, (_, index) => ({
       entry: {
         id: `stale-budget-${index}`,
         text: `stale ${index}`,

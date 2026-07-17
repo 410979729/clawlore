@@ -5,7 +5,7 @@
  * Handles CRUD operations for task_episodes, procedural_playbooks, and experience_runs
  */
 import { randomUUID } from "node:crypto";
-import { redactSupportBundle } from "./v2/operator/support-bundle.js";
+import { redactSupportBundle } from "./application/support-bundle.js";
 let experienceTransactionSequence = 0;
 function withExperienceTransaction(db, operation) {
     const savepoint = `clawlore_experience_${++experienceTransactionSequence}`;

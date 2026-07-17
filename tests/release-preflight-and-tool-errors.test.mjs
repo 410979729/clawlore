@@ -54,8 +54,25 @@ test("source-only and live release gates both reject post-build dirty trees", ()
 });
 
 test("model-visible tool catches do not interpolate raw exception strings", () => {
-  for (const relative of ["../src/tools.ts", "../src/experience-tools.ts"]) {
+  const relatives = [
+    "../src/tool-runtime-policy.ts",
+    "../src/self-improvement-tools.ts",
+    "../src/memory-recall-tools.ts",
+    "../src/memory-write-tools.ts",
+    "../src/memory-lifecycle-tools.ts",
+    "../src/memory-diagnostic-tools.ts",
+    "../src/memory-governance-tools.ts",
+    "../src/experience-tool-runtime-policy.ts",
+    "../src/experience-episode-tools.ts",
+    "../src/experience-playbook-tools.ts",
+    "../src/experience-query-tools.ts",
+    "../src/experience-operator-tools.ts",
+    "../src/experience-review-tools.ts",
+  ];
+  const sources = [];
+  for (const relative of relatives) {
     const source = readFileSync(new URL(relative, import.meta.url), "utf8");
+    sources.push(source);
     for (const forbidden of [
       "String(error)",
       "${error}",
@@ -66,8 +83,8 @@ test("model-visible tool catches do not interpolate raw exception strings", () =
     ]) {
       assert.equal(source.includes(forbidden), false, `${relative} exposes ${forbidden}`);
     }
-    assert.match(source, /diagnosticErrorSummary/);
   }
+  assert.match(sources.join("\n"), /diagnosticErrorSummary/);
 
   const canary = "sk-private-canary /home/private/user.txt original user text";
   for (const payload of [

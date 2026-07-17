@@ -18,117 +18,44 @@ import { buildSmartMetadata, isMemoryActiveAt, parseSmartMetadata, stringifySmar
 import {
   SqlTruthStore,
   type VectorRepairDebtEntry,
-  type SqlTruthFtsReport,
-  type VectorRepairDebtReport,
 } from "./sql-truth-store.js";
 import { SqliteBruteForceVectorStore } from "./sqlite-vector-store.js";
 import { diagnosticErrorSummary, diagnosticIdentifier } from "./diagnostic-redaction.js";
 import { ensurePrivateDirectory } from "./file-privacy.js";
+import { MemoryStoreFacade } from "./memory-store-facade.js";
 
-// ============================================================================
-// Types
-// ============================================================================
-
-export interface MemoryEntry {
-  id: string;
-  text: string;
-  vector: number[];
-  category: "preference" | "fact" | "decision" | "entity" | "other" | "reflection";
-  scope: string;
-  importance: number;
-  timestamp: number;
-  metadata?: string; // JSON string for extensible metadata
-}
-
-export interface MemorySearchResult {
-  entry: MemoryEntry;
-  score: number;
-}
-
-export interface StoreConfig {
-  dbPath: string;
-  vectorDim: number;
-  vectorBackend?: "lancedb" | "sqlite-bruteforce";
-}
-
-export interface MetadataPatch {
-  [key: string]: unknown;
-}
-
-export interface AtomicSupersedeInput {
-  text: string;
-  vector: number[];
-  category: MemoryEntry["category"];
-  importance: number;
-  buildMetadata(context: {
-    oldEntry: MemoryEntry;
-    newId: string;
-    now: number;
-  }): { oldMetadata: string; newMetadata: string; factKey: string };
-}
-
-export interface MemoryStoreDiagnostics {
-  sqlTruth: {
-    available: boolean;
-    path: string | null;
-    count: number | null;
-    fts: SqlTruthFtsReport | null;
-    errorCode:
-      | "SQL_TRUTH_UNAVAILABLE"
-      | "SQL_TRUTH_MIGRATION_REQUIRED"
-      | "SQL_TRUTH_RUNTIME_FAILURE"
-      | null;
-    error: string | null;
-  };
-  fts: {
-    available: boolean;
-    lastError: string | null;
-  };
-  vectorCompanion: {
-    ready: boolean;
-    needsRepair: boolean;
-    message: string | null;
-    configuredDimension: number;
-    backend: "lancedb" | "sqlite-bruteforce";
-    repairDebt: VectorRepairDebtReport | null;
-    scanBudgetExhaustions: number;
-    lastScanBudgetExhaustedAt: number | null;
-  };
-}
-
-export interface VectorCompanionEmbedder {
-  embedPassage(text: string): Promise<number[]>;
-  embedBatchPassage?(texts: string[]): Promise<number[][]>;
-}
-
-export interface VectorCompanionRebuildOptions {
-  batchSize?: number;
-  limit?: number;
-  dryRun?: boolean;
-  fullRebuild?: boolean;
-}
-
-export interface VectorCompanionRebuildResult {
-  dryRun: boolean;
-  fullRebuild: boolean;
-  truthCount: number;
-  vectorRowsBefore: number;
-  staleVectorRowsDeleted: number;
-  processed: number;
-  rebuilt: number;
-  skipped: number;
-  errors: string[];
-}
-
-export interface VectorCompanionDriftReport {
-  truthCount: number;
-  checkedTruthRows: number;
-  vectorRows: number;
-  missingVectorRows: number;
-  staleVectorRows: number;
-  truncated: boolean;
-  repairHint: string | null;
-}
+import type {
+  AtomicSupersedeInput,
+  MemoryEntry,
+  MemorySearchResult,
+  MemoryStoreDiagnostics,
+  MemoryStorePorts,
+  MetadataPatch,
+  StoreConfig,
+  VectorCompanionDriftReport,
+  VectorCompanionEmbedder,
+  VectorCompanionRebuildOptions,
+  VectorCompanionRebuildResult,
+  VectorRepairDebtReport,
+} from "./memory-store-ports.js";
+export type {
+  AtomicSupersedeInput,
+  MemoryEntry,
+  MemorySearchResult,
+  MemoryStoreDiagnostics,
+  MemoryStorePorts,
+  MemoryTransactionPort,
+  MemoryTruthPort,
+  MemoryRetrievalPort,
+  MemoryProjectionPort,
+  MetadataPatch,
+  StoreConfig,
+  VectorCompanionDriftReport,
+  VectorCompanionEmbedder,
+  VectorCompanionRebuildOptions,
+  VectorCompanionRebuildResult,
+  VectorRepairDebtReport,
+} from "./memory-store-ports.js";
 
 // ============================================================================
 // LanceDB Dynamic Import
@@ -270,7 +197,7 @@ export function validateStoragePath(dbPath: string): string {
 
 const TABLE_NAME = "memories";
 
-export class MemoryStore {
+class MemoryStoreRuntime implements MemoryStorePorts {
   private db: LanceDB.Connection | null = null;
   private table: LanceDB.Table | null = null;
   private sqlTruthStore: SqlTruthStore | null = null;
@@ -2072,5 +1999,12 @@ export class MemoryStore {
           metadata: (row.metadata as string) || "{}",
         }),
       );
+  }
+}
+
+/** Stable compatibility constructor over the canonical storage ports. */
+export class MemoryStore extends MemoryStoreFacade {
+  constructor(config: StoreConfig, ports?: MemoryStorePorts) {
+    super(ports ?? new MemoryStoreRuntime(config));
   }
 }

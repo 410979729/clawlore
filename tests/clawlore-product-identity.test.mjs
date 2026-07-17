@@ -32,7 +32,8 @@ test("ClawLore is the canonical package, manifest, config, and command identity"
 test("identity compatibility is explicit and live release checks stay canonical", () => {
   const identity = read("src/product-identity.ts");
   const indexSource = read("index.ts");
-  const cliSource = read("cli.ts");
+  const cliPolicySource = read("src/cli/cli-runtime-policy.ts");
+  const coreRuntimeSource = read("src/core-memory-runtime.ts");
   const releaseGate = read("scripts/release-gate.mjs");
   const vectorRepairSmoke = read("scripts/smoke-vector-repair.mjs");
   const transition = read("docs/clawlore/identity-transition-v1.md");
@@ -41,9 +42,9 @@ test("identity compatibility is explicit and live release checks stay canonical"
   assert.match(identity, /CLAWLORE_LEGACY_PLUGIN_IDS = \["scope-recall-openclaw"\]/);
   assert.match(identity, /CLAWLORE_RUNTIME_CONFIG_KEY = "runtime"/);
   assert.match(identity, /CLAWLORE_LEGACY_RUNTIME_CONFIG_KEYS = \["clawloreV2"\]/);
-  assert.match(indexSource, /CLAWLORE_LEGACY_DEFAULTS\.dataDirectoryName/);
-  assert.match(indexSource, /resolveDefaultOauthPathWithCompatibility/);
-  assert.match(cliSource, /CLAWLORE_LEGACY_DEFAULTS\.oauthDirectoryName/);
+  assert.match(coreRuntimeSource, /CLAWLORE_LEGACY_DEFAULTS\.dataDirectoryName/);
+  assert.match(coreRuntimeSource, /resolveDefaultOauthPathWithCompatibility/);
+  assert.match(cliPolicySource, /CLAWLORE_LEGACY_DEFAULTS\.oauthDirectoryName/);
   assert.match(releaseGate, /extensions\/clawlore/);
   assert.match(releaseGate, /\["plugins", "inspect", "clawlore", "--json"\]/);
   assert.match(releaseGate, /\["clawlore", "doctor", "--json", "--quiet"\]/);

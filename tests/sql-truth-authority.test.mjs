@@ -87,14 +87,14 @@ function entry(id, text, metadata = {}) {
 
 async function withFailingVectorMutation(store, action) {
   await store.getSqlTruthDb();
-  const companion = store.sqliteVectorStore ?? store.table;
+  const companion = store.ports.sqliteVectorStore ?? store.ports.table;
   assert.ok(companion, "vector companion initialized");
   const originals = {
     delete: companion.delete?.bind(companion),
     add: companion.add?.bind(companion),
     upsert: companion.upsert?.bind(companion),
   };
-  if (companion.delete) companion.delete = store.sqliteVectorStore
+  if (companion.delete) companion.delete = store.ports.sqliteVectorStore
     ? () => { throw new Error("injected vector delete failure"); }
     : async () => { throw new Error("injected vector delete failure"); };
   if (companion.add) companion.add = async () => { throw new Error("injected vector add failure"); };
@@ -110,10 +110,10 @@ async function withFailingVectorMutation(store, action) {
 
 async function withFailingVectorDeleteOnly(store, action) {
   await store.getSqlTruthDb();
-  const companion = store.sqliteVectorStore ?? store.table;
+  const companion = store.ports.sqliteVectorStore ?? store.ports.table;
   assert.ok(companion?.delete, "vector companion delete initialized");
   const originalDelete = companion.delete.bind(companion);
-  companion.delete = store.sqliteVectorStore
+  companion.delete = store.ports.sqliteVectorStore
     ? () => { throw new Error("injected vector delete-only failure"); }
     : async () => { throw new Error("injected vector delete-only failure"); };
   try {

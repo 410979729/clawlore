@@ -8,6 +8,22 @@ import {
   stableReleaseEvidenceMatches,
 } from "../scripts/release-evidence-contract.mjs";
 
+const CLI_SOURCE_FILES = [
+  "../cli.ts",
+  "../src/cli/auth-commands.ts",
+  "../src/cli/memory-commands.ts",
+  "../src/cli/diagnostic-commands.ts",
+  "../src/cli/governance-commands.ts",
+  "../src/cli/experience-commands.ts",
+  "../src/cli/migration-commands.ts",
+];
+
+function readClawLoreCliSources() {
+  return CLI_SOURCE_FILES
+    .map((relative) => readFileSync(new URL(relative, import.meta.url), "utf8"))
+    .join("\n");
+}
+
 const require = createRequire(import.meta.url);
 const { createJiti } = require("jiti");
 const jiti = createJiti(import.meta.url, {
@@ -562,7 +578,7 @@ test("legacy plaintext backup and destructive startup compaction are disabled", 
 });
 
 test("vector repair CLI is dry-run-first and SQLite stores use busy timeout", () => {
-  const cli = readFileSync(new URL("../cli.ts", import.meta.url), "utf8");
+  const cli = readClawLoreCliSources();
   assert.match(cli, /\.option\("--apply"/);
   assert.match(cli, /\.option\("--full"/);
   assert.match(cli, /options\.dryRun === true \|\| options\.apply !== true/);
@@ -575,7 +591,7 @@ test("vector repair CLI is dry-run-first and SQLite stores use busy timeout", ()
 });
 
 test("operator CLI exposes Yuheng 1.6 governance function surface", () => {
-  const cli = readFileSync(new URL("../cli.ts", import.meta.url), "utf8");
+  const cli = readClawLoreCliSources();
   for (const marker of [
     ".command(\"dashboard\")",
     ".command(\"candidates\")",
@@ -736,6 +752,7 @@ test("canonical release evidence compares stable SBOM metadata and only permits 
 test("CLI metadata registration defers secret and database materialization until command execution", () => {
   const entry = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
   const cli = readFileSync(new URL("../cli.ts", import.meta.url), "utf8");
+  const runtime = readFileSync(new URL("../src/core-memory-runtime.ts", import.meta.url), "utf8");
   const registerStart = entry.indexOf("register(api: OpenClawPluginApi)");
   const metadataBranch = entry.indexOf("if (isCliRegistrationMode(api))", registerStart);
   const runtimeParse = entry.indexOf("const config = parsePluginConfig(api.pluginConfig)", registerStart);
@@ -743,8 +760,8 @@ test("CLI metadata registration defers secret and database materialization until
   assert.ok(registerStart >= 0);
   assert.ok(metadataBranch > registerStart);
   assert.ok(runtimeParse > metadataBranch);
-  assert.match(entry, /resolveSecretRefValues/);
-  assert.match(entry, /applyResolvedAssignments/);
+  assert.match(runtime, /resolveSecretRefValues/);
+  assert.match(runtime, /applyResolvedAssignments/);
   assert.match(entry, /registerCliMetadata\(api\)/);
   assert.match(cli, /hook\("preAction"/);
   assert.match(cli, /await context\.beforeAction\?\.\(path\)/);

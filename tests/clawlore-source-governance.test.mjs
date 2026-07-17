@@ -26,7 +26,13 @@ function importedSpecifiers(source) {
 // This inventory describes the predominant responsibility of migration-era
 // root modules. It is a debt map, not a claim that every module is already pure.
 const ROOT_MODULES_BY_LAYER = {
-  composition: ["plugin-config.ts"],
+  composition: [
+    "adapters/openclaw/runtime-composition-root.ts",
+    "auto-capture-hooks.ts", "auto-recall-hooks.ts", "core-memory-runtime.ts", "plugin-config.ts",
+    "reflection-hooks.ts", "reflection-runtime-state.ts", "self-improvement-hooks.ts",
+    "task-experience-hooks.ts",
+    "runtime-shadow-registration.ts",
+  ],
   domain: [
     "auto-capture-policy.ts", "auto-recall-query.ts", "auto-recall-session-boundary.ts", "capture-safety.ts",
     "decay-engine.ts", "experience-models.ts", "experience-schemas.ts",
@@ -37,6 +43,9 @@ const ROOT_MODULES_BY_LAYER = {
     "scope-policy.ts", "smart-metadata.ts",
   ],
   application: [
+    "application/context-composer.ts", "application/identity-resolver.ts",
+    "application/legacy-address-mapper.ts", "application/policy-decision.ts",
+    "application/support-bundle.ts",
     "access-tracker.ts", "adaptive-retrieval.ts", "admission-control.ts",
     "admission-stats.ts", "auto-capture-cleanup.ts", "auto-capture-governance.ts",
     "auto-capture-session-state.ts",
@@ -46,13 +55,22 @@ const ROOT_MODULES_BY_LAYER = {
     "experience-replay.ts", "forgetting.ts", "governance-cleanup.ts",
     "graph-hygiene.ts", "identity-addressing.ts", "intent-analyzer.ts",
     "knowledge-skill-bridge.ts", "memory-compactor.ts", "memory-upgrader.ts",
+    "memory-store-facade.ts", "memory-store-ports.ts",
     "reflection-retry.ts", "retrieval-stats.ts", "retrieval-trace.ts",
     "retriever.ts", "session-compressor.ts", "smart-extractor.ts",
     "task-experience.ts", "tier-manager.ts",
   ],
   adapters: [
-    "experience-tools.ts", "reflection-command-orchestrator.ts", "reflection-generation.ts",
-    "reflection-transcript.ts", "runtime-config.ts", "scopes.ts", "session-recovery.ts", "tools.ts",
+    "adapters/openclaw/compatibility-context-adapter.ts", "adapters/openclaw/context-engine-skeleton.ts",
+    "adapters/openclaw/legacy-shadow-retrieval.ts", "adapters/openclaw/native-shadow-retrieval.ts",
+    "adapters/openclaw/legacy-context-sources.ts",
+    "experience-episode-tools.ts", "experience-operator-tools.ts", "experience-playbook-tools.ts",
+    "experience-query-tools.ts", "experience-review-tools.ts", "experience-tool-runtime-policy.ts",
+    "experience-tools.ts", "memory-diagnostic-tools.ts", "memory-governance-tools.ts",
+    "memory-lifecycle-tools.ts", "memory-recall-tools.ts", "memory-write-tools.ts",
+    "reflection-command-orchestrator.ts", "reflection-generation.ts",
+    "reflection-transcript.ts", "runtime-config.ts", "scopes.ts", "self-improvement-tools.ts",
+    "session-recovery.ts", "tool-runtime-policy.ts", "tools.ts",
     "types/openclaw-plugin-sdk.d.ts",
   ],
   infrastructure: [
@@ -61,13 +79,16 @@ const ROOT_MODULES_BY_LAYER = {
     "proper-lockfile.d.ts", "reflection-event-store.ts", "reflection-item-store.ts",
     "reflection-store.ts", "secret-index.ts",
     "sql-authority-migration.ts", "sql-truth-store.ts", "sqlite-vector-store.ts",
-    "store.ts", "workspace-boundary.ts",
+    "store.ts", "workspace-boundary.ts", "markdown-mirror.ts",
   ],
   operator: [
-    "diagnostic-redaction.ts", "diagnostics-redaction.ts", "migrate.ts",
+    "adapters/openclaw/runtime-rollout-control.ts",
+    "cli/auth-commands.ts", "cli/cli-runtime-policy.ts", "cli/diagnostic-commands.ts",
+    "cli/experience-commands.ts", "cli/governance-commands.ts", "cli/memory-commands.ts",
+    "cli/migration-commands.ts", "diagnostic-redaction.ts", "diagnostics-redaction.ts", "migrate.ts",
     "operator-dashboard.ts", "release-provenance.ts", "self-improvement-files.ts",
   ],
-  compat: ["clawteam-scope.ts"],
+  compat: ["adapters/openclaw/runtime-shadow.ts", "clawteam-scope.ts", "markdown-compat.ts"],
 };
 
 const ROOT_ALLOWED_DEPENDENCIES = {
@@ -104,7 +125,6 @@ const ROOT_REVERSE_DEPENDENCY_DEBT = new Set([
   "src/embedder.ts -> src/diagnostic-redaction.ts",
   "src/experience-promotion-batch.ts -> src/experience-store.ts",
   "src/experience-replay.ts -> src/experience-store.ts",
-  "src/experience-store.ts -> src/v2/operator/support-bundle.ts",
   "src/experience-tools.ts -> src/diagnostic-redaction.ts",
   "src/experience-tools.ts -> src/embedder.ts",
   "src/experience-tools.ts -> src/journal-recovery.ts",
@@ -141,17 +161,34 @@ const ROOT_REVERSE_DEPENDENCY_DEBT = new Set([
   "src/tools.ts -> src/store.ts",
 ]);
 
+// Splitting a debt-bearing adapter must not manufacture new logical debt just
+// because one old source file became several capability files. These aliases
+// keep the ledger attached to the stable Agent-tool subsystem while each
+// physical module remains independently classified and line-budgeted.
+const ROOT_DEBT_SOURCE_ALIASES = new Map([
+  ["src/experience-episode-tools.ts", "src/experience-tools.ts"],
+  ["src/experience-operator-tools.ts", "src/experience-tools.ts"],
+  ["src/experience-playbook-tools.ts", "src/experience-tools.ts"],
+  ["src/experience-query-tools.ts", "src/experience-tools.ts"],
+  ["src/experience-review-tools.ts", "src/experience-tools.ts"],
+  ["src/experience-tool-runtime-policy.ts", "src/experience-tools.ts"],
+  ["src/memory-diagnostic-tools.ts", "src/tools.ts"],
+  ["src/memory-governance-tools.ts", "src/tools.ts"],
+  ["src/memory-lifecycle-tools.ts", "src/tools.ts"],
+  ["src/memory-recall-tools.ts", "src/tools.ts"],
+  ["src/memory-write-tools.ts", "src/tools.ts"],
+  ["src/self-improvement-tools.ts", "src/tools.ts"],
+  ["src/tool-runtime-policy.ts", "src/tools.ts"],
+]);
+
 const V2_LAYERS = new Set([
   "adapters", "application", "domain", "eval", "migration", "operator",
   "storage", "workers",
 ]);
 
 const HOTSPOT_LINE_BUDGETS = new Map([
-  ["index.ts", 3_105],
-  ["cli.ts", 2_794],
-  ["src/tools.ts", 2_727],
-  ["src/store.ts", 2_076],
-  ["src/experience-tools.ts", 1_732],
+  ["index.ts", 632],
+  ["src/store.ts", 2_010],
   ["src/sql-truth-store.ts", 1_514],
   ["src/smart-extractor.ts", 1_427],
   ["src/retriever.ts", 1_425],
@@ -233,7 +270,8 @@ test("migration-era root reverse dependencies match the shrink-only debt ledger"
       if (!toLayer) continue;
       assert.ok(ROOT_ALLOWED_DEPENDENCIES[fromLayer], `missing dependency policy for ${fromLayer}`);
       if (!ROOT_ALLOWED_DEPENDENCIES[fromLayer].has(toLayer)) {
-        observedDebt.add(`${sourcePath} -> ${targetPath}`);
+        const debtSource = ROOT_DEBT_SOURCE_ALIASES.get(sourcePath) ?? sourcePath;
+        observedDebt.add(`${debtSource} -> ${targetPath}`);
       }
     }
   }
