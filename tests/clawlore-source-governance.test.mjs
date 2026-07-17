@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
-import { join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import test from "node:test";
 
 const root = resolve(".");
@@ -16,9 +16,17 @@ async function filesUnder(path, suffix) {
   return result;
 }
 
+function importedSpecifiers(source) {
+  const result = [];
+  const pattern = /(?:import|export)\s+(?:type\s+)?(?:[^"'\n]*?\s+from\s+)?["']([^"']+)["']/g;
+  for (const match of source.matchAll(pattern)) result.push(match[1]);
+  return result;
+}
+
 // This inventory describes the predominant responsibility of migration-era
 // root modules. It is a debt map, not a claim that every module is already pure.
 const ROOT_MODULES_BY_LAYER = {
+  composition: ["plugin-config.ts"],
   domain: [
     "auto-recall-query.ts", "auto-recall-session-boundary.ts", "capture-safety.ts",
     "decay-engine.ts", "experience-models.ts", "experience-schemas.ts",
@@ -60,13 +68,84 @@ const ROOT_MODULES_BY_LAYER = {
   compat: ["clawteam-scope.ts"],
 };
 
+const ROOT_ALLOWED_DEPENDENCIES = {
+  composition: new Set(["composition", "domain", "application", "adapters", "infrastructure", "operator", "compat"]),
+  domain: new Set(["domain"]),
+  application: new Set(["application", "domain"]),
+  adapters: new Set(["adapters", "application", "domain"]),
+  infrastructure: new Set(["infrastructure", "application", "domain"]),
+  operator: new Set(["operator", "infrastructure", "application", "domain"]),
+  compat: new Set(["compat", "adapters", "application", "infrastructure", "domain"]),
+};
+
+const V2_LAYER_TO_ROOT_LAYER = {
+  domain: "domain",
+  application: "application",
+  storage: "infrastructure",
+  workers: "application",
+  adapters: "adapters",
+  migration: "operator",
+  operator: "operator",
+  eval: "adapters",
+};
+
+// Exact migration debt. New reverse edges fail immediately; removing an edge
+// requires deleting its ledger entry in the same reviewed change.
+const ROOT_REVERSE_DEPENDENCY_DEBT = new Set([
+  "src/access-tracker.ts -> src/store.ts",
+  "src/admission-control.ts -> src/llm-client.ts",
+  "src/admission-control.ts -> src/store.ts",
+  "src/conflict-governance.ts -> src/store.ts",
+  "src/digest-pipeline.ts -> src/diagnostic-redaction.ts",
+  "src/digest-pipeline.ts -> src/llm-client.ts",
+  "src/digest-pipeline.ts -> src/store.ts",
+  "src/embedder.ts -> src/diagnostic-redaction.ts",
+  "src/experience-promotion-batch.ts -> src/experience-store.ts",
+  "src/experience-replay.ts -> src/experience-store.ts",
+  "src/experience-store.ts -> src/v2/operator/support-bundle.ts",
+  "src/experience-tools.ts -> src/diagnostic-redaction.ts",
+  "src/experience-tools.ts -> src/embedder.ts",
+  "src/experience-tools.ts -> src/journal-recovery.ts",
+  "src/experience-tools.ts -> src/operator-dashboard.ts",
+  "src/experience-tools.ts -> src/store.ts",
+  "src/experience-tools.ts -> src/workspace-boundary.ts",
+  "src/forgetting.ts -> src/diagnostic-redaction.ts",
+  "src/llm-client.ts -> src/diagnostic-redaction.ts",
+  "src/llm-oauth.ts -> src/diagnostic-redaction.ts",
+  "src/memory-compactor.ts -> src/diagnostic-redaction.ts",
+  "src/memory-compactor.ts -> src/store.ts",
+  "src/memory-upgrader.ts -> src/diagnostic-redaction.ts",
+  "src/memory-upgrader.ts -> src/llm-client.ts",
+  "src/memory-upgrader.ts -> src/store.ts",
+  "src/noise-prototypes.ts -> src/embedder.ts",
+  "src/retriever.ts -> src/diagnostic-redaction.ts",
+  "src/retriever.ts -> src/embedder.ts",
+  "src/retriever.ts -> src/store.ts",
+  "src/smart-extractor.ts -> src/diagnostic-redaction.ts",
+  "src/smart-extractor.ts -> src/embedder.ts",
+  "src/smart-extractor.ts -> src/llm-client.ts",
+  "src/smart-extractor.ts -> src/store.ts",
+  "src/sql-authority-migration.ts -> src/diagnostic-redaction.ts",
+  "src/store.ts -> src/diagnostic-redaction.ts",
+  "src/task-experience.ts -> src/diagnostic-redaction.ts",
+  "src/task-experience.ts -> src/embedder.ts",
+  "src/task-experience.ts -> src/llm-client.ts",
+  "src/task-experience.ts -> src/store.ts",
+  "src/tools.ts -> src/artifacts.ts",
+  "src/tools.ts -> src/diagnostic-redaction.ts",
+  "src/tools.ts -> src/embedder.ts",
+  "src/tools.ts -> src/secret-index.ts",
+  "src/tools.ts -> src/self-improvement-files.ts",
+  "src/tools.ts -> src/store.ts",
+]);
+
 const V2_LAYERS = new Set([
   "adapters", "application", "domain", "eval", "migration", "operator",
   "storage", "workers",
 ]);
 
 const HOTSPOT_LINE_BUDGETS = new Map([
-  ["index.ts", 4_730],
+  ["index.ts", 4_184],
   ["cli.ts", 2_794],
   ["src/tools.ts", 2_727],
   ["src/store.ts", 2_076],
@@ -96,6 +175,14 @@ const LEGACY_BRAND_BUDGETS = new Map([
   ["src/v2/domain/release.ts", 3],
 ]);
 
+function createRootLayerMap() {
+  const result = new Map();
+  for (const [layer, paths] of Object.entries(ROOT_MODULES_BY_LAYER)) {
+    for (const path of paths) result.set(`src/${path}`, layer);
+  }
+  return result;
+}
+
 test("every production TypeScript module has an architecture classification", async () => {
   const classified = new Map([
     ["index.ts", "composition"],
@@ -122,6 +209,34 @@ test("every production TypeScript module has an architecture classification", as
     .map((path) => relative(root, path).replaceAll("\\", "/"))]
     .sort();
   assert.deepEqual([...classified.keys()].sort(), actual);
+});
+
+test("migration-era root reverse dependencies match the shrink-only debt ledger", async () => {
+  const layerByPath = createRootLayerMap();
+  const observedDebt = new Set();
+
+  for (const [sourcePath, fromLayer] of layerByPath) {
+    if (sourcePath.endsWith(".d.ts")) continue;
+    const source = await readFile(resolve(sourcePath), "utf8");
+    for (const specifier of importedSpecifiers(source)) {
+      if (!specifier.startsWith(".")) continue;
+      const targetPath = relative(
+        root,
+        resolve(dirname(resolve(sourcePath)), specifier.replace(/\.js$/, ".ts")),
+      ).replaceAll("\\", "/");
+      const v2Layer = targetPath.startsWith("src/v2/")
+        ? V2_LAYER_TO_ROOT_LAYER[targetPath.split("/")[2]]
+        : undefined;
+      const toLayer = layerByPath.get(targetPath) ?? v2Layer;
+      if (!toLayer) continue;
+      assert.ok(ROOT_ALLOWED_DEPENDENCIES[fromLayer], `missing dependency policy for ${fromLayer}`);
+      if (!ROOT_ALLOWED_DEPENDENCIES[fromLayer].has(toLayer)) {
+        observedDebt.add(`${sourcePath} -> ${targetPath}`);
+      }
+    }
+  }
+
+  assert.deepEqual([...observedDebt].sort(), [...ROOT_REVERSE_DEPENDENCY_DEBT].sort());
 });
 
 test("existing TypeScript hotspots cannot grow and new modules stay below 800 lines", async () => {
