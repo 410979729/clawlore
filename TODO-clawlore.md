@@ -30,8 +30,12 @@ Detailed plan:
   - [x] Bundle 3: extract reflection contracts, transcript reading/reset
         recovery, embedded generation, and command:new/reset orchestration;
         reduce `index.ts` from 4,184 to 3,336 lines without new reverse debt.
-  - [ ] Extract auto-capture policy/conversation state, Markdown compatibility
-        retrieval, runtime construction, and capability hook registrars.
+  - [x] Bundle 4: extract auto-capture regex policy and bounded
+        ingress/history conversation state; reduce `index.ts` from 3,336 to
+        3,105 lines and prevent repeated identical agent-end snapshots from
+        selecting the full history again.
+  - [ ] Extract Markdown compatibility retrieval, runtime construction, and
+        capability hook registrars.
 - [ ] Split CLI and Agent tools by capability, centralize application policy,
       and preserve command/tool response contracts.
 - [ ] Reduce `MemoryStore` to a compatibility facade over explicit truth,
@@ -56,6 +60,14 @@ skips, typecheck, build, vector repair, 124/124 recall, 200,000-row FTS, three
 packed smokes, 42-component SBOM, 192-file pack scan, and official-registry
 vulnerabilities 0. Stable release-input and runtime identities matched; bundle
 3 is closed. Exact Windows and independent-review gates remain open.
+
+Bundle-4 code candidate `95047a7` and stable plan candidate `ea82afe` passed
+15/15 focused tests and the evidence-write Linux source gate: 411 total / 409
+passed / 0 failed / 2 platform skips, typecheck, build, vector repair, 124/124
+recall, 200,000-row FTS, three packed smokes, 42-component SBOM, 194-file pack
+scan, and official-registry vulnerabilities 0. Release-input identity is
+`3cbe4c38…` across 584 tracked inputs and runtime identity is `e25fbe07…`.
+Normal-mode re-verification remains the bundle-4 closure step.
 
 ## R1 — Canonical ClawLore identity candidate
 

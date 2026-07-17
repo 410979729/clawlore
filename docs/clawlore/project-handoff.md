@@ -439,6 +439,47 @@ extraction, CLI/tools/storage convergence, the exact Windows gate, owned
 Windows audit-root cleanup, and independent review remain open. See
 `eval/clawlore-v1-brand-architecture-refactoring-bundle3-run-2026-07-17.md`.
 
+## R2 brand and architecture bundle 4
+
+Code commit `95047a731a80e28b4ce60e47ec72f763d93784c7` extracts two
+auto-capture boundaries:
+
+- `auto-capture-policy.ts` owns compatibility regex signals, exclusions,
+  safety preflight, and category mapping while `index.ts` preserves the public
+  exports;
+- `auto-capture-session-state.ts` owns ingress/session-key alignment, normalized
+  message selection, pending ingress, history cursors, explicit-remember carry,
+  and bounded state without access, model, scope, or persistence authority.
+
+`index.ts` retains runtime access/scope resolution, rate and value policy,
+compression, smart extraction, regex persistence, Markdown dual-write, and hook
+registration. It shrinks from 3,336 to 3,105 lines. Both new modules are below
+800 lines, all production modules remain classified, and the 45-edge
+reverse-dependency ledger is unchanged.
+
+The extracted cursor also closes a correctness defect: a repeated agent-end
+delivery with an unchanged normalized snapshot now selects zero new texts
+instead of selecting the full history again. Growth still selects only its
+suffix; shorter reset snapshots remain new input.
+
+Focused tests passed 15/15. Stable plan candidate
+`ea82afe9dd9bef3c99c21238df47133a5f777858` passed the complete
+evidence-write Linux source gate: 411 total / 409 passed / 0 failed / two
+platform skips, typecheck, build, vector repair, 124/124 recall, 200,000-row
+FTS, three packed smokes, official-registry vulnerabilities 0, a 42-component
+SBOM, and a 194-file package scan. Release-input identity is
+`3cbe4c38c7dc132dd8ade2195358d3baa9ea9bb7c0dd60e0e08967ebf339fc02`
+across 584 tracked inputs; runtime identity is
+`e25fbe07227cd148da6ba1e28d90402a0646fd48be027d5f4fe4a56f56271df8`.
+Normal-mode verification remains the final bundle-4 closure step.
+
+No extension was deployed, live configuration or data changed, Gateway
+restarted, Windows client contacted, repository pushed, tag created, or release
+performed. Overall status remains NO-GO: Markdown/runtime/hook extraction,
+CLI/tools/storage convergence, the exact Windows gate, owned Windows audit-root
+cleanup, and independent review remain open. See
+`eval/clawlore-v1-brand-architecture-refactoring-bundle4-run-2026-07-17.md`.
+
 ## Current live boundary
 
 The 2026-07-14 H5 artifact remains the deployed runtime under the legacy plugin
