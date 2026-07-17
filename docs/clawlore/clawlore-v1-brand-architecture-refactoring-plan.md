@@ -265,3 +265,24 @@ The first implementation bundle is deliberately narrow:
 
 This creates the contract needed for later structural work without mixing a
 brand migration with a high-risk entry-point split.
+
+## Second bounded bundle
+
+The second bundle starts Phase B closure and the first Phase C slice:
+
+- enforce the target dependency direction across migration-era root modules;
+- keep the 45 baseline reverse edges in an exact shrink-only ledger;
+- document the dominant missing ports and remediation order;
+- characterize plugin configuration defaults, validation, compatibility, and
+  error behavior before changing the entry point;
+- move the validated `PluginConfig` contract and parser into
+  `src/plugin-config.ts` as composition support;
+- preserve the public `parsePluginConfig` export from `index.ts`;
+- reduce the `index.ts` non-growth ceiling from 4,730 to 4,184 lines;
+- do not combine this slice with reflection, capture, Markdown retrieval,
+  runtime construction, hook registration, or any live rollout.
+
+Acceptance requires parser parity fixtures, focused configuration and
+architecture tests, strict typecheck/build, the complete test suite, and the
+full Linux source release gate. Exact evidence belongs in the dated bundle-2
+run report rather than in this stable execution plan.
