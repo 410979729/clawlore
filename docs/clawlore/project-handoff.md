@@ -2,7 +2,7 @@
 
 Current through Phase 9, H1-H5 production hardening, the R1 canonical identity
 transition, the seventh and eighth independent reviews, and R2 brand/
-architecture bundle 1 through 2026-07-17.
+architecture bundle 2 through 2026-07-17.
 
 ## Canonical identity candidate
 
@@ -350,6 +350,35 @@ host/config/session/plugin-cache residues; they were not generated as candidate
 artifacts and were left untouched. The full architecture program and
 cross-platform/review gates remain open. See
 `eval/clawlore-v1-brand-architecture-refactoring-bundle1-run-2026-07-17.md`.
+
+## R2 brand and architecture bundle 2
+
+Code commit `5d3606e46479310f97a1833e45dd81f250837ce5` adds an exact
+shrink-only ledger for 45 migration-era reverse dependencies and extracts the
+validated plugin configuration contract/parser into `src/plugin-config.ts`.
+The parser is 556 lines; `index.ts` keeps composition use plus the public
+compatibility re-export and shrinks from 4,730 to 4,184 lines. Five valid and
+four invalid parity fixtures matched the old parser before the duplicate was
+removed. Four dedicated parser tests cover defaults, numeric normalization,
+legacy session behavior, credentials, and canonical/compatibility runtime
+input.
+
+The complete source plan candidate `9e0fcfa3705dfb3fab96b7dee001ca65dd3e5839`
+passed the evidence-write Linux source gate: 395 total / 393 passed / 0 failed /
+two platform skips, typecheck, build, vector repair, 124/124 deterministic
+recall, 200,000-row FTS, official-registry vulnerabilities 0, 42-component
+SBOM, 188-file pack scan, and packed runtime/LanceDB/OpenClaw CLI smokes.
+Release-input identity is
+`074832cb1cf41436e0511c4a691d9f16c0f5ca203e59989b701ca538476ef1a0`
+across 567 inputs; runtime identity is
+`4f31de8b1a782726f785ee78bdb08059d9d57347aee0ea1a3badf989b4e81350`.
+
+This bundle did not deploy, modify live configuration or data, restart the
+Gateway, connect to the Windows work computer, push, tag, or release. Overall
+status remains NO-GO: reflection/capture/Markdown/runtime/hook extraction,
+CLI/tools/storage convergence, the exact Windows gate, cleanup of only the
+owned Windows audit roots, and independent review remain open. See
+`eval/clawlore-v1-brand-architecture-refactoring-bundle2-run-2026-07-17.md`.
 
 ## Current live boundary
 

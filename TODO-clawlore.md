@@ -19,12 +19,17 @@ Detailed plan:
       budgets for all current hotspots plus an 800-line ceiling for new files.
 - [x] Pass bundle-1 focused tests, full Node 24 Linux regression, evidence-write
       source gate, and normal-mode evidence verification on clean commits.
-- [ ] Extend inward dependency-direction enforcement from `src/v2` to the
+- [x] Extend inward dependency-direction enforcement from `src/v2` to the
       migration-era root modules, with explicit debt exceptions that can only
       shrink.
 - [ ] Extract configuration, reflection, capture, Markdown retrieval, runtime
       construction, and hook registration from `index.ts` under characterization
       tests; target entry point is at most 800 lines.
+  - [x] Bundle 2: extract the validated plugin-config contract/parser with
+        parity tests; reduce `index.ts` from 4,730 to 4,184 lines.
+  - [ ] Extract reflection transcript reading and orchestration.
+  - [ ] Extract auto-capture policy/conversation state, Markdown compatibility
+        retrieval, runtime construction, and capability hook registrars.
 - [ ] Split CLI and Agent tools by capability, centralize application policy,
       and preserve command/tool response contracts.
 - [ ] Reduce `MemoryStore` to a compatibility facade over explicit truth,
@@ -34,6 +39,12 @@ Detailed plan:
 - [ ] Complete public-contract and security/transaction comment audit.
 - [ ] Pass focused/full Linux gates, exact Windows Node 24 gate, package smokes,
       and independent review before any live identity rollout.
+
+Bundle-2 Linux verification: 43/43 focused tests; 395 total / 393 passed /
+0 failed / 2 platform skips; typecheck, build, vector repair, 124/124 recall,
+200,000-row FTS, packed runtime/LanceDB/OpenClaw CLI, 42-component SBOM,
+188-file package scan, and official-registry vulnerabilities 0. Exact Windows
+and independent-review gates remain open.
 
 ## R1 — Canonical ClawLore identity candidate
 
