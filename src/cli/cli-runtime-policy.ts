@@ -73,13 +73,15 @@ export type ChooseOAuthProviderHook = NonNullable<
 // ============================================================================
 
 export function getPluginVersion(): string {
-  for (const relativePath of ["./package.json", "../package.json"]) {
+  // This module is two levels below the package root in source and three
+  // levels below it after compilation into dist/src/cli.
+  for (const relativePath of ["../../package.json", "../../../package.json"]) {
     try {
       const pkgUrl = new URL(relativePath, import.meta.url);
       const pkg = JSON.parse(readFileSync(pkgUrl, "utf8")) as { version?: string };
       if (pkg.version) return pkg.version;
     } catch {
-      // Source execution uses ./package.json; compiled dist execution uses ../package.json.
+      // Try the other stable source/compiled layout before failing closed.
     }
   }
   return "unknown";
