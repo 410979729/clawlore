@@ -36,6 +36,7 @@ const { EXPERIENCE_TOOL_NAMES } = jiti("../src/experience-tools.ts");
 const { buildSecretIndex } = jiti("../src/secret-index.ts");
 const { SmartExtractor } = jiti("../src/smart-extractor.ts");
 const { resolveRuntimeMemoryAccess } = jiti("../src/runtime-memory-boundary.ts");
+const { parseRuntimePluginConfig } = jiti("../src/plugin-config.ts");
 
 function fail(message) {
   throw new Error(message);
@@ -213,6 +214,21 @@ test("different private principals receive disjoint scopes and only an allowlist
   assert.equal(stranger.isAccessible("agent:main"), false);
   assert.equal(owner.isAccessible(stranger.defaultScope), false);
   assert.equal(stranger.isAccessible(owner.defaultScope), false);
+});
+
+test("runtime parsing asserts OpenClaw SecretRef materialization before strict config parsing", () => {
+  const parsed = parseRuntimePluginConfig({ embedding: { provider: "local-hash" } });
+  assert.equal(parsed.embedding.provider, "local-hash");
+
+  assert.throws(
+    () => parseRuntimePluginConfig({
+      embedding: {
+        provider: "openai-compatible",
+        apiKey: { source: "file", provider: "runtime", id: "embedding" },
+      },
+    }),
+    /did not resolve manifest-declared runtime SecretRefs before registration: embedding\.apiKey/,
+  );
 });
 
 test("system bypass stays unfiltered for read tools and requires explicit scopes for writes", async () => {
@@ -760,13 +776,15 @@ test("CLI metadata registration defers secret and database materialization until
   const runtime = readFileSync(new URL("../src/core-memory-runtime.ts", import.meta.url), "utf8");
   const registerStart = entry.indexOf("register(api: OpenClawPluginApi)");
   const metadataBranch = entry.indexOf("if (isCliRegistrationMode(api))", registerStart);
-  const runtimeParse = entry.indexOf("const config = parsePluginConfig(api.pluginConfig)", registerStart);
+  const runtimeParse = entry.indexOf("const config = parseRuntimePluginConfig(api.pluginConfig)", registerStart);
 
   assert.ok(registerStart >= 0);
   assert.ok(metadataBranch > registerStart);
   assert.ok(runtimeParse > metadataBranch);
   assert.match(runtime, /resolveSecretRefValues/);
   assert.match(runtime, /applyResolvedAssignments/);
+  const configParser = readFileSync(new URL("../src/plugin-config.ts", import.meta.url), "utf8");
+  assert.match(configParser, /OpenClaw did not resolve manifest-declared runtime SecretRefs/);
   assert.match(entry, /registerCliMetadata\(api\)/);
   assert.match(cli, /hook\("preAction"/);
   assert.match(cli, /await context\.beforeAction\?\.\(path\)/);

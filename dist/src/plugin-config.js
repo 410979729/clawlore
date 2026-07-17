@@ -1,4 +1,5 @@
 import { normalizeAdmissionControlConfig, } from "./admission-control.js";
+import { isCanonicalPrincipalKey, } from "./runtime-memory-boundary.js";
 import { resolveClawLoreRuntimeRequestConfig, } from "./runtime-config.js";
 import { DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG, } from "./task-experience.js";
 export const DEFAULT_REFLECTION_MESSAGE_COUNT = 120;
@@ -7,6 +8,48 @@ export const DEFAULT_REFLECTION_TIMEOUT_MS = 20_000;
 export const DEFAULT_REFLECTION_THINK_LEVEL = "medium";
 export const DEFAULT_REFLECTION_ERROR_REMINDER_MAX_ENTRIES = 3;
 export const DEFAULT_REFLECTION_DEDUPE_ERROR_SIGNALS = true;
+function looksLikeUnresolvedSecretRef(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+        return false;
+    const candidate = value;
+    return ["env", "file", "exec"].includes(String(candidate.source))
+        && typeof candidate.id === "string"
+        && candidate.id.trim().length > 0;
+}
+/**
+ * OpenClaw runtime registration is synchronous, so the host must materialize
+ * manifest-declared SecretRefs before invoking the plugin. Assert that host
+ * contract before strict parsing and fail with a direct boundary error.
+ */
+export function parseRuntimePluginConfig(value) {
+    const pluginConfig = value && typeof value === "object"
+        ? value
+        : {};
+    const embedding = pluginConfig.embedding;
+    const retrieval = pluginConfig.retrieval;
+    const llm = pluginConfig.llm;
+    const unresolved = [];
+    if (embedding) {
+        if (Array.isArray(embedding.apiKey)) {
+            embedding.apiKey.forEach((entry, index) => {
+                if (looksLikeUnresolvedSecretRef(entry))
+                    unresolved.push(`embedding.apiKey.${index}`);
+            });
+        }
+        else if (looksLikeUnresolvedSecretRef(embedding.apiKey)) {
+            unresolved.push("embedding.apiKey");
+        }
+    }
+    if (retrieval && looksLikeUnresolvedSecretRef(retrieval.rerankApiKey)) {
+        unresolved.push("retrieval.rerankApiKey");
+    }
+    if (llm && looksLikeUnresolvedSecretRef(llm.apiKey))
+        unresolved.push("llm.apiKey");
+    if (unresolved.length > 0) {
+        throw new Error(`clawlore: OpenClaw did not resolve manifest-declared runtime SecretRefs before registration: ${unresolved.join(", ")}`);
+    }
+    return parsePluginConfig(pluginConfig);
+}
 export function resolveConfigString(value) {
     return value;
 }
@@ -273,9 +316,12 @@ export function parsePluginConfig(value) {
                 enabled: raw?.enabled !== false,
                 groupMemory: raw?.groupMemory === "conversation" ? "conversation" : "deny",
                 legacyAgentScopePrincipals: Array.isArray(raw?.legacyAgentScopePrincipals)
-                    ? raw.legacyAgentScopePrincipals
-                        .filter((entry) => typeof entry === "string" && entry.trim().length > 0)
-                        .map((entry) => entry.trim())
+                    ? raw.legacyAgentScopePrincipals.map((entry, index) => {
+                        if (!isCanonicalPrincipalKey(entry)) {
+                            throw new Error(`principalIsolation.legacyAgentScopePrincipals[${index}] must be an exact canonical platform:account:principal key`);
+                        }
+                        return entry;
+                    })
                     : [],
                 allowGlobalRead: raw?.allowGlobalRead === true,
             };

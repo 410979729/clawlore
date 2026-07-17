@@ -60,7 +60,7 @@ test("plugin config preserves numeric normalization and legacy session compatibi
     principalIsolation: {
       enabled: false,
       groupMemory: "conversation",
-      legacyAgentScopePrincipals: [" main ", "", 7],
+      legacyAgentScopePrincipals: ["telegram:default:8176453077"],
       allowGlobalRead: true,
     },
   });
@@ -77,7 +77,7 @@ test("plugin config preserves numeric normalization and legacy session compatibi
   assert.deepEqual(parsed.principalIsolation, {
     enabled: false,
     groupMemory: "conversation",
-    legacyAgentScopePrincipals: ["main"],
+    legacyAgentScopePrincipals: ["telegram:default:8176453077"],
     allowGlobalRead: true,
   });
 });
@@ -97,6 +97,18 @@ test("plugin config fails closed for missing or malformed hosted credentials", (
     () => parsePluginConfig({ embedding: { apiKey: { secret: "ref" } } }),
     /embedding.apiKey must be a string or non-empty array of strings/,
   );
+});
+
+test("plugin config rejects malformed legacy principal migration allowlists", () => {
+  for (const principal of ["main", " telegram:default:8176453077", "telegram::8176453077", "*:default:8176453077", 7]) {
+    assert.throws(
+      () => parsePluginConfig({
+        embedding: {},
+        principalIsolation: { legacyAgentScopePrincipals: [principal] },
+      }),
+      /must be an exact canonical platform:account:principal key/,
+    );
+  }
 });
 
 test("plugin config resolves canonical runtime input and rejects conflicting compatibility input", () => {

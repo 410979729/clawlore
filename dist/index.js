@@ -16,7 +16,7 @@ const isClawLoreCliInvocation = () => {
 const isCliRegistrationMode = (api) => api.registrationMode === "cli-metadata" || isClawLoreCliInvocation();
 import { createMemoryCLI } from "./cli.js";
 import { CLAWLORE_CLI_ALIASES, CLAWLORE_CLI_PRIMARY, CLAWLORE_DESCRIPTION, CLAWLORE_PLUGIN_ID, CLAWLORE_PRODUCT_NAME, } from "./src/product-identity.js";
-import { parsePluginConfig, } from "./src/plugin-config.js";
+import { parsePluginConfig, parseRuntimePluginConfig } from "./src/plugin-config.js";
 export { parsePluginConfig };
 import { parseAgentIdFromSessionKey } from "./src/scopes.js";
 import { registerAllMemoryTools } from "./src/tools.js";
@@ -148,8 +148,8 @@ const clawLorePlugin = {
             registerCliMetadata(api);
             return;
         }
-        // Parse and validate configuration
-        const config = parsePluginConfig(api.pluginConfig);
+        // Assert OpenClaw's SecretRef materialization contract before strict runtime parsing.
+        const config = parseRuntimePluginConfig(api.pluginConfig);
         const { resolvedDbPath, embeddingModel, store, embedder, retriever, scopeManager, migrator, cliLlmClient, } = createCoreMemoryRuntime(api, config);
         api.registerCli(createMemoryCLI({
             store,

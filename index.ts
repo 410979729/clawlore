@@ -30,10 +30,7 @@ import {
   CLAWLORE_PLUGIN_ID,
   CLAWLORE_PRODUCT_NAME,
 } from "./src/product-identity.js";
-import {
-  parsePluginConfig,
-  type PluginConfig,
-} from "./src/plugin-config.js";
+import { parsePluginConfig, parseRuntimePluginConfig, type PluginConfig } from "./src/plugin-config.js";
 export { parsePluginConfig };
 import { createEmbedder } from "./src/embedder.js";
 import { createRetriever } from "./src/retriever.js";
@@ -217,8 +214,8 @@ const clawLorePlugin = {
       return;
     }
 
-    // Parse and validate configuration
-    const config = parsePluginConfig(api.pluginConfig);
+    // Assert OpenClaw's SecretRef materialization contract before strict runtime parsing.
+    const config = parseRuntimePluginConfig(api.pluginConfig);
     const {
       resolvedDbPath,
       embeddingModel,

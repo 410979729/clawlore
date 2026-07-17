@@ -55,6 +55,26 @@ function text(value: unknown): string | undefined {
   return normalized || undefined;
 }
 
+/**
+ * Accepts an exact runtime principal key (`platform:account:principal`).
+ * Wildcards, whitespace, missing segments, and control characters fail closed.
+ */
+export function isCanonicalPrincipalKey(value: unknown): value is string {
+  const principal = text(value);
+  if (!principal || principal !== value || principal.length > 512 || /[\s\u0000-\u001f\u007f]/.test(principal)) {
+    return false;
+  }
+  const firstSeparator = principal.indexOf(":");
+  const secondSeparator = principal.indexOf(":", firstSeparator + 1);
+  if (firstSeparator <= 0 || secondSeparator <= firstSeparator + 1 || secondSeparator >= principal.length - 1) {
+    return false;
+  }
+  const platform = principal.slice(0, firstSeparator);
+  const accountId = principal.slice(firstSeparator + 1, secondSeparator);
+  return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(platform)
+    && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(accountId);
+}
+
 function pick(contexts: unknown[], keys: string[]): string | undefined {
   for (const context of contexts) {
     const candidate = record(context);
@@ -110,8 +130,7 @@ export function normalizePrincipalIsolationConfig(
 ): NormalizedPrincipalIsolationConfig {
   const principals = Array.isArray(value?.legacyAgentScopePrincipals)
     ? value!.legacyAgentScopePrincipals!
-      .map((principal) => text(principal))
-      .filter((principal): principal is string => Boolean(principal))
+      .filter(isCanonicalPrincipalKey)
     : [];
   return {
     enabled: value?.enabled !== false,

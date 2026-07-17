@@ -4,6 +4,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import test from "node:test";
 
 const sourceRoot = resolve("src/v2");
+const canonicalRoot = resolve("src");
 
 const allowed = {
   domain: new Set(["domain"]),
@@ -57,5 +58,35 @@ test("application services do not depend on concrete storage adapters", async ()
     const source = await readFile(path, "utf8");
     if (/\.\.\/storage\//.test(source)) violations.push(relative(sourceRoot, path));
   }
+  assert.deepEqual(violations, []);
+});
+
+test("canonical application and OpenClaw adapters obey the active inward boundary", async () => {
+  const activeRoots = [join(canonicalRoot, "application"), join(canonicalRoot, "adapters", "openclaw")];
+  const crossCuttingAdapterExceptions = new Set([
+    "diagnostic-redaction.ts",
+    "file-privacy.ts",
+  ]);
+  const violations = [];
+
+  for (const root of activeRoots) {
+    for (const path of await files(root)) {
+      const fromApplication = path.startsWith(`${join(canonicalRoot, "application")}${sep}`);
+      const source = await readFile(path, "utf8");
+      for (const specifier of importedSpecifiers(source)) {
+        if (!specifier.startsWith(".")) continue;
+        const target = resolve(dirname(path), specifier.replace(/\.js$/, ".ts"));
+        const targetRelative = relative(canonicalRoot, target).split(sep).join("/");
+        const allowedTarget = targetRelative.startsWith("application/")
+          || targetRelative.startsWith("v2/domain/")
+          || (!fromApplication && targetRelative.startsWith("adapters/openclaw/"))
+          || (!fromApplication && crossCuttingAdapterExceptions.has(targetRelative));
+        if (!allowedTarget) {
+          violations.push(`${relative(canonicalRoot, path).split(sep).join("/")} -> ${targetRelative}`);
+        }
+      }
+    }
+  }
+
   assert.deepEqual(violations, []);
 });
