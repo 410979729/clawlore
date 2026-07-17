@@ -91,6 +91,16 @@ mode. Its stable release-input and runtime identities matched exactly. R2 is
 therefore closed at the independent source-audit entry boundary; it is not a
 release or deployment acceptance.
 
+An authenticated live-update request triggered a fresh rollout preflight on
+candidate `c6bfb29`. The clean Linux source gate and reproducibility check
+passed again; a private copy of the 1,036-row live SQLite authority migrated to
+schema version 4 and reopened strictly; and an isolated state root proved the
+canonical package/config staging order. The authorized Windows work computer
+was offline, so the exact Windows Node 24 gate and owned audit-root cleanup
+could not run. Independent review also remains open. No live extension,
+configuration, database, or Gateway state changed. See
+`docs/clawlore/eval/clawlore-v1-live-identity-rollout-preflight-2026-07-17.md`.
+
 ## R1 — Canonical ClawLore identity candidate
 
 - [x] Rename product, npm package, manifest id, config root, primary CLI,

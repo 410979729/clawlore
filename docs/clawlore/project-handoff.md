@@ -4,6 +4,22 @@ Current through Phase 9, H1-H5 production hardening, the R1 canonical identity
 transition, the seventh and eighth independent reviews, and R2 brand/
 architecture bundle 5 through 2026-07-17.
 
+## Authenticated live identity rollout preflight
+
+Joy authorized replacing the legacy live memory plugin with the canonical
+ClawLore candidate in an authenticated Telegram direct conversation. Fresh
+clean-source Linux and reproducibility gates passed on exact candidate
+`c6bfb29`; a private copy of all 1,036 live truth rows migrated to schema
+version 4 and reopened under strict authority checks; and an isolated state
+root proved the required artifact-first, atomic-config staging sequence.
+
+The rollout did not proceed. The authorized Windows work computer was offline,
+so the mandatory exact Windows Node 24 gate and owned audit-root cleanup could
+not run; independent source review also remains open. The live Gateway stayed
+healthy on `scope-recall-openclaw@1.1.0`, with no extension/config/database or
+restart mutation. Full evidence and continuation criteria are in
+`eval/clawlore-v1-live-identity-rollout-preflight-2026-07-17.md`.
+
 ## R2 architecture closure — independent audit entry
 
 The requested brand and architecture convergence has reached the independent
