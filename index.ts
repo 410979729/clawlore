@@ -91,7 +91,12 @@ export { readSessionConversationWithResetFallback } from "./src/reflection-trans
 import { createReflectionEventId } from "./src/reflection-event-store.js";
 import { parseReflectionMetadata } from "./src/reflection-metadata.js";
 import { isNoise } from "./src/noise-filter.js";
-import { normalizeAutoCaptureText } from "./src/auto-capture-cleanup.js";
+import {
+  detectCategory,
+  shouldCapture,
+} from "./src/auto-capture-policy.js";
+export { detectCategory, shouldCapture } from "./src/auto-capture-policy.js";
+import { AutoCaptureSessionState } from "./src/auto-capture-session-state.js";
 import {
   AutoRecallSessionCache,
   resolveAutoRecallSessionBoundary,
@@ -315,53 +320,6 @@ function isInternalReflectionSessionKey(sessionKey: unknown): boolean {
   return typeof sessionKey === "string" && sessionKey.trim().startsWith("temp:memory-reflection");
 }
 
-const AUTO_CAPTURE_MAP_MAX_ENTRIES = 2000;
-const AUTO_CAPTURE_EXPLICIT_REMEMBER_RE =
-  /^(?:请|請)?(?:记住|記住|记一下|記一下|别忘了|別忘了)[。.!?？!]*$/u;
-
-/**
- * Prune a Map to stay within the given maximum number of entries.
- * Deletes the oldest (earliest-inserted) keys when over the limit.
- */
-function pruneMapIfOver<K, V>(map: Map<K, V>, maxEntries: number): void {
-  if (map.size <= maxEntries) return;
-  const excess = map.size - maxEntries;
-  const iter = map.keys();
-  for (let i = 0; i < excess; i++) {
-    const key = iter.next().value;
-    if (key !== undefined) map.delete(key);
-  }
-}
-
-function isExplicitRememberCommand(text: string): boolean {
-  return AUTO_CAPTURE_EXPLICIT_REMEMBER_RE.test(text.trim());
-}
-
-function buildAutoCaptureConversationKeyFromIngress(
-  channelId: string | undefined,
-  conversationId: string | undefined,
-): string | null {
-  const channel = typeof channelId === "string" ? channelId.trim() : "";
-  const conversation = typeof conversationId === "string" ? conversationId.trim() : "";
-  if (!channel || !conversation) return null;
-  return `${channel}:${conversation}`;
-}
-
-/**
- * Extract the conversation portion from a sessionKey.
- * Expected format: `agent:<agentId>:<channelId>:<conversationId>`
- * where `<agentId>` does not contain colons. Returns everything after
- * the second colon as the conversation key, or null if the format
- * does not match.
- */
-function buildAutoCaptureConversationKeyFromSessionKey(sessionKey: string): string | null {
-  const trimmed = sessionKey.trim();
-  if (!trimmed) return null;
-  const match = /^agent:[^:]+:(.+)$/.exec(trimmed);
-  const suffix = match?.[1]?.trim();
-  return suffix || null;
-}
-
 function containsErrorSignal(text: string): boolean {
   const normalized = text.toLowerCase();
   return (
@@ -416,117 +374,6 @@ function extractTextFromToolResult(result: unknown): string {
   } catch {
     return "";
   }
-}
-
-// ============================================================================
-// Capture & Category Detection (from old plugin)
-// ============================================================================
-
-const MEMORY_TRIGGERS = [
-  /zapamatuj si|pamatuj|remember/i,
-  /preferuji|radši|nechci|prefer/i,
-  /rozhodli jsme|budeme používat/i,
-  /\b(we )?decided\b|we'?ll use|we will use|switch(ed)? to|migrate(d)? to|going forward|from now on/i,
-  /\+\d{10,}/,
-  /[\w.-]+@[\w.-]+\.\w+/,
-  /můj\s+\w+\s+je|je\s+můj/i,
-  /my\s+\w+\s+is|is\s+my/i,
-  /i (like|prefer|hate|love|want|need|care)/i,
-  /always|never|important/i,
-  // Chinese triggers (Traditional & Simplified)
-  /記住|记住|記一下|记一下|別忘了|别忘了|備註|备注/,
-  /偏好|喜好|喜歡|喜欢|討厭|讨厌|不喜歡|不喜欢|愛用|爱用|習慣|习惯/,
-  /決定|决定|選擇了|选择了|改用|換成|换成|以後用|以后用/,
-  /我的\S+是|叫我|稱呼|称呼/,
-  /老是|講不聽|總是|总是|從不|从不|一直|每次都/,
-  /重要|關鍵|关键|注意|千萬別|千万别/,
-  /幫我|筆記|存檔|存起來|存一下|重點|原則|底線/,
-];
-
-const CAPTURE_EXCLUDE_PATTERNS = [
-  // Memory management / meta-ops: do not store as long-term memory
-  /\b(scope-recall|memory-pro|memory_store|memory_recall|memory_forget|memory_update)\b/i,
-  /\bopenclaw\s+(scope-recall|memory-pro)\b/i,
-  /\b(delete|remove|forget|purge|cleanup|clean up|clear)\b.*\b(memory|memories|entry|entries)\b/i,
-  /\b(memory|memories)\b.*\b(delete|remove|forget|purge|cleanup|clean up|clear)\b/i,
-  /\bhow do i\b.*\b(delete|remove|forget|purge|cleanup|clear)\b/i,
-  /(删除|刪除|清理|清除).{0,12}(记忆|記憶|memory)/i,
-];
-
-export function shouldCapture(text: string): boolean {
-  let s = text.trim();
-
-  // Strip OpenClaw metadata headers (Conversation info or Sender)
-  const metadataPattern = /^(Conversation info|Sender) \(untrusted metadata\):[\s\S]*?\n\s*\n/gim;
-  s = s.replace(metadataPattern, "");
-
-  // CJK characters carry more meaning per character, use lower minimum threshold
-  const hasCJK = /[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/.test(
-    s,
-  );
-  const minLen = hasCJK ? 4 : 10;
-  if (s.length < minLen || s.length > 500) {
-    return false;
-  }
-  if (!evaluateCaptureSafety(s).allowed) {
-    return false;
-  }
-  // Skip injected context from memory recall
-  if (s.includes("<relevant-memories>")) {
-    return false;
-  }
-  // Skip system-generated content
-  if (s.startsWith("<") && s.includes("</")) {
-    return false;
-  }
-  // Skip agent summary responses (contain markdown formatting)
-  if (s.includes("**") && s.includes("\n-")) {
-    return false;
-  }
-  // Skip emoji-heavy responses (likely agent output)
-  const emojiCount = (s.match(/[\u{1F300}-\u{1F9FF}]/gu) || []).length;
-  if (emojiCount > 3) {
-    return false;
-  }
-  // Exclude obvious memory-management prompts
-  if (CAPTURE_EXCLUDE_PATTERNS.some((r) => r.test(s))) return false;
-
-  return MEMORY_TRIGGERS.some((r) => r.test(s));
-}
-
-export function detectCategory(
-  text: string,
-): "preference" | "fact" | "decision" | "entity" | "other" {
-  const lower = text.toLowerCase();
-  if (
-    /prefer|radši|like|love|hate|want|偏好|喜歡|喜欢|討厭|讨厌|不喜歡|不喜欢|愛用|爱用|習慣|习惯/i.test(
-      lower,
-    )
-  ) {
-    return "preference";
-  }
-  if (
-    /rozhodli|decided|we decided|will use|we will use|we'?ll use|switch(ed)? to|migrate(d)? to|going forward|from now on|budeme|決定|决定|選擇了|选择了|改用|換成|换成|以後用|以后用|規則|流程|SOP/i.test(
-      lower,
-    )
-  ) {
-    return "decision";
-  }
-  if (
-    /\+\d{10,}|@[\w.-]+\.\w+|is called|jmenuje se|我的\S+是|叫我|稱呼|称呼/i.test(
-      lower,
-    )
-  ) {
-    return "entity";
-  }
-  if (
-    /\b(is|are|has|have|je|má|jsou)\b|總是|总是|從不|从不|一直|每次都|老是/i.test(
-      lower,
-    )
-  ) {
-    return "fact";
-  }
-  return "other";
 }
 
 function sanitizeForContext(text: string): string {
@@ -1568,12 +1415,9 @@ const clawLorePlugin = {
     // Map<sessionId, turnCounter> - manual turn tracking per session
     const turnCounter = new Map<string, number>();
 
-    // Track how many normalized user texts have already been seen per session snapshot.
-    // All three Maps are pruned to AUTO_CAPTURE_MAP_MAX_ENTRIES to prevent unbounded
-    // growth in long-running processes with many distinct sessions.
-    const autoCaptureSeenTextCount = new Map<string, number>();
-    const autoCapturePendingIngressTexts = new Map<string, string[]>();
-    const autoCaptureRecentTexts = new Map<string, string[]>();
+    // Bounded cross-hook cursor. Access and persistence remain composition concerns;
+    // this object only aligns ingress messages with the later agent_end snapshot.
+    const autoCaptureSessionState = new AutoCaptureSessionState();
 
     const runtimeMemoryAccessFor = (event: unknown, ctx: any) => {
       const sessionKey = typeof ctx?.sessionKey === "string"
@@ -1602,16 +1446,13 @@ const clawLorePlugin = {
 
     api.on("message_received", (event: any, ctx: any) => {
       const { access } = runtimeMemoryAccessFor(event, ctx);
-      const conversationKey = buildAutoCaptureConversationKeyFromIngress(
-        ctx.channelId,
-        ctx.conversationId,
-      );
-      const normalized = normalizeAutoCaptureText("user", event.content, shouldSkipReflectionMessage);
-      if (!access.denied && conversationKey && normalized) {
-        const queue = autoCapturePendingIngressTexts.get(conversationKey) || [];
-        queue.push(normalized);
-        autoCapturePendingIngressTexts.set(conversationKey, queue.slice(-6));
-        pruneMapIfOver(autoCapturePendingIngressTexts, AUTO_CAPTURE_MAP_MAX_ENTRIES);
+      if (!access.denied) {
+        autoCaptureSessionState.recordIngress({
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          content: event.content,
+          shouldSkipMessage: shouldSkipReflectionMessage,
+        });
       }
       api.logger.debug(
         `clawlore: ingress message_received channel=${diagnosticIdentifier(ctx.channelId)} account=${diagnosticIdentifier(ctx.accountId)} conversation=${diagnosticIdentifier(ctx.conversationId)} from=${diagnosticIdentifier(event.from)} ${diagnosticTextSummary(event.content)}`,
@@ -2301,90 +2142,18 @@ const clawLorePlugin = {
             `clawlore: auto-capture agent_end payload agent=${diagnosticIdentifier(agentId)} session=${diagnosticIdentifier(sessionKey)} (captureAssistant=${config.captureAssistant === true}, ${summarizeAgentEndMessages(event.messages)})`,
           );
 
-          // Extract text content from messages
-          const eligibleTexts: string[] = [];
-          let skippedAutoCaptureTexts = 0;
-          for (const msg of event.messages) {
-            if (!msg || typeof msg !== "object") {
-              continue;
-            }
-            const msgObj = msg as Record<string, unknown>;
-
-            const role = msgObj.role;
-            const captureAssistant = config.captureAssistant === true;
-            if (
-              role !== "user" &&
-              !(captureAssistant && role === "assistant")
-            ) {
-              continue;
-            }
-
-            const content = msgObj.content;
-
-            if (typeof content === "string") {
-              const normalized = normalizeAutoCaptureText(role, content, shouldSkipReflectionMessage);
-              if (!normalized) {
-                skippedAutoCaptureTexts++;
-              } else {
-                eligibleTexts.push(normalized);
-              }
-              continue;
-            }
-
-            if (Array.isArray(content)) {
-              for (const block of content) {
-                if (
-                  block &&
-                  typeof block === "object" &&
-                  "type" in block &&
-                  (block as Record<string, unknown>).type === "text" &&
-                  "text" in block &&
-                  typeof (block as Record<string, unknown>).text === "string"
-                ) {
-                  const text = (block as Record<string, unknown>).text as string;
-                  const normalized = normalizeAutoCaptureText(role, text, shouldSkipReflectionMessage);
-                  if (!normalized) {
-                    skippedAutoCaptureTexts++;
-                  } else {
-                    eligibleTexts.push(normalized);
-                  }
-                }
-              }
-            }
-          }
-
-          const conversationKey = buildAutoCaptureConversationKeyFromSessionKey(sessionKey);
-          const pendingIngressTexts = conversationKey
-            ? [...(autoCapturePendingIngressTexts.get(conversationKey) || [])]
-            : [];
-          if (conversationKey) {
-            autoCapturePendingIngressTexts.delete(conversationKey);
-          }
-
-          const previousSeenCount = autoCaptureSeenTextCount.get(sessionKey) ?? 0;
-          let newTexts = eligibleTexts;
-          if (pendingIngressTexts.length > 0) {
-            newTexts = pendingIngressTexts;
-          } else if (previousSeenCount > 0 && eligibleTexts.length > previousSeenCount) {
-            newTexts = eligibleTexts.slice(previousSeenCount);
-          }
-          autoCaptureSeenTextCount.set(sessionKey, eligibleTexts.length);
-          pruneMapIfOver(autoCaptureSeenTextCount, AUTO_CAPTURE_MAP_MAX_ENTRIES);
-
-          const priorRecentTexts = autoCaptureRecentTexts.get(sessionKey) || [];
-          let texts = newTexts;
-          if (
-            texts.length === 1 &&
-            isExplicitRememberCommand(texts[0]) &&
-            priorRecentTexts.length > 0
-          ) {
-            texts = [...priorRecentTexts.slice(-1), ...texts];
-          }
-          if (newTexts.length > 0) {
-            const nextRecentTexts = [...priorRecentTexts, ...newTexts].slice(-6);
-            autoCaptureRecentTexts.set(sessionKey, nextRecentTexts);
-            pruneMapIfOver(autoCaptureRecentTexts, AUTO_CAPTURE_MAP_MAX_ENTRIES);
-          }
+          const captureSelection = autoCaptureSessionState.consumeAgentEnd({
+            sessionKey,
+            messages: event.messages,
+            captureAssistant: config.captureAssistant === true,
+            shouldSkipMessage: shouldSkipReflectionMessage,
+          });
+          const {
+            eligibleTexts,
+            pendingIngressCount,
+            skippedTextCount: skippedAutoCaptureTexts,
+          } = captureSelection;
+          let { texts } = captureSelection;
 
           const minMessages = config.extractMinMessages ?? 4;
           if (skippedAutoCaptureTexts > 0) {
@@ -2392,9 +2161,9 @@ const clawLorePlugin = {
               `clawlore: auto-capture skipped ${skippedAutoCaptureTexts} injected/system text block(s) for agent=${diagnosticIdentifier(agentId)}`,
             );
           }
-          if (pendingIngressTexts.length > 0) {
+          if (pendingIngressCount > 0) {
             api.logger.debug(
-              `clawlore: auto-capture using ${pendingIngressTexts.length} pending ingress text(s) for agent=${diagnosticIdentifier(agentId)}`,
+              `clawlore: auto-capture using ${pendingIngressCount} pending ingress text(s) for agent=${diagnosticIdentifier(agentId)}`,
             );
           }
           if (texts.length !== eligibleTexts.length) {

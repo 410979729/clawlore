@@ -28,7 +28,7 @@ function importedSpecifiers(source) {
 const ROOT_MODULES_BY_LAYER = {
   composition: ["plugin-config.ts"],
   domain: [
-    "auto-recall-query.ts", "auto-recall-session-boundary.ts", "capture-safety.ts",
+    "auto-capture-policy.ts", "auto-recall-query.ts", "auto-recall-session-boundary.ts", "capture-safety.ts",
     "decay-engine.ts", "experience-models.ts", "experience-schemas.ts",
     "extraction-prompts.ts", "memory-categories.ts", "noise-filter.ts",
     "noise-prototypes.ts", "preference-slots.ts", "product-identity.ts",
@@ -39,6 +39,7 @@ const ROOT_MODULES_BY_LAYER = {
   application: [
     "access-tracker.ts", "adaptive-retrieval.ts", "admission-control.ts",
     "admission-stats.ts", "auto-capture-cleanup.ts", "auto-capture-governance.ts",
+    "auto-capture-session-state.ts",
     "auto-recall-ledger.ts", "batch-dedup.ts", "candidate-promotion.ts",
     "chunker.ts", "conflict-governance.ts", "digest-pipeline.ts",
     "experience-governance.ts", "experience-promotion-batch.ts", "experience-promotion.ts",
@@ -146,7 +147,7 @@ const V2_LAYERS = new Set([
 ]);
 
 const HOTSPOT_LINE_BUDGETS = new Map([
-  ["index.ts", 3_336],
+  ["index.ts", 3_105],
   ["cli.ts", 2_794],
   ["src/tools.ts", 2_727],
   ["src/store.ts", 2_076],
