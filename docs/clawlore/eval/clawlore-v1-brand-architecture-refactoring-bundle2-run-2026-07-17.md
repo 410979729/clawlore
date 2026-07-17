@@ -75,7 +75,7 @@ Full Node 24 Linux regression:
 - 0 failed;
 - 2 platform-condition skips.
 
-Evidence-write Linux source gate:
+Evidence-write and normal-mode Linux source gates:
 
 - strict typecheck and build: pass;
 - vector repair smoke: pass;
@@ -89,6 +89,13 @@ Evidence-write Linux source gate:
 - npm pack filename/content scan: 188 files;
 - clean candidate state: `dirty=false`.
 
+Canonical evidence commit:
+`974c04a55e05aa89de52ccabdfa56953a1609228`.
+
+Normal mode re-ran the complete gate from that clean commit. Stable
+release-input and runtime identities matched the checked-in evidence; only the
+contract's declared observed-commit/SBOM toolchain variance changed.
+
 Release-input identity:
 `074832cb1cf41436e0511c4a691d9f16c0f5ca203e59989b701ca538476ef1a0`
 across 567 tracked release inputs.
@@ -98,9 +105,12 @@ Runtime identity:
 
 ## Cleanup and remaining boundary
 
-The lockfile-built dependency tree is retained only until normal-mode evidence
-verification completes. It will be removed before final handoff. No ClawLore
-temporary root was intentionally created outside the release-gate sandboxes.
+The lockfile-built `node_modules` tree was removed after normal-mode evidence
+verification. `/tmp` contained no ClawLore-named residue, and the project
+worktree was clean. The workspace state-hygiene audit reported 86 items outside
+the project: historical config backups, session reset/deleted artifacts, and
+host-managed plugin-cache documents. They were not created by this bundle and
+were left untouched.
 
 Overall release status remains NO-GO. The next bounded slice should extract
 reflection transcript reading and orchestration under characterization tests;

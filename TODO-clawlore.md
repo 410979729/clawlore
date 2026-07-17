@@ -40,11 +40,12 @@ Detailed plan:
 - [ ] Pass focused/full Linux gates, exact Windows Node 24 gate, package smokes,
       and independent review before any live identity rollout.
 
-Bundle-2 Linux verification: 43/43 focused tests; 395 total / 393 passed /
-0 failed / 2 platform skips; typecheck, build, vector repair, 124/124 recall,
-200,000-row FTS, packed runtime/LanceDB/OpenClaw CLI, 42-component SBOM,
-188-file package scan, and official-registry vulnerabilities 0. Exact Windows
-and independent-review gates remain open.
+Bundle-2 Linux verification: 43/43 focused tests; evidence-write and normal-mode
+source gates each passed 395 total / 393 passed / 0 failed / 2 platform skips,
+typecheck, build, vector repair, 124/124 recall, 200,000-row FTS, packed
+runtime/LanceDB/OpenClaw CLI, 42-component SBOM, 188-file package scan, and
+official-registry vulnerabilities 0. Exact Windows and independent-review
+gates remain open.
 
 ## R1 — Canonical ClawLore identity candidate
 

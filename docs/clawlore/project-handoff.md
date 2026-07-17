@@ -372,6 +372,15 @@ Release-input identity is
 `074832cb1cf41436e0511c4a691d9f16c0f5ca203e59989b701ca538476ef1a0`
 across 567 inputs; runtime identity is
 `4f31de8b1a782726f785ee78bdb08059d9d57347aee0ea1a3badf989b4e81350`.
+Evidence commit `974c04a55e05aa89de52ccabdfa56953a1609228` then passed the
+same complete gate in normal mode. The stable release-input and runtime
+identities matched; only the evidence contract's declared observed-commit/SBOM
+toolchain variance changed.
+
+The lockfile dependency tree was removed after normal verification, `/tmp` had
+no ClawLore-named residue, and the project worktree was clean. The workspace
+state-hygiene audit still reports 86 out-of-project historical config/session/
+plugin-cache items; they were not created by this bundle and were left intact.
 
 This bundle did not deploy, modify live configuration or data, restart the
 Gateway, connect to the Windows work computer, push, tag, or release. Overall
