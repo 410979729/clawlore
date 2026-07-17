@@ -61,13 +61,14 @@ packed smokes, 42-component SBOM, 192-file pack scan, and official-registry
 vulnerabilities 0. Stable release-input and runtime identities matched; bundle
 3 is closed. Exact Windows and independent-review gates remain open.
 
-Bundle-4 code candidate `95047a7` and stable plan candidate `ea82afe` passed
-15/15 focused tests and the evidence-write Linux source gate: 411 total / 409
-passed / 0 failed / 2 platform skips, typecheck, build, vector repair, 124/124
-recall, 200,000-row FTS, three packed smokes, 42-component SBOM, 194-file pack
-scan, and official-registry vulnerabilities 0. Release-input identity is
-`3cbe4c38…` across 584 tracked inputs and runtime identity is `e25fbe07…`.
-Normal-mode re-verification remains the bundle-4 closure step.
+Bundle-4 code candidate `95047a7`, stable plan candidate `ea82afe`, and evidence
+commit `8ad0159` passed 15/15 focused tests plus evidence-write and normal-mode
+Linux source gates: 411 total / 409 passed / 0 failed / 2 platform skips,
+typecheck, build, vector repair, 124/124 recall, 200,000-row FTS, three packed
+smokes, 42-component SBOM, 194-file pack scan, and official-registry
+vulnerabilities 0. Release-input identity `3cbe4c38…` across 584 tracked inputs
+and runtime identity `e25fbe07…` matched exactly; bundle 4 is closed. Exact
+Windows and independent-review gates remain open.
 
 ## R1 — Canonical ClawLore identity candidate
 

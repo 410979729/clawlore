@@ -1,12 +1,12 @@
 # ClawLore v1 brand and architecture refactoring bundle 4 — 2026-07-17
 
-Status: evidence-write Linux source gate PASS; normal-mode verification
-pending; source candidate only.
+Status: evidence-write and normal-mode Linux source gates PASS; bundle closed;
+source candidate only.
 
 ## Decision
 
 The auto-capture policy and bounded conversation-state slice is accepted at
-the code and first Linux evidence boundary. Regex compatibility policy no
+the code and complete Linux source-gate boundary. Regex compatibility policy no
 longer lives in the entry point, and cross-hook ingress/history state has one
 owner with characterization tests. No reverse-dependency exception was added.
 
@@ -105,12 +105,23 @@ across 584 tracked inputs.
 Runtime identity:
 `e25fbe07227cd148da6ba1e28d90402a0646fd48be027d5f4fe4a56f56271df8`.
 
-Normal mode must compare a clean evidence commit against these stable fields
-before bundle closure.
+Evidence commit:
+`8ad01595db43c9404bde267eff9d1caf9db6bc08`.
+
+The clean evidence commit passed the same complete gate in normal mode. Its
+release-input and runtime identities matched the evidence-write run exactly;
+the gate exited 0 with all three packed smokes, supply-chain audit, SBOM, and
+package scan repeated.
 
 ## Cleanup and remaining boundary
 
-Cleanup and state-hygiene results are pending final normal-mode verification.
+The 332 MiB lockfile dependency tree was removed. No ClawLore-named path
+remains in the readable `/tmp` scan, and the project worktree was clean before
+closure. The workspace state-hygiene audit still reports the same 86
+out-of-project historical configuration/session/plugin-cache items; they were
+not created by this bundle and were left intact. The live Gateway remains
+`active/running` and `/healthz` returned `{"ok":true,"status":"live"}`.
+
 Overall release status remains NO-GO. The next bounded entry-point slice is
 Markdown compatibility retrieval; it must not include runtime construction,
 capability hook registrars, storage convergence, or live rollout.

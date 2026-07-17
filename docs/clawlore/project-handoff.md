@@ -471,7 +471,15 @@ SBOM, and a 194-file package scan. Release-input identity is
 `3cbe4c38c7dc132dd8ade2195358d3baa9ea9bb7c0dd60e0e08967ebf339fc02`
 across 584 tracked inputs; runtime identity is
 `e25fbe07227cd148da6ba1e28d90402a0646fd48be027d5f4fe4a56f56271df8`.
-Normal-mode verification remains the final bundle-4 closure step.
+Evidence commit `8ad01595db43c9404bde267eff9d1caf9db6bc08` then passed the
+same complete gate in normal mode. The stable release-input and runtime
+identities matched exactly, closing bundle 4.
+
+The 332 MiB lockfile dependency tree was removed and no ClawLore-named path
+remained in the readable `/tmp` scan. The workspace hygiene audit still reports
+86 out-of-project historical config, session, and plugin-cache items; they were
+not created by this bundle and were left intact. The live Gateway remained
+`active/running` with a live health response.
 
 No extension was deployed, live configuration or data changed, Gateway
 restarted, Windows client contacted, repository pushed, tag created, or release
