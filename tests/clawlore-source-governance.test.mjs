@@ -32,7 +32,7 @@ const ROOT_MODULES_BY_LAYER = {
     "decay-engine.ts", "experience-models.ts", "experience-schemas.ts",
     "extraction-prompts.ts", "memory-categories.ts", "noise-filter.ts",
     "noise-prototypes.ts", "preference-slots.ts", "product-identity.ts",
-    "reflection-mapped-metadata.ts", "reflection-metadata.ts", "reflection-ranking.ts",
+    "reflection-contracts.ts", "reflection-mapped-metadata.ts", "reflection-metadata.ts", "reflection-ranking.ts",
     "reflection-slices.ts", "runtime-memory-boundary.ts", "runtime-scope-metadata.ts",
     "scope-policy.ts", "smart-metadata.ts",
   ],
@@ -50,14 +50,15 @@ const ROOT_MODULES_BY_LAYER = {
     "task-experience.ts", "tier-manager.ts",
   ],
   adapters: [
-    "experience-tools.ts", "runtime-config.ts", "scopes.ts", "tools.ts",
+    "experience-tools.ts", "reflection-command-orchestrator.ts", "reflection-generation.ts",
+    "reflection-transcript.ts", "runtime-config.ts", "scopes.ts", "session-recovery.ts", "tools.ts",
     "types/openclaw-plugin-sdk.d.ts",
   ],
   infrastructure: [
     "artifacts.ts", "embedder.ts", "experience-store.ts", "file-privacy.ts",
     "journal-recovery.ts", "llm-client.ts", "llm-oauth.ts", "oauth-session-storage.ts",
     "proper-lockfile.d.ts", "reflection-event-store.ts", "reflection-item-store.ts",
-    "reflection-store.ts", "secret-index.ts", "session-recovery.ts",
+    "reflection-store.ts", "secret-index.ts",
     "sql-authority-migration.ts", "sql-truth-store.ts", "sqlite-vector-store.ts",
     "store.ts", "workspace-boundary.ts",
   ],
@@ -145,7 +146,7 @@ const V2_LAYERS = new Set([
 ]);
 
 const HOTSPOT_LINE_BUDGETS = new Map([
-  ["index.ts", 4_184],
+  ["index.ts", 3_336],
   ["cli.ts", 2_794],
   ["src/tools.ts", 2_727],
   ["src/store.ts", 2_076],

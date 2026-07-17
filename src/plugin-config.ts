@@ -12,8 +12,9 @@ import {
   type TaskExperienceCaptureConfig,
 } from "./task-experience.js";
 import type { WorkspaceBoundaryConfig } from "./workspace-boundary.js";
+import type { ReflectionThinkLevel } from "./reflection-contracts.js";
+export type { ReflectionThinkLevel } from "./reflection-contracts.js";
 
-export type ReflectionThinkLevel = "off" | "minimal" | "low" | "medium" | "high";
 export type SessionStrategy = "memoryReflection" | "systemSessionMemory" | "none";
 export type ReflectionInjectMode = "inheritance-only" | "inheritance+derived";
 
