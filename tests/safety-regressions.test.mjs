@@ -683,6 +683,10 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   assert.match(gate, /releaseInputIdentity/);
   assert.match(gate, /checked-in release evidence does not match current release inputs/);
   assert.match(gate, /stableReleaseEvidenceMatches/);
+  assert.match(gate, /CLI_SOURCE_PATHS/);
+  assert.match(gate, /src\/cli\/diagnostic-commands\.ts/);
+  assert.match(gate, /src\/cli\/experience-commands\.ts/);
+  assert.match(gate, /src\/cli\/governance-commands\.ts/);
   assert.match(gate, /runOpenClawCapture/);
   assert.match(gate, /npm_execpath/);
   assert.match(gate, /process\.execPath/);

@@ -318,7 +318,22 @@ if (!indexSource.includes("registerExperienceTools(") || !indexSource.includes("
   throw new Error("release gate failed: index.ts does not initialize/register Experience Kernel");
 }
 
-const cliSource = await readFile("cli.ts", "utf8");
+// CLI capabilities are deliberately split; release policy must audit the whole
+// published command surface instead of treating the compatibility facade as
+// the implementation owner.
+const CLI_SOURCE_PATHS = Object.freeze([
+  "cli.ts",
+  "src/cli/auth-commands.ts",
+  "src/cli/cli-runtime-policy.ts",
+  "src/cli/diagnostic-commands.ts",
+  "src/cli/experience-commands.ts",
+  "src/cli/governance-commands.ts",
+  "src/cli/memory-commands.ts",
+  "src/cli/migration-commands.ts",
+]);
+const cliSource = (await Promise.all(
+  CLI_SOURCE_PATHS.map((path) => readFile(path, "utf8")),
+)).join("\n");
 for (const marker of ["collectExperienceHealth", "collectNightlyDigestHealth", "Experience Kernel"]) {
   if (!cliSource.includes(marker)) {
     throw new Error(`release gate failed: cli doctor missing ${marker}`);
