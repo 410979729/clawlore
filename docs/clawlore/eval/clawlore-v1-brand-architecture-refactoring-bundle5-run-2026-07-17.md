@@ -1,8 +1,7 @@
 # ClawLore v1 brand and architecture refactoring bundle 5 — 2026-07-17
 
-Status: architecture closure reached; evidence-write Linux source gate PASS;
-normal-mode verification pending on the clean evidence commit; source candidate
-only.
+Status: architecture closure reached; evidence-write and normal-mode Linux
+source gates PASS; ready for independent source audit; source candidate only.
 
 ## Decision
 
@@ -101,12 +100,24 @@ Runtime identity:
 `40d827230c0d2e7c48fbe364228eaf69739a75862acb983bfb24a8c3e3cbeb69`.
 
 The canonical machine evidence is
-`eval/clawlore-v1-release-evidence.json`. Normal mode must independently match
-its stable fields on a clean evidence commit before this bundle is closed.
+`eval/clawlore-v1-release-evidence.json`.
+
+## Normal-mode evidence verification
+
+Evidence commit `22f2887fe1c4214c8f9bf4226fd6d09cba759823` repeated the complete
+source gate in normal mode. It again passed 418 total / 416 passed / 0 failed /
+2 skipped, typecheck, build, vector repair, 124/124 recall, the 200,000-row FTS
+baseline, all three packed smokes, a 42-component SBOM, a 239-file package
+scan, and official-registry vulnerabilities 0.
+
+The normal run recomputed release-input identity `6f7edcc2…` and runtime
+identity `40d82723…` exactly. The observed commit and SBOM digest varied only in
+the explicitly permitted evidence fields; stable evidence comparison passed.
 
 ## Remaining boundary
 
-Release/live status is NO-GO. Next action is independent source audit plus the
+Architecture status is AUDIT-READY. Release/live status is NO-GO. Next action
+is independent source audit plus the
 separate exact Windows gate when the authorized work computer is reachable.
 No compatibility alias, persisted protocol version, live config, live database,
 or extension installation is removed or changed by this closure.

@@ -86,6 +86,11 @@ vulnerabilities 0. Release-input identity is `6f7edcc2…` across 680 tracked
 inputs; runtime identity is `40d82723…`. Exact Windows and independent review
 remain open, so release/live status remains NO-GO.
 
+Evidence commit `22f2887` repeated the same complete source gate in normal
+mode. Its stable release-input and runtime identities matched exactly. R2 is
+therefore closed at the independent source-audit entry boundary; it is not a
+release or deployment acceptance.
+
 ## R1 — Canonical ClawLore identity candidate
 
 - [x] Rename product, npm package, manifest id, config root, primary CLI,

@@ -45,6 +45,12 @@ still inspected only monolithic `cli.ts`, and compiled version lookup retained
 the old relative depth. Commits `961d2e6` and `56bce74` fix and regress both.
 Neither failed run is represented as acceptance evidence.
 
+Evidence commit `22f2887` then repeated the complete source gate in normal
+mode. The same 418/416/0/2 test result, all three packed smokes, 239-file scan,
+zero-vulnerability audit, release-input identity `6f7edcc2…`, and runtime
+identity `40d82723…` passed stable evidence comparison. The source is therefore
+ready to hand to an independent auditor.
+
 Remaining Phase H gates are the exact real-Windows Node 24 run, cleanup of the
 owned Windows audit roots when that client is reachable, and independent
 source review. No live extension/config/data was changed; release and rollout
