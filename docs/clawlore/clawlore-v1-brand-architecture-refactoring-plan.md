@@ -338,3 +338,32 @@ message-shape fixtures, pending-ingress/repeated-snapshot/history-growth tests,
 bounded-state verification, source governance, strict typecheck/build, the
 complete regression suite, and both evidence-write and normal-mode Linux
 source gates. Exact identities and counts belong in the dated bundle-4 report.
+
+## Fifth bounded bundle — architecture closure candidate
+
+The fifth bundle closes Phases C through G as one source-only audit candidate.
+It does not claim that all inherited implementation hotspots have disappeared;
+the existing shrink-only ledger remains the control for infrastructure and
+operator files that still exceed 800 lines.
+
+- extract Markdown compatibility retrieval/mirroring, core runtime
+  construction, runtime-shadow registration, and capability hook registrars;
+- reduce `index.ts` to a composition root of at most 800 lines;
+- split the CLI, memory tools, and Experience tools by capability while
+  preserving their public command, tool, authorization, and error contracts;
+- make `MemoryStore` a compatibility facade over explicit truth, retrieval,
+  projection, and transaction ports without changing transaction semantics;
+- move stable current-product application/OpenClaw adapter modules out of
+  `src/v2`, leaving deprecated re-export shims, while retaining V2/V1 names for
+  actual persisted schemas and protocols;
+- publish the current architecture map, compatibility removal ledger, and
+  comment/contract audit, and lock their claims with executable contract tests;
+- shrink the reverse-dependency debt ledger when an old edge is removed; no new
+  exception may be added.
+
+Acceptance requires focused public-contract, composition, storage,
+authorization, Markdown-safety, and convergence tests; the complete Linux
+regression and source release gate in evidence-write and normal mode; a clean
+worktree and owned-temporary cleanup. Reaching this boundary means ready for
+independent source audit, not ready for release or live rollout. Exact Windows
+Node 24 validation and independent review remain Phase H gates.
