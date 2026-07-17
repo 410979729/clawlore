@@ -344,7 +344,11 @@ across 563 inputs; runtime identity is
 
 This bundle did not touch live configuration, extension files, database state,
 Gateway service state, repository remotes, or the Windows work computer. The
-full architecture program and cross-platform/review gates remain open. See
+lockfile-built dependency tree and ClawLore `/tmp` artifacts were removed. The
+project worktree is clean. The state-hygiene audit reports 86 out-of-project
+host/config/session/plugin-cache residues; they were not generated as candidate
+artifacts and were left untouched. The full architecture program and
+cross-platform/review gates remain open. See
 `eval/clawlore-v1-brand-architecture-refactoring-bundle1-run-2026-07-17.md`.
 
 ## Current live boundary

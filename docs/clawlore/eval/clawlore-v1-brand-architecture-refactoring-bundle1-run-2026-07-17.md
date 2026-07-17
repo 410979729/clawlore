@@ -109,6 +109,15 @@ evidence was then regenerated in the gate's evidence-write mode, committed,
 and independently rechecked by normal mode. These were sequencing guards, not
 ignored test failures.
 
+## Cleanup
+
+The `node_modules` tree rebuilt from the lockfile for verification was removed.
+No ClawLore temporary root remained under `/tmp`, and the project worktree was
+clean at material HEAD. The state-hygiene audit reported 86 items outside the
+project, consisting of host/config backups, session reset/deleted residues, and
+Codex plugin-cache documents. They were not candidate artifacts and were left
+untouched.
+
 ## Remaining boundary
 
 Overall release status remains NO-GO. The next architecture bundles must add a
