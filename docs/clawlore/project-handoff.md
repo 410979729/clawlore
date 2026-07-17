@@ -421,7 +421,16 @@ complete evidence-write gate. Its release-input identity is
 `2f48eb41e55c8dc947ef8f2ed800cb83cb274cb35c6bab7ed8972ae375a59538`
 across 578 tracked inputs; runtime identity remains
 `0931f45e39dcbaf6a2497e5ec6ebc4bc5096b5ef302626099fd439dc24d8b821`.
-Normal-mode verification remains the final bundle-3 closure step.
+Evidence commit `7897a39c0f33325259fa53adde1ba71346f868a1` then passed the
+same complete gate in normal mode. The stable release-input and runtime
+identities matched exactly, closing bundle 3.
+
+The 332 MiB lockfile dependency tree and two ClawLore Jiti test-cache files
+were removed. No ClawLore-named path remains in the readable `/tmp` scan. The
+workspace hygiene audit still reports 86 out-of-project historical config,
+session, and plugin-cache items; they were not created by this bundle and were
+left intact. The live Gateway remained `active/running` with a live health
+response.
 
 No extension was deployed, live configuration or data changed, Gateway
 restarted, Windows client contacted, repository pushed, tag created, or release

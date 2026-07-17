@@ -49,13 +49,13 @@ runtime/LanceDB/OpenClaw CLI, 42-component SBOM, 188-file package scan, and
 official-registry vulnerabilities 0. Exact Windows and independent-review
 gates remain open.
 
-Bundle-3 code candidate `799dbcf` and documentation candidate `ac5e18b` passed
-18/18 focused tests and the final evidence-write Linux source gate: 403 total /
-401 passed / 0 failed / 2
-platform skips, typecheck, build, vector repair, 124/124 recall, 200,000-row
-FTS, three packed smokes, 42-component SBOM, 192-file pack scan, and
-official-registry vulnerabilities 0. Normal-mode re-verification is the
-remaining bundle-3 closure step.
+Bundle-3 code candidate `799dbcf`, documentation candidate `ac5e18b`, and
+evidence commit `7897a39` passed 18/18 focused tests plus evidence-write and
+normal-mode Linux source gates: 403 total / 401 passed / 0 failed / 2 platform
+skips, typecheck, build, vector repair, 124/124 recall, 200,000-row FTS, three
+packed smokes, 42-component SBOM, 192-file pack scan, and official-registry
+vulnerabilities 0. Stable release-input and runtime identities matched; bundle
+3 is closed. Exact Windows and independent-review gates remain open.
 
 ## R1 — Canonical ClawLore identity candidate
 

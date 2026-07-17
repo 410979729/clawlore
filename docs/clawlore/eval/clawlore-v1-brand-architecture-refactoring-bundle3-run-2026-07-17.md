@@ -1,12 +1,12 @@
 # ClawLore v1 brand and architecture refactoring bundle 3 — 2026-07-17
 
-Status: final documentation-bound evidence-write Linux source gate PASS;
-normal-mode verification pending; source candidate only.
+Status: evidence-write and normal-mode Linux source gates PASS; bundle closed;
+source candidate only.
 
 ## Decision
 
 The reflection-specific composition-root slice is accepted at the code and
-first Linux evidence-write boundary. Transcript reading, embedded generation,
+complete Linux source-gate boundary. Transcript reading, embedded generation,
 and `command:new`/`command:reset` orchestration now have named responsibilities
 and characterization tests. No reverse-dependency exception was added.
 
@@ -99,12 +99,24 @@ across 578 tracked inputs.
 Runtime identity:
 `0931f45e39dcbaf6a2497e5ec6ebc4bc5096b5ef302626099fd439dc24d8b821`.
 
-Normal mode still must compare a clean evidence commit against these stable
-fields before bundle closure.
+Evidence commit:
+`7897a39c0f33325259fa53adde1ba71346f868a1`.
+
+The clean evidence commit passed the same complete gate in normal mode. Its
+release-input and runtime identities matched the evidence-write run exactly;
+the gate exited 0 with all three packed smokes, supply-chain audit, SBOM, and
+package scan repeated.
 
 ## Cleanup and remaining boundary
 
-Cleanup and state-hygiene results are pending final normal-mode verification.
+The 332 MiB lockfile dependency tree and the two ClawLore Jiti cache files
+identified as test artifacts were removed. No ClawLore-named path remains in
+the readable `/tmp` scan, and the project worktree was clean before closure.
+The workspace state-hygiene audit still reports the same 86 out-of-project
+historical configuration/session/plugin-cache items; they were not created by
+this bundle and were left intact. The live Gateway remains `active/running`
+and `/healthz` returned `{"ok":true,"status":"live"}`.
+
 Overall release status remains NO-GO. The next bounded code slice is
 auto-capture policy and conversation-state extraction; it must not include
 Markdown retrieval, runtime construction, storage convergence, or live rollout.
