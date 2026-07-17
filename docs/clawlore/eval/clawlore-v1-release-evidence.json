@@ -1,21 +1,21 @@
 {
   "schema": "clawlore.release-evidence.v2",
   "package": "clawlore@1.2.0",
-  "observedCommit": "9e0fcfa3705dfb3fab96b7dee001ca65dd3e5839",
+  "observedCommit": "799dbcf650f4857b21d8fd725e8b03ef5192f9d8",
   "releaseInput": {
     "algorithm": "sha256-git-blobs-release-inputs-v2",
-    "digest": "074832cb1cf41436e0511c4a691d9f16c0f5ca203e59989b701ca538476ef1a0",
-    "fileCount": 567,
+    "digest": "c7306fede5c1908c24417f03cc8483bdbebef2721fa9790dbd6d3149d6b5cb9b",
+    "fileCount": 578,
     "excludedAuditLedger": [
       "TODO-clawlore.md",
       "docs/clawlore/project-handoff.md",
       "docs/clawlore/eval/"
     ]
   },
-  "runtimeDigest": "4f31de8b1a782726f785ee78bdb08059d9d57347aee0ea1a3badf989b4e81350",
+  "runtimeDigest": "0931f45e39dcbaf6a2497e5ec6ebc4bc5096b5ef302626099fd439dc24d8b821",
   "sourceOnly": true,
   "dirty": false,
-  "packFileCount": 188,
+  "packFileCount": 192,
   "packageLockSha256": "66e22abef648c898e8e4e41c3e9e5edb399437b70a7a697cd8f3206ff731b7cd",
   "sbom": {
     "format": "CycloneDX",
@@ -23,7 +23,7 @@
     "tool": "npm sbom --package-lock-only --sbom-format cyclonedx",
     "toolVersion": "11.9.0",
     "componentCount": 42,
-    "sha256": "3e2d959cb33c80e44d135acee21cf4ec9bc4581a9c0827dc33c3a3831287e914"
+    "sha256": "86a0681ee4694ffad82c41d1a0001c14adcb0bca8047b9170f45e0653a32c61a"
   },
   "toolchain": {
     "node": "v24.14.0",

@@ -2,7 +2,7 @@
 
 Current through Phase 9, H1-H5 production hardening, the R1 canonical identity
 transition, the seventh and eighth independent reviews, and R2 brand/
-architecture bundle 2 through 2026-07-17.
+architecture bundle 3 through 2026-07-17.
 
 ## Canonical identity candidate
 
@@ -389,6 +389,43 @@ CLI/tools/storage convergence, the exact Windows gate, cleanup of only the
 owned Windows audit roots, and independent review remain open. See
 `eval/clawlore-v1-brand-architecture-refactoring-bundle2-run-2026-07-17.md`.
 
+## R2 brand and architecture bundle 3
+
+Code commit `799dbcf650f4857b21d8fd725e8b03ef5192f9d8` extracts the
+reflection-specific entry-point slice into four bounded modules:
+
+- `reflection-contracts.ts` owns shared domain types;
+- `reflection-transcript.ts` owns message filtering/redaction, JSONL reading,
+  reset fallback, and previous-session recovery;
+- `reflection-generation.ts` owns the exact prompt, embedded-runner boundary,
+  timeout/retry behavior, and structured fallback;
+- `reflection-command-orchestrator.ts` owns the access-gated
+  `command:new`/`command:reset` use case through explicit store, embedding,
+  learning, cache, and diagnostic ports.
+
+`index.ts` retains state shared with reflection injection plus dependency
+composition and hook registration. It shrinks from 4,184 to 3,336 lines. The
+four new production modules are each below 800 lines, all are classified, and
+the 45-edge reverse-dependency debt ledger is unchanged.
+
+Three new characterization suites cover transcript redaction/reset recovery,
+embedded success and fallback, fail-closed denied access, recovered-session
+orchestration, reflection-file/daily-log writes, store handoff, derived cache
+update, and cleanup. The focused set passed 18/18. The first evidence-write
+Linux source gate passed 403 total / 401 passed / 0 failed / two platform
+skips, typecheck, build, vector repair, 124/124 deterministic recall, the
+200,000-row FTS baseline, official-registry vulnerabilities 0, a 42-component
+SBOM, a 192-file package scan, and all three packed smokes. Documentation-bound
+evidence regeneration and normal-mode verification remain the final bundle-3
+closure steps.
+
+No extension was deployed, live configuration or data changed, Gateway
+restarted, Windows client contacted, repository pushed, tag created, or release
+performed. Overall status remains NO-GO: capture/Markdown/runtime/hook
+extraction, CLI/tools/storage convergence, the exact Windows gate, owned
+Windows audit-root cleanup, and independent review remain open. See
+`eval/clawlore-v1-brand-architecture-refactoring-bundle3-run-2026-07-17.md`.
+
 ## Current live boundary
 
 The 2026-07-14 H5 artifact remains the deployed runtime under the legacy plugin
@@ -418,9 +455,9 @@ not an implied approval to switch later without fresh evidence.
 
 ## Next controlled boundary
 
-1. Add an executable non-growth ledger for migration-era reverse dependencies,
-   then extract the next characterized configuration/composition slice from
-   `index.ts` without mixing in a live rollout.
+1. Extract auto-capture policy and conversation-state handling from `index.ts`
+   under characterization tests; do not combine it with Markdown retrieval,
+   runtime construction, storage convergence, or a live rollout.
 2. At the next release-candidate boundary, run the exact candidate through the
    Windows Node 24 source gate, then remove and verify absence of only the
    clearly owned audit roots.

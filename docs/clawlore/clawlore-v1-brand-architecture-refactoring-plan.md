@@ -286,3 +286,31 @@ Acceptance requires parser parity fixtures, focused configuration and
 architecture tests, strict typecheck/build, the complete test suite, and the
 full Linux source release gate. Exact evidence belongs in the dated bundle-2
 run report rather than in this stable execution plan.
+
+## Third bounded bundle
+
+The third bundle completes the reflection-specific Phase C slice without
+changing capture, recall injection, runtime construction, or live state:
+
+- move the reflection error/generation contracts into a dependency-free domain
+  module;
+- move transcript filtering, redaction, JSONL reading, reset fallback, and
+  previous-session recovery into a characterized OpenClaw adapter;
+- move prompt construction, embedded-runner loading, timeout/retry handling,
+  and structured fallback generation into a separate adapter;
+- move `command:new` / `command:reset` recovery, generation, file writing,
+  mapped-memory persistence, reflection-store persistence, and daily-log
+  recording behind explicit ports in one command orchestrator;
+- keep error collection, inherited/derived prompt injection, session caches,
+  and hook registration in the composition root for a later hook-registrar
+  slice;
+- preserve the public transcript-reader export and all existing hook names,
+  priorities, log contracts, storage metadata, and fail-closed access checks;
+- reduce the `index.ts` non-growth ceiling from 4,184 to 3,336 lines without
+  adding a reverse-dependency exception.
+
+Acceptance requires transcript/reset fixtures, embedded success/fallback
+fixtures, denied and successful command-orchestration fixtures, source
+governance, strict typecheck/build, the complete regression suite, and both
+evidence-write and normal-mode Linux source gates. Exact identities and counts
+belong in the dated bundle-3 run report.

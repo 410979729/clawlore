@@ -27,7 +27,9 @@ Detailed plan:
       tests; target entry point is at most 800 lines.
   - [x] Bundle 2: extract the validated plugin-config contract/parser with
         parity tests; reduce `index.ts` from 4,730 to 4,184 lines.
-  - [ ] Extract reflection transcript reading and orchestration.
+  - [x] Bundle 3: extract reflection contracts, transcript reading/reset
+        recovery, embedded generation, and command:new/reset orchestration;
+        reduce `index.ts` from 4,184 to 3,336 lines without new reverse debt.
   - [ ] Extract auto-capture policy/conversation state, Markdown compatibility
         retrieval, runtime construction, and capability hook registrars.
 - [ ] Split CLI and Agent tools by capability, centralize application policy,
@@ -46,6 +48,13 @@ typecheck, build, vector repair, 124/124 recall, 200,000-row FTS, packed
 runtime/LanceDB/OpenClaw CLI, 42-component SBOM, 188-file package scan, and
 official-registry vulnerabilities 0. Exact Windows and independent-review
 gates remain open.
+
+Bundle-3 code candidate `799dbcf` passed 18/18 focused tests and the first
+evidence-write Linux source gate: 403 total / 401 passed / 0 failed / 2
+platform skips, typecheck, build, vector repair, 124/124 recall, 200,000-row
+FTS, three packed smokes, 42-component SBOM, 192-file pack scan, and
+official-registry vulnerabilities 0. Final documentation-bound evidence and
+normal-mode re-verification are the remaining bundle-3 closure steps.
 
 ## R1 — Canonical ClawLore identity candidate
 
