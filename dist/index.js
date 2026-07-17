@@ -17,7 +17,7 @@ import { createRequire } from "node:module";
 // blunt for deciding whether to short-circuit runtime registration.
 const isClawLoreCliInvocation = () => {
     const args = process.argv.slice(2);
-    return args.includes("clawlore") || args.includes("scope-recall") || args.includes("memory-pro");
+    return args.includes(CLAWLORE_CLI_PRIMARY) || CLAWLORE_CLI_ALIASES.some((name) => args.includes(name));
 };
 const isCliRegistrationMode = (api) => api.registrationMode === "cli-metadata" || isClawLoreCliInvocation();
 // Import core components
@@ -62,6 +62,7 @@ import { resolveRuntimeMemoryAccess, runtimeBoundaryMetadata, } from "./src/runt
 import { computeRuntimeReleaseBinding, resolvePluginRoot, } from "./src/release-provenance.js";
 import { filterUserMdExclusiveRecallResults, isUserMdExclusiveMemory, } from "./src/workspace-boundary.js";
 import { normalizeAdmissionControlConfig, resolveRejectedAuditFilePath, } from "./src/admission-control.js";
+import { resolveClawLoreRuntimeRequestConfig, } from "./src/runtime-config.js";
 import { analyzeIntent, applyCategoryBoost } from "./src/intent-analyzer.js";
 import { createTaskEpisode, ensureExperienceSchema, recordTaskExperienceCaptureEvent, } from "./src/experience-store.js";
 import { recordAutoRecallTrace, } from "./src/auto-recall-ledger.js";
@@ -1596,7 +1597,7 @@ const clawLorePlugin = {
             }
             return results;
         }
-        const clawloreRuntimeConfig = normalizeClawLoreRuntimeConfigV1(config.clawloreV2);
+        const clawloreRuntimeConfig = normalizeClawLoreRuntimeConfigV1(config.runtime);
         let runtimeReleaseBinding;
         const rolloutBindingErrors = [];
         if (clawloreRuntimeConfig.mode === "shadow") {
@@ -1613,14 +1614,14 @@ const clawLorePlugin = {
         }
         const rolloutControls = clawloreRuntimeConfig.mode === "shadow" && runtimeReleaseBinding
             ? loadRuntimeRolloutControlsV1({
-                readinessFile: config.clawloreV2?.readinessFile
-                    ? api.resolvePath(config.clawloreV2.readinessFile)
+                readinessFile: config.runtime?.readinessFile
+                    ? api.resolvePath(config.runtime.readinessFile)
                     : undefined,
                 expectedBinding: runtimeReleaseBinding,
             })
             : { readiness: undefined, errors: rolloutBindingErrors };
         if (rolloutControls.errors.length > 0) {
-            api.logger.warn(`clawlore-v2: shadow rollout controls blocked: ${rolloutControls.errors.join(",")}`);
+            api.logger.warn(`clawlore: shadow rollout controls blocked: ${rolloutControls.errors.join(",")}`);
         }
         const legacyShadowRetriever = createLegacyShadowCandidateRetrieverV1({
             workspaceId: "tianji-main-workspace",
@@ -1668,15 +1669,15 @@ const clawLorePlugin = {
                 retrieveCandidates: nativeShadowRetriever,
                 retrieveComparisonCandidates: cachedLegacyShadowRetriever,
                 onObserverError(code) {
-                    api.logger.warn(`clawlore-v2: read-only shadow observer ${code}`);
+                    api.logger.warn(`clawlore: read-only shadow observer ${code}`);
                 },
                 onObserverMetrics(metrics) {
-                    api.logger.debug?.(`clawlore-v2: observer metrics active=${metrics.active} late=${metrics.late} timeouts=${metrics.timeouts} saturated=${metrics.saturated}`);
+                    api.logger.debug?.(`clawlore: observer metrics active=${metrics.active} late=${metrics.late} timeouts=${metrics.timeouts} saturated=${metrics.saturated}`);
                 },
             },
             readiness: rolloutControls.readiness,
         });
-        api.logger.info(`clawlore-v2: runtime status=${clawloreRuntimeReceipt.status} mode=${clawloreRuntimeReceipt.requestedMode} hooks=${clawloreRuntimeReceipt.registeredHooks.length} writes=${clawloreRuntimeReceipt.writeEnabled} promptMutation=${clawloreRuntimeReceipt.promptMutationEnabled} contextEngine=${clawloreRuntimeReceipt.contextEngineRegistered} blocks=${clawloreRuntimeReceipt.blockingReasons.join(",") || "none"}`);
+        api.logger.info(`clawlore: runtime status=${clawloreRuntimeReceipt.status} mode=${clawloreRuntimeReceipt.requestedMode} hooks=${clawloreRuntimeReceipt.registeredHooks.length} writes=${clawloreRuntimeReceipt.writeEnabled} promptMutation=${clawloreRuntimeReceipt.promptMutationEnabled} contextEngine=${clawloreRuntimeReceipt.contextEngineRegistered} blocks=${clawloreRuntimeReceipt.blockingReasons.join(",") || "none"}`);
         async function runRecallLifecycle(results, scopeFilter) {
             const now = Date.now();
             const lifecycleEntries = new Map();
@@ -3787,26 +3788,7 @@ export function parsePluginConfig(value) {
                 dedupeThreshold: parseNumberBetween(raw.dedupeThreshold, 0, 1) ?? DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG.dedupeThreshold,
             };
         })(),
-        clawloreV2: (() => {
-            const raw = typeof cfg.clawloreV2 === "object" && cfg.clawloreV2 !== null
-                ? cfg.clawloreV2
-                : null;
-            if (!raw)
-                return undefined;
-            return {
-                mode: raw.mode === "shadow" ? "shadow" : "disabled",
-                contextEngine: raw.contextEngine === "native-opt-in" ? "native-opt-in" : "compatibility",
-                tokenBudget: parseIntBetween(raw.tokenBudget, 32, 32_768) ?? 512,
-                maxLatencyMs: parseIntBetween(raw.maxLatencyMs, 25, 5_000) ?? 750,
-                traceFile: asNonEmptyString(raw.traceFile),
-                maxTraceBytes: parseIntBetween(raw.maxTraceBytes, 16_384, 100_000_000) ?? 5_000_000,
-                maxQueryChars: parseIntBetween(raw.maxQueryChars, 256, 12_000) ?? 4_000,
-                candidateLimit: parseIntBetween(raw.candidateLimit, 1, 20) ?? 6,
-                maxConcurrent: parseIntBetween(raw.maxConcurrent, 1, 16) ?? 2,
-                readinessFile: asNonEmptyString(raw.readinessFile),
-                approvalFile: asNonEmptyString(raw.approvalFile),
-            };
-        })(),
+        runtime: resolveClawLoreRuntimeRequestConfig(cfg),
     };
 }
 export default clawLorePlugin;

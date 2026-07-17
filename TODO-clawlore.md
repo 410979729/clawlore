@@ -1,6 +1,37 @@
 # ClawLore v1 TODO
 
-Updated: 2026-07-16
+Updated: 2026-07-17
+
+## R2 — Canonical brand and architecture convergence
+
+Detailed plan:
+`docs/clawlore/clawlore-v1-brand-architecture-refactoring-plan.md`.
+
+- [x] Measure current source hotspots, branding debt, dependency coverage, and
+      comment/compatibility markers without changing live state.
+- [x] Define canonical ClawLore surfaces, explicit compatibility surfaces,
+      target module boundaries, comment rules, and a phased verification ladder.
+- [x] Introduce canonical `runtime` configuration while retaining
+      `clawloreV2` as a deprecated, conflict-checked compatibility input.
+- [x] Remove migration-era `clawlore-v2:` prefixes from current runtime logs
+      and prevent unexplained new Scope Recall branding in source.
+- [x] Classify every production TypeScript module and add executable non-growth
+      budgets for all current hotspots plus an 800-line ceiling for new files.
+- [ ] Extend inward dependency-direction enforcement from `src/v2` to the
+      migration-era root modules, with explicit debt exceptions that can only
+      shrink.
+- [ ] Extract configuration, reflection, capture, Markdown retrieval, runtime
+      construction, and hook registration from `index.ts` under characterization
+      tests; target entry point is at most 800 lines.
+- [ ] Split CLI and Agent tools by capability, centralize application policy,
+      and preserve command/tool response contracts.
+- [ ] Reduce `MemoryStore` to a compatibility facade over explicit truth,
+      projection, transaction, and retrieval ports.
+- [ ] Converge stable `src/v2` modules into canonical non-versioned roots one
+      capability at a time; preserve actual schema/protocol version names.
+- [ ] Complete public-contract and security/transaction comment audit.
+- [ ] Pass focused/full Linux gates, exact Windows Node 24 gate, package smokes,
+      and independent review before any live identity rollout.
 
 ## R1 — Canonical ClawLore identity candidate
 

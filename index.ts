@@ -24,7 +24,7 @@ import { createRequire } from "node:module";
 // blunt for deciding whether to short-circuit runtime registration.
 const isClawLoreCliInvocation = () => {
   const args = process.argv.slice(2);
-  return args.includes("clawlore") || args.includes("scope-recall") || args.includes("memory-pro");
+  return args.includes(CLAWLORE_CLI_PRIMARY) || CLAWLORE_CLI_ALIASES.some((name) => args.includes(name));
 };
 
 const isCliRegistrationMode = (api: Pick<OpenClawPluginApi, "registrationMode">) =>
@@ -133,6 +133,10 @@ import {
   type AdmissionControlConfig,
   type AdmissionRejectionAuditEntry,
 } from "./src/admission-control.js";
+import {
+  resolveClawLoreRuntimeRequestConfig,
+  type ClawLoreRuntimeRequestConfig,
+} from "./src/runtime-config.js";
 import { analyzeIntent, applyCategoryBoost } from "./src/intent-analyzer.js";
 import {
   createTaskEpisode,
@@ -302,20 +306,7 @@ interface PluginConfig {
     maxExtractionsPerHour?: number;
   };
   taskExperienceCapture?: TaskExperienceCaptureConfig;
-  clawloreV2?: {
-    mode?: "disabled" | "shadow";
-    contextEngine?: "compatibility" | "native-opt-in";
-    tokenBudget?: number;
-    maxLatencyMs?: number;
-    traceFile?: string;
-    maxTraceBytes?: number;
-    maxQueryChars?: number;
-    candidateLimit?: number;
-    maxConcurrent?: number;
-    readinessFile?: string;
-    /** Deprecated compatibility input. Parsed but never used as an activation gate. */
-    approvalFile?: string;
-  };
+  runtime?: ClawLoreRuntimeRequestConfig;
 }
 
 type ReflectionThinkLevel = "off" | "minimal" | "low" | "medium" | "high";
@@ -2131,7 +2122,7 @@ const clawLorePlugin = {
       return results;
     }
 
-    const clawloreRuntimeConfig = normalizeClawLoreRuntimeConfigV1(config.clawloreV2);
+    const clawloreRuntimeConfig = normalizeClawLoreRuntimeConfigV1(config.runtime);
     let runtimeReleaseBinding: ReturnType<typeof computeRuntimeReleaseBinding> | undefined;
     const rolloutBindingErrors: string[] = [];
     if (clawloreRuntimeConfig.mode === "shadow") {
@@ -2147,15 +2138,15 @@ const clawLorePlugin = {
     }
     const rolloutControls = clawloreRuntimeConfig.mode === "shadow" && runtimeReleaseBinding
       ? loadRuntimeRolloutControlsV1({
-          readinessFile: config.clawloreV2?.readinessFile
-            ? api.resolvePath(config.clawloreV2.readinessFile)
+          readinessFile: config.runtime?.readinessFile
+            ? api.resolvePath(config.runtime.readinessFile)
             : undefined,
           expectedBinding: runtimeReleaseBinding,
         })
       : { readiness: undefined, errors: rolloutBindingErrors };
     if (rolloutControls.errors.length > 0) {
       api.logger.warn(
-        `clawlore-v2: shadow rollout controls blocked: ${rolloutControls.errors.join(",")}`,
+        `clawlore: shadow rollout controls blocked: ${rolloutControls.errors.join(",")}`,
       );
     }
     const legacyShadowRetriever = createLegacyShadowCandidateRetrieverV1({
@@ -2204,18 +2195,18 @@ const clawLorePlugin = {
         retrieveCandidates: nativeShadowRetriever,
         retrieveComparisonCandidates: cachedLegacyShadowRetriever,
         onObserverError(code) {
-          api.logger.warn(`clawlore-v2: read-only shadow observer ${code}`);
+          api.logger.warn(`clawlore: read-only shadow observer ${code}`);
         },
         onObserverMetrics(metrics) {
           api.logger.debug?.(
-            `clawlore-v2: observer metrics active=${metrics.active} late=${metrics.late} timeouts=${metrics.timeouts} saturated=${metrics.saturated}`,
+            `clawlore: observer metrics active=${metrics.active} late=${metrics.late} timeouts=${metrics.timeouts} saturated=${metrics.saturated}`,
           );
         },
       },
       readiness: rolloutControls.readiness,
     });
     api.logger.info(
-      `clawlore-v2: runtime status=${clawloreRuntimeReceipt.status} mode=${clawloreRuntimeReceipt.requestedMode} hooks=${clawloreRuntimeReceipt.registeredHooks.length} writes=${clawloreRuntimeReceipt.writeEnabled} promptMutation=${clawloreRuntimeReceipt.promptMutationEnabled} contextEngine=${clawloreRuntimeReceipt.contextEngineRegistered} blocks=${clawloreRuntimeReceipt.blockingReasons.join(",") || "none"}`,
+      `clawlore: runtime status=${clawloreRuntimeReceipt.status} mode=${clawloreRuntimeReceipt.requestedMode} hooks=${clawloreRuntimeReceipt.registeredHooks.length} writes=${clawloreRuntimeReceipt.writeEnabled} promptMutation=${clawloreRuntimeReceipt.promptMutationEnabled} contextEngine=${clawloreRuntimeReceipt.contextEngineRegistered} blocks=${clawloreRuntimeReceipt.blockingReasons.join(",") || "none"}`,
     );
 
     async function runRecallLifecycle(
@@ -4732,25 +4723,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
           parseNumberBetween(raw.dedupeThreshold, 0, 1) ?? DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG.dedupeThreshold,
       };
     })(),
-    clawloreV2: (() => {
-      const raw = typeof cfg.clawloreV2 === "object" && cfg.clawloreV2 !== null
-        ? cfg.clawloreV2 as Record<string, unknown>
-        : null;
-      if (!raw) return undefined;
-      return {
-        mode: raw.mode === "shadow" ? "shadow" : "disabled",
-        contextEngine: raw.contextEngine === "native-opt-in" ? "native-opt-in" : "compatibility",
-        tokenBudget: parseIntBetween(raw.tokenBudget, 32, 32_768) ?? 512,
-        maxLatencyMs: parseIntBetween(raw.maxLatencyMs, 25, 5_000) ?? 750,
-        traceFile: asNonEmptyString(raw.traceFile),
-        maxTraceBytes: parseIntBetween(raw.maxTraceBytes, 16_384, 100_000_000) ?? 5_000_000,
-        maxQueryChars: parseIntBetween(raw.maxQueryChars, 256, 12_000) ?? 4_000,
-        candidateLimit: parseIntBetween(raw.candidateLimit, 1, 20) ?? 6,
-        maxConcurrent: parseIntBetween(raw.maxConcurrent, 1, 16) ?? 2,
-        readinessFile: asNonEmptyString(raw.readinessFile),
-        approvalFile: asNonEmptyString(raw.approvalFile),
-      };
-    })(),
+    runtime: resolveClawLoreRuntimeRequestConfig(cfg),
   };
 }
 

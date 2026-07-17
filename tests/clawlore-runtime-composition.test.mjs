@@ -7,6 +7,7 @@ import { releaseProvenance } from "./fixtures/release-provenance.mjs";
 const require = createRequire(import.meta.url);
 const { createJiti } = require("jiti");
 const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: false });
+const { resolveClawLoreRuntimeRequestConfig } = jiti("../src/runtime-config.ts");
 const { buildReleaseReadinessReceipt } = jiti("../src/v2/application/release-readiness.ts");
 const {
   InMemoryRuntimeShadowSinkV1,
@@ -94,12 +95,16 @@ function dependencies(overrides = {}) {
 
 test("runtime composition is default-off and invalid config fails to disabled", async () => {
   const manifest = JSON.parse(await readFile("openclaw.plugin.json", "utf8"));
-  assert.equal(manifest.configSchema.properties.clawloreV2.properties.mode.default, "disabled");
+  assert.equal(manifest.configSchema.properties.runtime.properties.mode.default, "disabled");
   assert.match(
-    manifest.configSchema.properties.clawloreV2.properties.approvalFile.description,
+    manifest.configSchema.properties.runtime.properties.approvalFile.description,
     /Deprecated compatibility field.*ignored/,
   );
-  assert.equal(manifest.configSchema.properties.clawloreV2.properties.maxConcurrent.default, 2);
+  assert.equal(manifest.configSchema.properties.runtime.properties.maxConcurrent.default, 2);
+  assert.match(
+    manifest.configSchema.properties.clawloreV2.description,
+    /Deprecated compatibility alias for runtime/,
+  );
   assert.equal(normalizeClawLoreRuntimeConfigV1({ mode: "shadow" }).maxConcurrent, 2);
 
   for (const config of [undefined, {}, { mode: "v2-write" }, { mode: "cutover" }]) {
@@ -114,6 +119,26 @@ test("runtime composition is default-off and invalid config fails to disabled", 
     assert.equal(receipt.contextEngineRegistered, false);
     assert.equal(host.hooks.length, 0);
   }
+});
+
+test("runtime config accepts the deprecated alias but rejects ambiguous dual input", () => {
+  const requested = { mode: "shadow", contextEngine: "compatibility", maxConcurrent: 4 };
+  const canonical = resolveClawLoreRuntimeRequestConfig({ runtime: requested });
+  const legacy = resolveClawLoreRuntimeRequestConfig({ clawloreV2: requested });
+
+  assert.deepEqual(canonical, legacy);
+  assert.deepEqual(resolveClawLoreRuntimeRequestConfig({ runtime: requested, clawloreV2: requested }), canonical);
+  assert.throws(
+    () => resolveClawLoreRuntimeRequestConfig({
+      runtime: requested,
+      clawloreV2: { ...requested, maxConcurrent: 3 },
+    }),
+    /Conflicting ClawLore runtime and deprecated clawloreV2 configuration/,
+  );
+  assert.throws(
+    () => resolveClawLoreRuntimeRequestConfig({ runtime: "shadow" }),
+    /runtime configuration must be an object/,
+  );
 });
 
 test("shadow request registers nothing without matching readiness", () => {

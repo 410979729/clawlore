@@ -1683,16 +1683,16 @@
           }
         }
       },
-      "clawloreV2": {
+      "runtime": {
         "type": "object",
         "additionalProperties": false,
-        "description": "ClawLore runtime request. The legacy key name is retained for configuration compatibility; V2 refers to the data architecture, not the product version. Shadow activation requires a verified readiness receipt.",
+        "description": "Canonical ClawLore runtime request. Shadow activation requires a verified readiness receipt and never authorizes writes, prompt mutation, ContextEngine, lifecycle mutation, or final recall.",
         "properties": {
           "mode": {
             "type": "string",
             "enum": ["disabled", "shadow"],
             "default": "disabled",
-            "description": "Request no V2 runtime registration or one read-only shadow observer. This field alone never authorizes activation."
+            "description": "Request no runtime registration or one read-only shadow observer. This field alone never authorizes activation."
           },
           "contextEngine": {
             "type": "string",
@@ -1755,6 +1755,74 @@
             "description": "Deprecated compatibility field. Accepted so existing configurations remain valid, but ignored and never used as an activation gate."
           }
         }
+      },
+      "clawloreV2": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Deprecated compatibility alias for runtime. New configurations must use runtime; conflicting dual input fails before hook registration.",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": ["disabled", "shadow"],
+            "default": "disabled",
+            "description": "Deprecated alias for runtime.mode. This field alone never authorizes activation."
+          },
+          "contextEngine": {
+            "type": "string",
+            "enum": ["compatibility", "native-opt-in"],
+            "default": "compatibility",
+            "description": "Deprecated alias for runtime.contextEngine. Native opt-in fails closed."
+          },
+          "tokenBudget": {
+            "type": "integer",
+            "minimum": 32,
+            "maximum": 32768,
+            "default": 512
+          },
+          "maxLatencyMs": {
+            "type": "integer",
+            "minimum": 25,
+            "maximum": 5000,
+            "default": 750
+          },
+          "traceFile": {
+            "type": "string",
+            "minLength": 1
+          },
+          "maxTraceBytes": {
+            "type": "integer",
+            "minimum": 16384,
+            "maximum": 100000000,
+            "default": 5000000
+          },
+          "maxQueryChars": {
+            "type": "integer",
+            "minimum": 256,
+            "maximum": 12000,
+            "default": 4000
+          },
+          "candidateLimit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "default": 6
+          },
+          "maxConcurrent": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 16,
+            "default": 2
+          },
+          "readinessFile": {
+            "type": "string",
+            "minLength": 1
+          },
+          "approvalFile": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Deprecated compatibility field. Accepted so existing configurations remain valid, but ignored and never used as an activation gate."
+          }
+        }
       }
     },
     "required": [
@@ -1762,45 +1830,45 @@
     ]
   },
   "uiHints": {
-    "clawloreV2.mode": {
+    "runtime.mode": {
       "label": "ClawLore Runtime",
       "help": "Default disabled. Shadow requires a verified readiness receipt before any hook is registered.",
       "advanced": true
     },
-    "clawloreV2.contextEngine": {
+    "runtime.contextEngine": {
       "label": "ClawLore Context Engine",
       "help": "Compatibility is the only activatable choice in this release slice. Native opt-in fails closed.",
       "advanced": true
     },
-    "clawloreV2.tokenBudget": {
+    "runtime.tokenBudget": {
       "label": "ClawLore Shadow Token Budget",
       "advanced": true
     },
-    "clawloreV2.maxLatencyMs": {
+    "runtime.maxLatencyMs": {
       "label": "ClawLore Shadow Latency Limit",
       "advanced": true
     },
-    "clawloreV2.traceFile": {
+    "runtime.traceFile": {
       "label": "ClawLore Redacted Trace File",
       "advanced": true
     },
-    "clawloreV2.maxTraceBytes": {
+    "runtime.maxTraceBytes": {
       "label": "ClawLore Trace Rotation Bytes",
       "advanced": true
     },
-    "clawloreV2.maxQueryChars": {
+    "runtime.maxQueryChars": {
       "label": "ClawLore Shadow Query Limit",
       "advanced": true
     },
-    "clawloreV2.candidateLimit": {
+    "runtime.candidateLimit": {
       "label": "ClawLore Shadow Candidate Limit",
       "advanced": true
     },
-    "clawloreV2.maxConcurrent": {
+    "runtime.maxConcurrent": {
       "label": "ClawLore Shadow Concurrency Limit",
       "advanced": true
     },
-    "clawloreV2.readinessFile": {
+    "runtime.readinessFile": {
       "label": "ClawLore Readiness Receipt",
       "advanced": true
     },

@@ -187,6 +187,16 @@ test("reviewer-skipped tool-backed tasks still produce an episode draft", async 
   assert.equal(draft.tool_names.includes("exec_command"), true);
   assert.match(draft.task_goal, /OpenClaw digest recovery/);
 
+  const clawLoreDraft = buildTaskExperienceEpisodeDraft({
+    transcript: {
+      ...transcript,
+      userGoal: "Refactor the ClawLore runtime configuration and verify the compatibility gate.",
+    },
+    result,
+    agentId: "main",
+  });
+  assert.equal(clawLoreDraft.task_class, "clawlore_task");
+
   const chatTranscript = extractTaskExperienceTranscript([
     { role: "user", content: "What is a SQL index?" },
     { role: "assistant", content: "A SQL index speeds up lookups by maintaining an auxiliary structure." },

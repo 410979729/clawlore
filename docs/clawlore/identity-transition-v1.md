@@ -14,9 +14,10 @@ Status: source candidate only; independent audit required before deployment.
 | Default extension | `extensions/clawlore` |
 | Repository | `410979729/clawlore` |
 
-ClawLore remains on the v1 product line. Identifiers such as `clawloreV2`,
-Memory Address V2, and schema V3 describe internal data architecture; they do
-not make the product ClawLore v2.
+ClawLore remains on the v1 product line. `runtime` is the canonical runtime
+configuration object. The old `clawloreV2` key is accepted only as a deprecated
+configuration alias. Identifiers such as Memory Address V2 and schema V3
+describe internal data architecture; they do not make the product ClawLore v2.
 
 ## Compatibility retained
 
@@ -28,6 +29,9 @@ not make the product ClawLore v2.
   a competing empty store.
 - `scope_recall_*` dynamic-tool ids remain stable wire contracts. Renaming them
   in the same release would break automations without improving runtime safety.
+- Existing `clawloreV2` runtime configuration is read as a deprecated alias for
+  `runtime`. If both keys are present, they must normalize identically or
+  startup fails before hook registration.
 - Historical reports retain the names and paths that were true when captured.
 
 ## Deployment gate

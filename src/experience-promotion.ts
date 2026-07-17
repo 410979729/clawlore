@@ -132,12 +132,14 @@ function detectRiskLevel(evidence: string[], toolNames: string[], goal: string):
 
 function classifyTask(goal: string, toolNames: string[]): string {
   const lowered = goal.toLowerCase();
+  const isReleaseTask = containsAny(lowered, ["release", "push", "version", "发布", "推送", "版本"]);
+
+  if (lowered.includes("clawlore")) {
+    return isReleaseTask ? "clawlore_release_closeout" : "clawlore_quality_check";
+  }
 
   if (lowered.includes("scope-recall") || lowered.includes("scope_recall")) {
-    if (containsAny(lowered, ["release", "push", "version", "发布", "推送", "版本"])) {
-      return "scope_recall_release_closeout";
-    }
-    return "scope_recall_quality_check";
+    return isReleaseTask ? "scope_recall_release_closeout" : "scope_recall_quality_check";
   }
 
   if (lowered.includes("openclaw") || lowered.includes("gateway")) {
@@ -165,6 +167,10 @@ function classifyTask(goal: string, toolNames: string[]): string {
 
 function generateTitle(taskClass: string, goal: string): string {
   switch (taskClass) {
+    case "clawlore_release_closeout":
+      return "ClawLore 发布候选收口经验手册";
+    case "clawlore_quality_check":
+      return "ClawLore 质量检查经验手册";
     case "scope_recall_release_closeout":
       return "scope-recall 发布候选收口经验手册";
     case "scope_recall_quality_check":

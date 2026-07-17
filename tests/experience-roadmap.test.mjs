@@ -20,6 +20,7 @@ const {
   listAutoRecallTraces,
 } = jiti("../src/auto-recall-ledger.ts");
 const { runPromotionBatch } = jiti("../src/experience-promotion-batch.ts");
+const { promoteExperiences } = jiti("../src/experience-promotion.ts");
 const {
   evaluateRecallScopePolicy,
   scopeIdForContext,
@@ -143,6 +144,30 @@ test("promotion batch dry-run is zero-write and apply records batch items", () =
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM experience_promotion_batches").get().count, 1);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM experience_promotion_batch_items").get().count, 1);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM procedural_playbooks").get().count, 1);
+});
+
+test("new promotion records use ClawLore task classes while legacy classes remain readable", () => {
+  const db = new DatabaseSync(":memory:");
+  ensureExperienceSchema(db);
+  createTaskEpisode(db, {
+    scope_id: "agent:main",
+    session_id: "session-clawlore-quality",
+    task_class: "agent_verified_task",
+    task_goal: "Refactor the ClawLore runtime boundary and verify the focused tests.",
+    status: "completed",
+    outcome: "success",
+    tool_names: ["node:test"],
+    evidence: ["Focused ClawLore runtime tests passed."],
+    verification: ["node --test passed"],
+  });
+
+  const result = promoteExperiences(db, { scope_id: "agent:main", dry_run: false });
+  assert.equal(result.playbooks_created, 1);
+  const playbook = db.prepare(
+    "SELECT task_class, title FROM procedural_playbooks WHERE created_from_episode_id <> ''",
+  ).get();
+  assert.equal(playbook.task_class, "clawlore_quality_check");
+  assert.equal(playbook.title, "ClawLore 质量检查经验手册");
 });
 
 test("scope policy labels global, same-scope, and cross-customer decisions", () => {

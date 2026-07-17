@@ -336,7 +336,7 @@ function classifyHeuristic(text: string): DigestMemoryType | null {
   if (/(流程|步骤|sop|playbook|workflow|run .*verify|verify .*run|release gate)/i.test(text)) return "workflow";
   if (/(决定|决策|必须|禁止|不能|should|must|decision|decided)/i.test(text)) return "decision";
   if (/(偏好|喜欢|希望|preference|prefer)/i.test(text)) return "preference";
-  if (/(项目|工程|plugin|gateway|openclaw|scope-recall)/i.test(text)) return "project";
+  if (/(项目|工程|plugin|gateway|openclaw|clawlore|scope-recall)/i.test(text)) return "project";
   if (/https?:\/\/|path:|文件|文档|resource/i.test(text)) return "resource";
   if (lowered.includes("case") || lowered.includes("事故") || lowered.includes("复盘")) return "case";
   return null;

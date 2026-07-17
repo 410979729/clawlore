@@ -1,4 +1,4 @@
-import { CLAWLORE_CLI_ALIASES, CLAWLORE_CLI_PRIMARY, CLAWLORE_CONFIG_ROOT, CLAWLORE_LEGACY_PLUGIN_IDS, CLAWLORE_PACKAGE_NAME, CLAWLORE_PLUGIN_ID, CLAWLORE_PRODUCT_NAME, } from "../../product-identity.js";
+import { CLAWLORE_CLI_ALIASES, CLAWLORE_CLI_PRIMARY, CLAWLORE_CONFIG_ROOT, CLAWLORE_LEGACY_CONFIG_ROOTS, CLAWLORE_LEGACY_PLUGIN_IDS, CLAWLORE_PACKAGE_NAME, CLAWLORE_PLUGIN_ID, CLAWLORE_PRODUCT_NAME, } from "../../product-identity.js";
 export const CLAWLORE_COMPATIBILITY_SURFACE_V1 = {
     productBrand: CLAWLORE_PRODUCT_NAME,
     packageName: CLAWLORE_PACKAGE_NAME,
@@ -7,7 +7,7 @@ export const CLAWLORE_COMPATIBILITY_SURFACE_V1 = {
     cliPrimary: CLAWLORE_CLI_PRIMARY,
     cliAliases: [...CLAWLORE_CLI_ALIASES],
     legacyPluginIds: [...CLAWLORE_LEGACY_PLUGIN_IDS],
-    legacyConfigRoots: ["plugins.entries.scope-recall-openclaw.config"],
+    legacyConfigRoots: [...CLAWLORE_LEGACY_CONFIG_ROOTS],
     dataDirectoryPolicy: "preserve_existing",
     sourceMetadataPolicy: "preserve_historical",
     compatibilityMajorVersions: 1,

@@ -83,11 +83,12 @@ function detectRiskLevel(evidence, toolNames, goal) {
 }
 function classifyTask(goal, toolNames) {
     const lowered = goal.toLowerCase();
+    const isReleaseTask = containsAny(lowered, ["release", "push", "version", "发布", "推送", "版本"]);
+    if (lowered.includes("clawlore")) {
+        return isReleaseTask ? "clawlore_release_closeout" : "clawlore_quality_check";
+    }
     if (lowered.includes("scope-recall") || lowered.includes("scope_recall")) {
-        if (containsAny(lowered, ["release", "push", "version", "发布", "推送", "版本"])) {
-            return "scope_recall_release_closeout";
-        }
-        return "scope_recall_quality_check";
+        return isReleaseTask ? "scope_recall_release_closeout" : "scope_recall_quality_check";
     }
     if (lowered.includes("openclaw") || lowered.includes("gateway")) {
         return "openclaw_operations";
@@ -108,6 +109,10 @@ function classifyTask(goal, toolNames) {
 }
 function generateTitle(taskClass, goal) {
     switch (taskClass) {
+        case "clawlore_release_closeout":
+            return "ClawLore 发布候选收口经验手册";
+        case "clawlore_quality_check":
+            return "ClawLore 质量检查经验手册";
         case "scope_recall_release_closeout":
             return "scope-recall 发布候选收口经验手册";
         case "scope_recall_quality_check":

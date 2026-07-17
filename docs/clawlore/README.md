@@ -11,6 +11,8 @@ identity is retained only at documented compatibility boundaries.
 
 - `rfc.md`: product and architecture contract.
 - `migration-plan.md`: additive migration, shadow comparison, cutover, and rollback.
+- `clawlore-v1-brand-architecture-refactoring-plan.md`: active canonical-brand,
+  module-boundary, hotspot-decomposition, comment, and verification plan.
 - `project-handoff.md`: current live position, latest completed phase, and next
   controlled boundary.
 - `first-vertical-slice.md`: executable Memory Address V2 slice and acceptance gates.

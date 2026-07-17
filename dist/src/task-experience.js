@@ -242,6 +242,9 @@ function resultReason(result) {
 }
 function classifyTaskExperienceEpisode(goal) {
     const lowered = goal.toLowerCase();
+    if (/claw[-_ ]?lore/.test(lowered))
+        return "clawlore_task";
+    // Persisted Scope Recall task classes remain valid historical compatibility values.
     if (/scope[-_ ]?recall|scoperecall/.test(lowered))
         return "scope_recall_task";
     if (/openclaw|gateway/.test(lowered))

@@ -219,7 +219,7 @@ function classifyHeuristic(text) {
         return "decision";
     if (/(偏好|喜欢|希望|preference|prefer)/i.test(text))
         return "preference";
-    if (/(项目|工程|plugin|gateway|openclaw|scope-recall)/i.test(text))
+    if (/(项目|工程|plugin|gateway|openclaw|clawlore|scope-recall)/i.test(text))
         return "project";
     if (/https?:\/\/|path:|文件|文档|resource/i.test(text))
         return "resource";

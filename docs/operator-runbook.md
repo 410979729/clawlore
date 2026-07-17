@@ -104,7 +104,9 @@ authority, and then recheck diagnostics.
    legacy and canonical plugin copies together because they expose the same
    memory slot and tool contracts.
 4. Move the config entry and memory slot to `clawlore` while preserving its
-   `dbPath`, conservative runtime flags, and `clawloreV2` controls.
+   `dbPath`, conservative runtime flags, and canonical `runtime` controls.
+   Existing `clawloreV2` input is a deprecated migration alias only; do not
+   write both keys unless their normalized values are identical.
 5. Restart once, then run `npm run release:gate` from the clean candidate so
    recursive source/live identity and runtime smoke are checked.
 

@@ -12,6 +12,10 @@ const {
   computeRuntimeReleaseBinding,
 } = jiti(resolve(root, "src/release-provenance.ts"));
 const { buildReleaseReadinessReceipt } = jiti(resolve(root, "src/v2/application/release-readiness.ts"));
+const {
+  CLAWLORE_LEGACY_PLUGIN_IDS,
+  CLAWLORE_PLUGIN_ID,
+} = jiti(resolve(root, "src/product-identity.ts"));
 
 function required(name) {
   const value = process.env[name]?.trim();
@@ -25,7 +29,7 @@ function sha256File(path) {
 
 function pluginConfig(rootConfig) {
   const entries = rootConfig?.plugins?.entries ?? {};
-  const value = entries.clawlore?.config ?? entries["scope-recall-openclaw"]?.config;
+  const value = entries[CLAWLORE_PLUGIN_ID]?.config ?? entries[CLAWLORE_LEGACY_PLUGIN_IDS[0]]?.config;
   if (!value) throw new Error("ClawLore plugin config is missing from OpenClaw config");
   return parsePluginConfig(value);
 }

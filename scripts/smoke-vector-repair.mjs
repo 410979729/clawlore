@@ -18,7 +18,7 @@ function assert(condition, message) {
   }
 }
 
-const dbPath = await mkdtemp(join(tmpdir(), "scope-recall-vector-repair-"));
+const dbPath = await mkdtemp(join(tmpdir(), "clawlore-vector-repair-"));
 let store;
 
 try {
