@@ -1,8 +1,8 @@
 # ClawLore v1 project handoff
 
 Current through Phase 9, H1-H5 production hardening, the R1 canonical identity
-transition, the seventh independent review, and the eighth independent
-read-only review plus focused closure through 2026-07-16.
+transition, the seventh and eighth independent reviews, and R2 brand/
+architecture bundle 1 through 2026-07-17.
 
 ## Canonical identity candidate
 
@@ -318,6 +318,35 @@ remains conditional on the real Windows gate and owned-test-root cleanup.
 Repository creation/rename and push follow only after those external gates and
 a separate release decision.
 
+## R2 brand and architecture bundle 1
+
+Source commit `f7aaf4e0db79c8ebbbc6214bc935317dd0f2cf74` establishes
+`runtime` as the canonical ClawLore runtime configuration, retains
+`clawloreV2` only as a deprecated conflict-checked alias, replaces current
+`clawlore-v2:` log prefixes, and makes new Experience classifications
+ClawLore-first without rewriting old persisted values.
+
+The new source-governance gate classifies 174 production TypeScript entries,
+sets exact non-growth ceilings on 17 existing hotspots, caps new TypeScript
+modules at 800 lines, and confines legacy brand spellings to a non-growth
+compatibility ledger. The detailed execution plan is
+`clawlore-v1-brand-architecture-refactoring-plan.md`.
+
+Evidence commit `0165239251610f3f8b27fad7128fb6f7753029a5` passed both
+evidence-write and normal-mode Linux source gates: 390 total / 388 passed / 0
+failed / two platform-condition skips, typecheck, build, vector repair,
+124/124 recall, 200,000-row FTS, official-registry vulnerabilities 0,
+42-component SBOM, 187-file pack, and all three packed smokes. Release-input
+identity is
+`5ecf31d547f7936a5bdee3d349a056470fea15b6c89e193372f2935b31e506fd`
+across 563 inputs; runtime identity is
+`363f87ce789c0e7b9ad967d7a8b9b48723d33651e12204532e96a00c022b2dd6`.
+
+This bundle did not touch live configuration, extension files, database state,
+Gateway service state, repository remotes, or the Windows work computer. The
+full architecture program and cross-platform/review gates remain open. See
+`eval/clawlore-v1-brand-architecture-refactoring-bundle1-run-2026-07-17.md`.
+
 ## Current live boundary
 
 The 2026-07-14 H5 artifact remains the deployed runtime under the legacy plugin
@@ -347,11 +376,14 @@ not an implied approval to switch later without fresh evidence.
 
 ## Next controlled boundary
 
-1. When the authorized work computer is stably reachable, run exact
-   `df0f80e3105bc6101a6fd78d0eb11a49983390cf` through the Windows Node 24
-   source gate, then remove and verify absence of only the clearly owned audit
-   roots.
-2. If the external Windows gates pass, create or rename the GitHub repository to `clawlore`,
-   verify the destination, then update `origin` and push the audited commit.
-3. Treat any live identity migration as a separate backup-backed rollout with
+1. Add an executable non-growth ledger for migration-era reverse dependencies,
+   then extract the next characterized configuration/composition slice from
+   `index.ts` without mixing in a live rollout.
+2. At the next release-candidate boundary, run the exact candidate through the
+   Windows Node 24 source gate, then remove and verify absence of only the
+   clearly owned audit roots.
+3. Obtain independent review before repository publication. If accepted,
+   create or rename the GitHub repository to `clawlore`, verify the destination,
+   then update `origin` and push the audited commit.
+4. Treat any live identity migration as a separate backup-backed rollout with
    an atomic config/extension switch, post-restart gates, and rollback evidence.

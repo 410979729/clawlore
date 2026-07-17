@@ -17,6 +17,8 @@ Detailed plan:
       and prevent unexplained new Scope Recall branding in source.
 - [x] Classify every production TypeScript module and add executable non-growth
       budgets for all current hotspots plus an 800-line ceiling for new files.
+- [x] Pass bundle-1 focused tests, full Node 24 Linux regression, evidence-write
+      source gate, and normal-mode evidence verification on clean commits.
 - [ ] Extend inward dependency-direction enforcement from `src/v2` to the
       migration-era root modules, with explicit debt exceptions that can only
       shrink.
