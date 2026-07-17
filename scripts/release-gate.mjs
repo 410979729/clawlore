@@ -13,7 +13,7 @@ import {
   ALLOWED_PLATFORM_VARIANCE,
   stableReleaseEvidenceMatches,
 } from "./release-evidence-contract.mjs";
-import { releaseInputIdentity } from "./release-input-identity.mjs";
+import { committedGitBlobSha256, releaseInputIdentity } from "./release-input-identity.mjs";
 import { assertReleaseSourceState } from "./release-source-state.mjs";
 
 async function exists(path) {
@@ -492,6 +492,7 @@ if (!sourceOnly && !(await exists(extensionDir))) {
 }
 
 const diffPathspec = gitRoot === sourceRoot ? "." : relative(gitRoot, sourceRoot);
+const packageLockGitPath = relative(gitRoot, resolve(sourceRoot, "package-lock.json")).replaceAll("\\", "/");
 run("git", ["diff", "--check", "--", diffPathspec || "."]);
 run("node", ["scripts/dependency-preflight.mjs"]);
 run("npm", ["test"]);
@@ -748,7 +749,7 @@ const releaseEvidence = {
   sourceOnly,
   dirty: gitDirty,
   packFileCount: packFiles.length,
-  packageLockSha256: createHash("sha256").update(await readFile("package-lock.json")).digest("hex"),
+  packageLockSha256: committedGitBlobSha256({ gitRoot, path: packageLockGitPath }),
   sbom: {
     format: sbom.bomFormat,
     specVersion: sbom.specVersion,

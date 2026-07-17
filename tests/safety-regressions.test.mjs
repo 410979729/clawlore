@@ -680,6 +680,7 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   assert.match(gate, /packedOpenClawCliSmoke: true/);
   assert.match(gate, /clawlore\.release-evidence\.v2/);
   assert.match(gate, /packageLockSha256/);
+  assert.match(gate, /committedGitBlobSha256/);
   assert.match(gate, /releaseInputIdentity/);
   assert.match(gate, /checked-in release evidence does not match current release inputs/);
   assert.match(gate, /stableReleaseEvidenceMatches/);

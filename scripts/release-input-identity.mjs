@@ -34,6 +34,18 @@ function readGitBlob(gitRoot, objectId) {
   return result.stdout;
 }
 
+export function committedGitBlobSha256({ gitRoot, path }) {
+  const gitPath = String(path ?? "").replaceAll("\\", "/").replace(/^\.\//, "");
+  if (!gitPath || gitPath.startsWith("../") || gitPath.includes("/../")) {
+    throw new Error("release input Git blob path is invalid");
+  }
+  const objectId = runGitText(gitRoot, ["rev-parse", `HEAD:${gitPath}`]).trim();
+  if (!/^[0-9a-f]{40,64}$/i.test(objectId)) {
+    throw new Error(`release input Git blob is unresolved: ${gitPath}`);
+  }
+  return createHash("sha256").update(readGitBlob(gitRoot, objectId)).digest("hex");
+}
+
 function trackedHeadBlobs(gitRoot, diffPathspec) {
   const raw = runGitText(gitRoot, [
     "ls-tree",
