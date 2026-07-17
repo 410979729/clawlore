@@ -2,7 +2,53 @@
 
 Current through Phase 9, H1-H5 production hardening, the R1 canonical identity
 transition, the seventh and eighth independent reviews, and R2 brand/
-architecture bundle 3 through 2026-07-17.
+architecture bundle 5 through 2026-07-17.
+
+## R2 architecture closure — independent audit entry
+
+The requested brand and architecture convergence has reached the independent
+source-audit boundary. It is not a deployment or release acceptance.
+
+- `index.ts` is a 632-line composition root, down from 4,730 lines. Markdown
+  compatibility, runtime construction, runtime-shadow registration, and five
+  capability hook families have explicit owners.
+- `cli.ts` is a 198-line facade. CLI, memory tools, and Experience tools are
+  split by capability with shared policy and exact public-export regressions.
+- `MemoryStore` is a compatibility facade over explicit truth, retrieval,
+  projection, and transaction ports. The existing transaction implementation
+  and its fault/authority/privacy tests remain intact.
+- Stable current-product application and OpenClaw adapter modules use canonical
+  roots. Old `src/v2` capability paths are pure deprecated re-exports; actual
+  persisted/schema/protocol V1/V2 names remain versioned.
+- The reverse-dependency ledger shrank from 45 to 44 edges. New production
+  modules remain below 800 lines; inherited hotspots are exact shrink-only debt,
+  not falsely declared eliminated.
+
+Audit documents:
+
+- `architecture-module-map-v1.md`;
+- `compatibility-removal-ledger-v1.md`;
+- `comment-contract-audit-v1.md`;
+- `eval/clawlore-v1-brand-architecture-refactoring-bundle5-run-2026-07-17.md`.
+
+The evidence-write Linux source gate on exact source candidate `56bce74` passed
+418 total / 416 passed / 0 failed / 2 platform skips, strict typecheck/build,
+vector repair, 124/124 deterministic recall, the 200,000-row FTS baseline,
+all three packed smokes, 42-component SBOM, a 239-file package scan, and zero
+official-registry vulnerabilities. Release-input identity is
+`6f7edcc2692f8e718b3e0bda6682975a408641ea4354f8ce528af79cef908e27`
+across 680 tracked inputs; runtime identity is
+`40d827230c0d2e7c48fbe364228eaf69739a75862acb983bfb24a8c3e3cbeb69`.
+
+The release gate itself exposed two split-boundary defects before passing: it
+still inspected only monolithic `cli.ts`, and compiled version lookup retained
+the old relative depth. Commits `961d2e6` and `56bce74` fix and regress both.
+Neither failed run is represented as acceptance evidence.
+
+Remaining Phase H gates are the exact real-Windows Node 24 run, cleanup of the
+owned Windows audit roots when that client is reachable, and independent
+source review. No live extension/config/data was changed; release and rollout
+remain NO-GO.
 
 ## Canonical identity candidate
 

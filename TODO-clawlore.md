@@ -22,7 +22,7 @@ Detailed plan:
 - [x] Extend inward dependency-direction enforcement from `src/v2` to the
       migration-era root modules, with explicit debt exceptions that can only
       shrink.
-- [ ] Extract configuration, reflection, capture, Markdown retrieval, runtime
+- [x] Extract configuration, reflection, capture, Markdown retrieval, runtime
       construction, and hook registration from `index.ts` under characterization
       tests; target entry point is at most 800 lines.
   - [x] Bundle 2: extract the validated plugin-config contract/parser with
@@ -34,17 +34,19 @@ Detailed plan:
         ingress/history conversation state; reduce `index.ts` from 3,336 to
         3,105 lines and prevent repeated identical agent-end snapshots from
         selecting the full history again.
-  - [ ] Extract Markdown compatibility retrieval, runtime construction, and
+  - [x] Extract Markdown compatibility retrieval, runtime construction, and
         capability hook registrars.
-- [ ] Split CLI and Agent tools by capability, centralize application policy,
+- [x] Split CLI and Agent tools by capability, centralize application policy,
       and preserve command/tool response contracts.
-- [ ] Reduce `MemoryStore` to a compatibility facade over explicit truth,
+- [x] Reduce `MemoryStore` to a compatibility facade over explicit truth,
       projection, transaction, and retrieval ports.
-- [ ] Converge stable `src/v2` modules into canonical non-versioned roots one
+- [x] Converge stable `src/v2` modules into canonical non-versioned roots one
       capability at a time; preserve actual schema/protocol version names.
-- [ ] Complete public-contract and security/transaction comment audit.
-- [ ] Pass focused/full Linux gates, exact Windows Node 24 gate, package smokes,
-      and independent review before any live identity rollout.
+- [x] Complete public-contract and security/transaction comment audit.
+- [x] Pass focused/full Linux gates and all three Linux package smokes on the
+      architecture-closure candidate.
+- [ ] Pass the exact Windows Node 24 gate and independent review before any
+      live identity rollout.
 
 Bundle-2 Linux verification: 43/43 focused tests; evidence-write and normal-mode
 source gates each passed 395 total / 393 passed / 0 failed / 2 platform skips,
@@ -69,6 +71,20 @@ smokes, 42-component SBOM, 194-file pack scan, and official-registry
 vulnerabilities 0. Release-input identity `3cbe4c38…` across 584 tracked inputs
 and runtime identity `e25fbe07…` matched exactly; bundle 4 is closed. Exact
 Windows and independent-review gates remain open.
+
+Bundle-5 architecture closure is source-audit ready. Code candidate `d50fd4e`
+reduces `index.ts` to 632 lines and `cli.ts` to 198 lines, splits memory and
+Experience tools by capability, adds explicit store ports/facade, moves stable
+current-product application/OpenClaw adapters to canonical roots, and shrinks
+the reverse-dependency debt ledger from 45 to 44 edges. Release-gate follow-up
+commits `961d2e6` and `56bce74` make the gate inspect split CLI modules and
+resolve the package version from both source and compiled layouts. The final
+evidence-write Linux gate passed 418 total / 416 passed / 0 failed / 2 platform
+skips, typecheck, build, vector repair, 124/124 recall, 200,000-row FTS, three
+packed smokes, 42-component SBOM, 239-file pack scan, and official-registry
+vulnerabilities 0. Release-input identity is `6f7edcc2…` across 680 tracked
+inputs; runtime identity is `40d82723…`. Exact Windows and independent review
+remain open, so release/live status remains NO-GO.
 
 ## R1 — Canonical ClawLore identity candidate
 
