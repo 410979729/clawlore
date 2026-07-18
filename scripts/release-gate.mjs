@@ -85,6 +85,19 @@ function parseJsonWithPreamble(raw, label) {
   }
 }
 
+function isDeepSubset(expected, actual) {
+  if (Array.isArray(expected)) {
+    return Array.isArray(actual) &&
+      expected.length === actual.length &&
+      expected.every((value, index) => isDeepSubset(value, actual[index]));
+  }
+  if (expected && typeof expected === "object") {
+    return actual && typeof actual === "object" && !Array.isArray(actual) &&
+      Object.entries(expected).every(([key, value]) => isDeepSubset(value, actual[key]));
+  }
+  return Object.is(expected, actual);
+}
+
 function changelogSection(changelog, version) {
   const marker = `## ${version}`;
   const start = changelog.indexOf(marker);
@@ -773,8 +786,12 @@ try {
     ),
     "legacy-migrated effective ClawLore config",
   );
+  const migratedSourceConfig = JSON.parse(await readFile(legacyConfigPath, "utf8"));
+  const expectedLegacyConfig = migratedSourceConfig.plugins?.entries?.clawlore?.config;
   if (
-    Object.keys(effectiveLegacyConfig).length !== 30 ||
+    !expectedLegacyConfig ||
+    Object.keys(expectedLegacyConfig).length !== 30 ||
+    !isDeepSubset(expectedLegacyConfig, effectiveLegacyConfig) ||
     effectiveLegacyConfig.dbPath !== legacyDbPath ||
     effectiveLegacyConfig.llm?.apiKey?.source !== "env" ||
     effectiveLegacyConfig.llm?.apiKey?.provider !== "default" ||

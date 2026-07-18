@@ -697,6 +697,7 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   assert.match(gate, /packedRuntimeSmoke: true/);
   assert.match(gate, /installed-tarball OpenClaw inspect/);
   assert.match(gate, /legacy-migrated effective ClawLore config/);
+  assert.match(gate, /isDeepSubset\(expectedLegacyConfig, effectiveLegacyConfig\)/);
   assert.match(gate, /migrated legacy identity doctor did not report ok=true/);
   assert.match(gate, /packedOpenClawCliSmoke: true/);
   assert.match(gate, /clawlore\.release-evidence\.v2/);
