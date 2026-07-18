@@ -64,3 +64,33 @@ test("release input identity uses committed Git blobs instead of platform workin
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("package-lock stays byte-identical in a core.autocrlf=true checkout", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clawlore-lock-eol-"));
+  const source = join(root, "source");
+  const checkout = join(root, "checkout");
+  try {
+    await mkdir(source, { recursive: true });
+    git(source, ["init", "--quiet"]);
+    git(source, ["config", "user.name", "ClawLore Test"]);
+    git(source, ["config", "user.email", "clawlore-test@example.invalid"]);
+    git(source, ["config", "core.autocrlf", "false"]);
+    await writeFile(
+      join(source, ".gitattributes"),
+      await readFile(new URL("../.gitattributes", import.meta.url), "utf8"),
+      "utf8",
+    );
+    await writeFile(join(source, "package-lock.json"), "{\n  \"lockfileVersion\": 3\n}\n", "utf8");
+    git(source, ["add", "."]);
+    git(source, ["commit", "--quiet", "-m", "fixture"]);
+    const committedLock = committedGitBlobSha256({ gitRoot: source, path: "package-lock.json" });
+
+    git(root, ["-c", "core.autocrlf=true", "clone", "--quiet", source, checkout]);
+    const workingLock = await readFile(join(checkout, "package-lock.json"));
+    assert.equal(workingLock.includes(Buffer.from("\r\n")), false);
+    assert.equal(createHash("sha256").update(workingLock).digest("hex"), committedLock);
+    assert.equal(git(checkout, ["-c", "core.autocrlf=true", "status", "--porcelain"]), "");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

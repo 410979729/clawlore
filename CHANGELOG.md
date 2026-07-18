@@ -63,6 +63,9 @@ No changes yet.
 - Added a packed real-OpenClaw legacy migration gate that verifies the full
   30-key config, `dbPath`, SecretRef, activation, and doctor result survive host
   normalization without a second legacy entry.
+- Forced `package-lock.json` to LF on every checkout and made the release gate
+  reject working-tree bytes that differ from the committed Git blob, closing
+  the Windows `core.autocrlf=true` evidence gap instead of merely hashing around it.
 
 - Added Tianji's independent Scope Recall roadmap, documenting that the
   OpenClaw plugin may borrow from Yuheng/Hermes without remaining lockstep.

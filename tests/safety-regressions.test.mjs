@@ -705,6 +705,7 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   assert.match(gate, /clawlore\.release-evidence\.v2/);
   assert.match(gate, /packageLockSha256/);
   assert.match(gate, /committedGitBlobSha256/);
+  assert.match(gate, /working-tree package-lock\.json bytes differ from the committed Git blob/);
   assert.match(gate, /releaseInputIdentity/);
   assert.match(gate, /checked-in release evidence does not match current release inputs/);
   assert.match(gate, /stableReleaseEvidenceMatches/);
@@ -728,6 +729,7 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   assert.match(workflow, /npm run release:gate:source/);
   assert.equal(buildConfig.compilerOptions.newLine, "lf");
   assert.match(gitAttributes, /^\/package\.json text eol=lf$/m);
+  assert.match(gitAttributes, /^\/package-lock\.json text eol=lf$/m);
   assert.match(gitAttributes, /^\/openclaw\.plugin\.json text eol=lf$/m);
   assert.match(gitAttributes, /^\/src\/\*\*\/\*\.ts text eol=lf$/m);
   assert.match(gitAttributes, /^\/dist\/\*\.js text eol=lf$/m);

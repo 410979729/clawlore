@@ -509,6 +509,13 @@ if (!sourceOnly && !(await exists(extensionDir))) {
 const diffPathspec = gitRoot === sourceRoot ? "." : relative(gitRoot, sourceRoot);
 const packageLockGitPath = relative(gitRoot, resolve(sourceRoot, "package-lock.json")).replaceAll("\\", "/");
 run("git", ["diff", "--check", "--", diffPathspec || "."]);
+const committedPackageLockSha256 = committedGitBlobSha256({ gitRoot, path: packageLockGitPath });
+const workingPackageLockSha256 = createHash("sha256")
+  .update(await readFile(resolve(sourceRoot, "package-lock.json")))
+  .digest("hex");
+if (workingPackageLockSha256 !== committedPackageLockSha256) {
+  throw new Error("release gate failed: working-tree package-lock.json bytes differ from the committed Git blob");
+}
 run("node", ["scripts/dependency-preflight.mjs"]);
 run("npm", ["test"]);
 run("npm", ["run", "typecheck"]);
@@ -855,7 +862,7 @@ const releaseEvidence = {
   sourceOnly,
   dirty: gitDirty,
   packFileCount: packFiles.length,
-  packageLockSha256: committedGitBlobSha256({ gitRoot, path: packageLockGitPath }),
+  packageLockSha256: committedPackageLockSha256,
   sbom: {
     format: sbom.bomFormat,
     specVersion: sbom.specVersion,
