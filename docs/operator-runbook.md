@@ -107,6 +107,11 @@ authority, and then recheck diagnostics.
    `dbPath`, conservative runtime flags, and canonical `runtime` controls.
    Existing `clawloreV2` input is a deprecated migration alias only; do not
    write both keys unless their normalized values are identical.
+   Auth commands now perform this identity move as one complete config
+   migration when only the legacy entry exists. If canonical and legacy entries
+   both exist with different contents, they stop without writing. OAuth login
+   also refuses plaintext API-key backup material, and logout commits the
+   restored config before deleting OAuth files.
 5. Restart once, then run `npm run release:gate` from the clean candidate so
    recursive source/live identity and runtime smoke are checked.
 

@@ -1,16 +1,12 @@
 /**
  * CLI Commands for Memory Management
  */
-import JSON5 from "json5";
-import { existsSync, readFileSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import path from "node:path";
+import { readFileSync } from "node:fs";
 import * as readline from "node:readline";
 import { redactDigestReportForDiagnostics, redactDigestRunForDiagnostics, } from "../diagnostics-redaction.js";
 import { digestReport } from "../digest-pipeline.js";
 import { getDefaultOauthModelForProvider, isOauthModelSupported, listOAuthProviders, normalizeOAuthProviderId } from "../llm-oauth.js";
-import { CLAWLORE_LEGACY_DEFAULTS } from "../product-identity.js";
+export * from "./auth-config-transaction.js";
 // ============================================================================
 // Utility Functions
 // ============================================================================
@@ -33,125 +29,6 @@ export function getPluginVersion() {
 export function clampInt(value, min, max) {
     const n = Number.isFinite(value) ? value : min;
     return Math.max(min, Math.min(max, Math.trunc(n)));
-}
-export function resolveOpenClawConfigPath(explicit) {
-    const openclawHome = resolveOpenClawHome();
-    if (explicit && explicit.trim()) {
-        return path.resolve(explicit.trim());
-    }
-    const fromEnv = process.env.OPENCLAW_CONFIG_PATH?.trim();
-    if (fromEnv) {
-        return path.resolve(fromEnv);
-    }
-    return path.join(openclawHome, "openclaw.json");
-}
-export function resolveOpenClawHome() {
-    return process.env.OPENCLAW_HOME?.trim()
-        ? path.resolve(process.env.OPENCLAW_HOME.trim())
-        : path.join(homedir(), ".openclaw");
-}
-export function resolveDefaultOauthPath() {
-    const home = resolveOpenClawHome();
-    const canonical = path.join(home, ".clawlore", "oauth.json");
-    const legacy = path.join(home, CLAWLORE_LEGACY_DEFAULTS.oauthDirectoryName, "oauth.json");
-    return !existsSync(canonical) && existsSync(legacy) ? legacy : canonical;
-}
-export function resolveLoginOauthPath(rawPath) {
-    const trimmed = typeof rawPath === "string" ? rawPath.trim() : "";
-    const candidate = trimmed || resolveDefaultOauthPath();
-    return path.resolve(candidate);
-}
-export function resolveConfiguredOauthPath(configPath, rawPath) {
-    const trimmed = typeof rawPath === "string" ? rawPath.trim() : "";
-    if (!trimmed) {
-        return resolveDefaultOauthPath();
-    }
-    if (path.isAbsolute(trimmed)) {
-        return trimmed;
-    }
-    return path.resolve(path.dirname(configPath), trimmed);
-}
-export function isPlainObject(value) {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-export function isOauthLlmConfig(value) {
-    return isPlainObject(value) && value.auth === "oauth";
-}
-export function extractRestorableApiKeyLlmConfig(value) {
-    if (!isPlainObject(value)) {
-        return {};
-    }
-    const result = {};
-    if (value.auth === "api-key") {
-        result.auth = "api-key";
-    }
-    if (typeof value.model === "string") {
-        result.model = value.model;
-    }
-    if (typeof value.baseURL === "string") {
-        result.baseURL = value.baseURL;
-    }
-    if (typeof value.timeoutMs === "number" && Number.isFinite(value.timeoutMs) && value.timeoutMs > 0) {
-        result.timeoutMs = Math.trunc(value.timeoutMs);
-    }
-    return result;
-}
-export function extractOauthSafeLlmConfig(value) {
-    if (!isPlainObject(value)) {
-        return {};
-    }
-    const result = {};
-    if (typeof value.baseURL === "string") {
-        result.baseURL = value.baseURL;
-    }
-    if (typeof value.timeoutMs === "number" && Number.isFinite(value.timeoutMs) && value.timeoutMs > 0) {
-        result.timeoutMs = Math.trunc(value.timeoutMs);
-    }
-    return result;
-}
-export function hasRestorableApiKeyLlmConfig(value) {
-    return Object.keys(value).length > 0;
-}
-export function buildLogoutFallbackLlmConfig(value) {
-    if (isOauthLlmConfig(value)) {
-        return extractOauthSafeLlmConfig(value);
-    }
-    return extractRestorableApiKeyLlmConfig(value);
-}
-export function getOauthBackupPath(oauthPath) {
-    const parsed = path.parse(oauthPath);
-    const fileName = parsed.ext
-        ? `${parsed.name}.llm-backup${parsed.ext}`
-        : `${parsed.base}.llm-backup.json`;
-    return path.join(parsed.dir, fileName);
-}
-export async function saveOauthLlmBackup(oauthPath, llm, hadLlmConfig) {
-    const backupPath = getOauthBackupPath(oauthPath);
-    const payload = {
-        version: 1,
-        hadLlmConfig,
-        llm: extractRestorableApiKeyLlmConfig(llm),
-    };
-    await mkdir(path.dirname(backupPath), { recursive: true });
-    await writeFile(backupPath, JSON.stringify(payload, null, 2) + "\n", "utf8");
-}
-export async function loadOauthLlmBackup(oauthPath) {
-    const backupPath = getOauthBackupPath(oauthPath);
-    try {
-        const raw = await readFile(backupPath, "utf8");
-        const parsed = JSON.parse(raw);
-        if (!isPlainObject(parsed) || parsed.version !== 1 || typeof parsed.hadLlmConfig !== "boolean") {
-            return null;
-        }
-        return {
-            version: 1,
-            hadLlmConfig: parsed.hadLlmConfig,
-            llm: extractRestorableApiKeyLlmConfig(parsed.llm),
-        };
-    }
-    catch {
-        return null;
-    }
 }
 export const OAUTH_PROVIDER_CHOICES = listOAuthProviders()
     .map((provider) => `${provider.id} (${provider.label})`)
@@ -269,33 +146,6 @@ export function pickOauthModel(providerId, currentModel, overrideModel) {
         return { model: currentModel.trim(), source: "config" };
     }
     return { model: getDefaultOauthModelForProvider(providerId), source: "default" };
-}
-export async function loadOpenClawConfig(configPath) {
-    const raw = await readFile(configPath, "utf8");
-    const parsed = JSON5.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        throw new Error(`Invalid OpenClaw config at ${configPath}: expected object`);
-    }
-    return parsed;
-}
-export function ensurePluginConfigRoot(config, pluginId) {
-    config.plugins ||= {};
-    config.plugins.entries ||= {};
-    config.plugins.entries[pluginId] ||= { enabled: true, config: {} };
-    const entry = config.plugins.entries[pluginId];
-    entry.enabled = true;
-    entry.config ||= {};
-    return entry.config;
-}
-export function getExistingPluginConfigRoot(config, pluginId) {
-    const plugins = isPlainObject(config.plugins) ? config.plugins : {};
-    const entries = isPlainObject(plugins.entries) ? plugins.entries : {};
-    const entry = isPlainObject(entries[pluginId]) ? entries[pluginId] : {};
-    return isPlainObject(entry.config) ? entry.config : {};
-}
-export async function saveOpenClawConfig(configPath, config) {
-    await mkdir(path.dirname(configPath), { recursive: true });
-    await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", "utf8");
 }
 export function formatMemory(memory, index) {
     const prefix = index !== undefined ? `${index + 1}. ` : "";

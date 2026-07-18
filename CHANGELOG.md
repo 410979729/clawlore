@@ -53,6 +53,16 @@ No changes yet.
   verification and paths containing spaces or non-ASCII text.
 - Made release-gate scripts cross-platform Node entry points, added a packed
   native LanceDB reopen/delete smoke, and enabled strict TypeScript checking.
+- Made API-key-to-OAuth transitions preserve only schema-valid SecretRefs and
+  restore them exactly on logout; plaintext keys now fail before authorization.
+- Made OAuth logout commit and validate a private, backup-backed atomic config
+  replacement before deleting OAuth authority, with fault injection across
+  temp sync, rename, validation, and authority deletion boundaries.
+- Made auth commands migrate a legacy-only plugin entry, allowlist, memory slot,
+  and complete config to `clawlore`, while conflicting dual entries fail closed.
+- Added a packed real-OpenClaw legacy migration gate that verifies the full
+  30-key config, `dbPath`, SecretRef, activation, and doctor result survive host
+  normalization without a second legacy entry.
 
 - Added Tianji's independent Scope Recall roadmap, documenting that the
   OpenClaw plugin may borrow from Yuheng/Hermes without remaining lockstep.

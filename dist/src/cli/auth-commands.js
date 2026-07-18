@@ -1,7 +1,6 @@
 /**
  * CLI Commands for Memory Management
  */
-import { rm } from "node:fs/promises";
 import path from "node:path";
 import { diagnosticErrorSummary } from "../diagnostic-redaction.js";
 import { getDefaultOauthModelForProvider, getOAuthProviderLabel, normalizeOAuthProviderId, normalizeOauthModel, performOAuthLogin } from "../llm-oauth.js";
@@ -9,7 +8,7 @@ import { readOAuthSessionFile } from "../oauth-session-storage.js";
 import { CLAWLORE_PLUGIN_ID } from "../product-identity.js";
 import { inspectLegacyAuthorityMigration, migrateLegacySqlAuthority, } from "../sql-authority-migration.js";
 import { SqlTruthStore } from "../sql-truth-store.js";
-import { OAUTH_PROVIDER_CHOICES, buildLogoutFallbackLlmConfig, clampInt, ensurePluginConfigRoot, extractOauthSafeLlmConfig, getExistingPluginConfigRoot, getOauthBackupPath, getPluginVersion, hasRestorableApiKeyLlmConfig, isOauthLlmConfig, isPlainObject, loadOauthLlmBackup, loadOpenClawConfig, pickOauthModel, resolveConfiguredOauthPath, resolveLoginOauthPath, resolveOauthProviderSelection, resolveOpenClawConfigPath, saveOauthLlmBackup, saveOpenClawConfig, writeJson } from "./cli-runtime-policy.js";
+import { OAUTH_PROVIDER_CHOICES, clampInt, ensurePluginConfigRoot, getExistingPluginConfigRoot, getPluginVersion, isPlainObject, loadOpenClawConfig, performOAuthLogoutConfigTransaction, planOAuthLoginConfig, prepareOAuthLoginBackup, pickOauthModel, resolveConfiguredOauthPath, resolveLoginOauthPath, resolveOauthProviderSelection, resolveOpenClawConfigPath, saveOauthLlmBackup, saveOpenClawConfig, writeJson } from "./cli-runtime-policy.js";
 export function registerAuthCommands(runtime) {
     const { program, memory, context, runSearch, getSqlDbOrThrow, parseScopeFilter, parseLimitOption, dryRunFromApplyOptions, loadKnowledgeDocs, hasTables, requireExperienceTables, } = runtime;
     // Version
@@ -100,19 +99,33 @@ export function registerAuthCommands(runtime) {
         .action(async (options) => {
         try {
             const pluginId = context.pluginId || CLAWLORE_PLUGIN_ID;
-            const currentLlm = context.pluginConfig?.llm;
-            const currentProvider = currentLlm && typeof currentLlm === "object" && typeof currentLlm.oauthProvider === "string"
-                ? String(currentLlm.oauthProvider)
+            const configPath = resolveOpenClawConfigPath(options.config);
+            const openclawConfig = await loadOpenClawConfig(configPath);
+            const pluginConfig = ensurePluginConfigRoot(openclawConfig, pluginId);
+            const hadLlmConfig = isPlainObject(pluginConfig.llm);
+            const existingLlm = hadLlmConfig ? { ...pluginConfig.llm } : {};
+            const currentProvider = typeof existingLlm.oauthProvider === "string"
+                ? existingLlm.oauthProvider
                 : undefined;
             const selectedProvider = await resolveOauthProviderSelection(currentProvider, options.provider, context.oauthTestHooks?.chooseProvider);
-            const currentModel = currentLlm && typeof currentLlm === "object" && typeof currentLlm.model === "string"
-                ? String(currentLlm.model)
+            const currentModel = typeof existingLlm.model === "string"
+                ? existingLlm.model
                 : undefined;
             const selectedModel = pickOauthModel(selectedProvider.providerId, currentModel, options.model);
             const oauthModel = normalizeOauthModel(selectedModel.model);
-            const configPath = resolveOpenClawConfigPath(options.config);
             const oauthPath = resolveLoginOauthPath(options.oauthPath);
             const timeoutMs = clampInt((parseInt(options.timeout, 10) || 120) * 1000, 15_000, 900_000);
+            const loginPlan = planOAuthLoginConfig({
+                llm: pluginConfig.llm,
+                providerId: selectedProvider.providerId,
+                model: oauthModel,
+                oauthPath,
+            });
+            const loginBackupPlan = await prepareOAuthLoginBackup({
+                configPath,
+                targetOauthPath: oauthPath,
+                loginPlan,
+            });
             if (selectedModel.source === "default" && currentModel && currentModel.trim()) {
                 console.log(`Configured llm.model "${currentModel}" is not supported by provider ${selectedProvider.providerId}. Falling back to ${getDefaultOauthModelForProvider(selectedProvider.providerId)}.`);
             }
@@ -132,25 +145,10 @@ export function registerAuthCommands(runtime) {
                     await context.oauthTestHooks?.authorizeUrl?.(url);
                 },
             });
-            const openclawConfig = await loadOpenClawConfig(configPath);
-            const pluginConfig = ensurePluginConfigRoot(openclawConfig, pluginId);
-            const hadLlmConfig = isPlainObject(pluginConfig.llm);
-            const existingLlm = hadLlmConfig ? { ...pluginConfig.llm } : {};
-            const wasOauthMode = isOauthLlmConfig(existingLlm);
-            if (!wasOauthMode) {
-                await saveOauthLlmBackup(oauthPath, pluginConfig.llm, hadLlmConfig);
+            if (loginBackupPlan.writeBackup) {
+                await saveOauthLlmBackup(oauthPath, loginBackupPlan.llm, loginBackupPlan.hadLlmConfig);
             }
-            const nextLlm = wasOauthMode ? { ...existingLlm } : extractOauthSafeLlmConfig(existingLlm);
-            if (!wasOauthMode) {
-                delete nextLlm.baseURL;
-            }
-            pluginConfig.llm = {
-                ...nextLlm,
-                auth: "oauth",
-                oauthProvider: selectedProvider.providerId,
-                model: oauthModel,
-                oauthPath,
-            };
+            pluginConfig.llm = loginPlan.nextLlm;
             await saveOpenClawConfig(configPath, openclawConfig);
             console.log(`OAuth login completed for account ${session.accountId}.`);
             console.log(`Updated ${pluginId} config: llm.auth=oauth, llm.oauthProvider=${selectedProvider.providerId}, llm.oauthPath=${oauthPath}, llm.model=${oauthModel}`);
@@ -212,35 +210,12 @@ export function registerAuthCommands(runtime) {
         try {
             const pluginId = context.pluginId || CLAWLORE_PLUGIN_ID;
             const configPath = resolveOpenClawConfigPath(options.config);
-            const openclawConfig = await loadOpenClawConfig(configPath);
-            const pluginConfig = ensurePluginConfigRoot(openclawConfig, pluginId);
-            const llm = typeof pluginConfig.llm === "object" && pluginConfig.llm ? pluginConfig.llm : {};
-            const oauthPath = options.oauthPath && String(options.oauthPath).trim()
-                ? resolveLoginOauthPath(options.oauthPath)
-                : resolveConfiguredOauthPath(configPath, llm.oauthPath);
-            const backupPath = getOauthBackupPath(oauthPath);
-            const backup = await loadOauthLlmBackup(oauthPath);
-            await rm(oauthPath, { force: true });
-            await rm(backupPath, { force: true });
-            if (backup) {
-                if (backup.hadLlmConfig) {
-                    pluginConfig.llm = { ...backup.llm };
-                }
-                else {
-                    delete pluginConfig.llm;
-                }
-            }
-            else {
-                const fallbackLlm = buildLogoutFallbackLlmConfig(llm);
-                if (hasRestorableApiKeyLlmConfig(fallbackLlm)) {
-                    pluginConfig.llm = fallbackLlm;
-                }
-                else {
-                    delete pluginConfig.llm;
-                }
-            }
-            await saveOpenClawConfig(configPath, openclawConfig);
-            console.log(`Deleted OAuth file: ${oauthPath}`);
+            const result = await performOAuthLogoutConfigTransaction({
+                configPath,
+                pluginId,
+                oauthPathOverride: options.oauthPath,
+            });
+            console.log(`Deleted OAuth file: ${result.oauthPath}`);
             console.log(`Updated ${pluginId} config: llm.auth=api-key`);
         }
         catch (error) {

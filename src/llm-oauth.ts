@@ -1,10 +1,10 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
-import { lstat, open, rename, rm } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { lstat } from "node:fs/promises";
+import { resolve } from "node:path";
 import { readOAuthSessionFile } from "./oauth-session-storage.js";
 import { diagnosticErrorSummary, diagnosticIdentifier } from "./diagnostic-redaction.js";
-import { enforcePrivatePath, ensurePrivateDirectory } from "./file-privacy.js";
+import { writePrivateFileAtomic } from "./file-privacy.js";
 
 export interface OAuthLoginOptions {
   authPath: string;
@@ -521,23 +521,11 @@ async function assertOAuthTargetIsNotSymlink(authPath: string): Promise<void> {
   }
 }
 
-async function syncOAuthParentDirectory(directory: string): Promise<void> {
-  if (process.platform === "win32") return;
-  const handle = await open(directory, "r");
-  try {
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-}
-
 async function saveOAuthSessionUnlocked(
   authPath: string,
   session: OAuthSession,
   hooks: OAuthSessionWriteHooks = {},
 ): Promise<void> {
-  const directory = dirname(authPath);
-  ensurePrivateDirectory(directory);
   await assertOAuthTargetIsNotSymlink(authPath);
   const payload: Record<string, unknown> = {
     provider: session.providerId,
@@ -551,36 +539,7 @@ async function saveOAuthSessionUnlocked(
     payload[OAUTH_WIRE_REFRESH_FIELD] = session.refreshToken;
   }
   const serialized = JSON.stringify(payload, null, 2) + "\n";
-  const temporaryPath = join(
-    directory,
-    `.${basename(authPath)}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`,
-  );
-  let renamed = false;
-  try {
-    const handle = await open(temporaryPath, "wx", 0o600);
-    try {
-      await handle.writeFile(serialized, { encoding: "utf8" });
-      if (process.platform !== "win32") {
-        await handle.chmod(0o600);
-      }
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-    enforcePrivatePath(temporaryPath, { kind: "file" });
-    await hooks.beforeRename?.();
-    await assertOAuthTargetIsNotSymlink(authPath);
-    await rename(temporaryPath, authPath);
-    renamed = true;
-    await hooks.afterRename?.();
-    enforcePrivatePath(authPath, { kind: "file" });
-    await hooks.beforeDirectorySync?.();
-    await syncOAuthParentDirectory(directory);
-  } finally {
-    if (!renamed) {
-      await rm(temporaryPath, { force: true }).catch(() => undefined);
-    }
-  }
+  await writePrivateFileAtomic(authPath, serialized, hooks);
 }
 
 export async function saveOAuthSession(

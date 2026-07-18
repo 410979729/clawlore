@@ -3,11 +3,7 @@
  */
 
 import type { Command } from "commander";
-import JSON5 from "json5";
-import { existsSync, readFileSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import path from "node:path";
+import { readFileSync } from "node:fs";
 import * as readline from "node:readline";
 import {
   redactDigestReportForDiagnostics,
@@ -27,11 +23,10 @@ import {
   normalizeOAuthProviderId
 } from "../llm-oauth.js";
 import type { MemoryMigrator } from "../migrate.js";
-import {
-  CLAWLORE_LEGACY_DEFAULTS
-} from "../product-identity.js";
 import { type MemoryRetriever } from "../retriever.js";
 import { type MemoryStore } from "../store.js";
+
+export * from "./auth-config-transaction.js";
 
 export type DatabaseSync = any;
 
@@ -90,155 +85,6 @@ export function getPluginVersion(): string {
 export function clampInt(value: number, min: number, max: number): number {
   const n = Number.isFinite(value) ? value : min;
   return Math.max(min, Math.min(max, Math.trunc(n)));
-}
-
-export function resolveOpenClawConfigPath(explicit?: string): string {
-  const openclawHome = resolveOpenClawHome();
-  if (explicit && explicit.trim()) {
-    return path.resolve(explicit.trim());
-  }
-
-  const fromEnv = process.env.OPENCLAW_CONFIG_PATH?.trim();
-  if (fromEnv) {
-    return path.resolve(fromEnv);
-  }
-
-  return path.join(openclawHome, "openclaw.json");
-}
-
-export function resolveOpenClawHome(): string {
-  return process.env.OPENCLAW_HOME?.trim()
-    ? path.resolve(process.env.OPENCLAW_HOME.trim())
-    : path.join(homedir(), ".openclaw");
-}
-
-export function resolveDefaultOauthPath(): string {
-  const home = resolveOpenClawHome();
-  const canonical = path.join(home, ".clawlore", "oauth.json");
-  const legacy = path.join(home, CLAWLORE_LEGACY_DEFAULTS.oauthDirectoryName, "oauth.json");
-  return !existsSync(canonical) && existsSync(legacy) ? legacy : canonical;
-}
-
-export function resolveLoginOauthPath(rawPath: unknown): string {
-  const trimmed = typeof rawPath === "string" ? rawPath.trim() : "";
-  const candidate = trimmed || resolveDefaultOauthPath();
-  return path.resolve(candidate);
-}
-
-export function resolveConfiguredOauthPath(configPath: string, rawPath: unknown): string {
-  const trimmed = typeof rawPath === "string" ? rawPath.trim() : "";
-  if (!trimmed) {
-    return resolveDefaultOauthPath();
-  }
-  if (path.isAbsolute(trimmed)) {
-    return trimmed;
-  }
-  return path.resolve(path.dirname(configPath), trimmed);
-}
-
-type RestorableApiKeyLlmConfig = {
-  auth?: "api-key";
-  model?: string;
-  baseURL?: string;
-  timeoutMs?: number;
-};
-
-type OAuthLlmBackup = {
-  version: 1;
-  hadLlmConfig: boolean;
-  llm: RestorableApiKeyLlmConfig;
-};
-
-export function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-export function isOauthLlmConfig(value: unknown): boolean {
-  return isPlainObject(value) && value.auth === "oauth";
-}
-
-export function extractRestorableApiKeyLlmConfig(value: unknown): RestorableApiKeyLlmConfig {
-  if (!isPlainObject(value)) {
-    return {};
-  }
-
-  const result: RestorableApiKeyLlmConfig = {};
-  if (value.auth === "api-key") {
-    result.auth = "api-key";
-  }
-  if (typeof value.model === "string") {
-    result.model = value.model;
-  }
-  if (typeof value.baseURL === "string") {
-    result.baseURL = value.baseURL;
-  }
-  if (typeof value.timeoutMs === "number" && Number.isFinite(value.timeoutMs) && value.timeoutMs > 0) {
-    result.timeoutMs = Math.trunc(value.timeoutMs);
-  }
-  return result;
-}
-
-export function extractOauthSafeLlmConfig(value: unknown): RestorableApiKeyLlmConfig {
-  if (!isPlainObject(value)) {
-    return {};
-  }
-
-  const result: RestorableApiKeyLlmConfig = {};
-  if (typeof value.baseURL === "string") {
-    result.baseURL = value.baseURL;
-  }
-  if (typeof value.timeoutMs === "number" && Number.isFinite(value.timeoutMs) && value.timeoutMs > 0) {
-    result.timeoutMs = Math.trunc(value.timeoutMs);
-  }
-  return result;
-}
-
-export function hasRestorableApiKeyLlmConfig(value: RestorableApiKeyLlmConfig): boolean {
-  return Object.keys(value).length > 0;
-}
-
-export function buildLogoutFallbackLlmConfig(value: unknown): RestorableApiKeyLlmConfig {
-  if (isOauthLlmConfig(value)) {
-    return extractOauthSafeLlmConfig(value);
-  }
-  return extractRestorableApiKeyLlmConfig(value);
-}
-
-export function getOauthBackupPath(oauthPath: string): string {
-  const parsed = path.parse(oauthPath);
-  const fileName = parsed.ext
-    ? `${parsed.name}.llm-backup${parsed.ext}`
-    : `${parsed.base}.llm-backup.json`;
-  return path.join(parsed.dir, fileName);
-}
-
-export async function saveOauthLlmBackup(oauthPath: string, llm: unknown, hadLlmConfig: boolean): Promise<void> {
-  const backupPath = getOauthBackupPath(oauthPath);
-  const payload: OAuthLlmBackup = {
-    version: 1,
-    hadLlmConfig,
-    llm: extractRestorableApiKeyLlmConfig(llm),
-  };
-  await mkdir(path.dirname(backupPath), { recursive: true });
-  await writeFile(backupPath, JSON.stringify(payload, null, 2) + "\n", "utf8");
-}
-
-export async function loadOauthLlmBackup(oauthPath: string): Promise<OAuthLlmBackup | null> {
-  const backupPath = getOauthBackupPath(oauthPath);
-  try {
-    const raw = await readFile(backupPath, "utf8");
-    const parsed = JSON.parse(raw);
-    if (!isPlainObject(parsed) || parsed.version !== 1 || typeof parsed.hadLlmConfig !== "boolean") {
-      return null;
-    }
-    return {
-      version: 1,
-      hadLlmConfig: parsed.hadLlmConfig,
-      llm: extractRestorableApiKeyLlmConfig(parsed.llm),
-    };
-  } catch {
-    return null;
-  }
 }
 
 export const OAUTH_PROVIDER_CHOICES = listOAuthProviders()
@@ -394,37 +240,6 @@ export function pickOauthModel(
   }
 
   return { model: getDefaultOauthModelForProvider(providerId), source: "default" };
-}
-
-export async function loadOpenClawConfig(configPath: string): Promise<Record<string, any>> {
-  const raw = await readFile(configPath, "utf8");
-  const parsed = JSON5.parse(raw);
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error(`Invalid OpenClaw config at ${configPath}: expected object`);
-  }
-  return parsed as Record<string, any>;
-}
-
-export function ensurePluginConfigRoot(config: Record<string, any>, pluginId: string): Record<string, any> {
-  config.plugins ||= {};
-  config.plugins.entries ||= {};
-  config.plugins.entries[pluginId] ||= { enabled: true, config: {} };
-  const entry = config.plugins.entries[pluginId];
-  entry.enabled = true;
-  entry.config ||= {};
-  return entry.config as Record<string, any>;
-}
-
-export function getExistingPluginConfigRoot(config: Record<string, any>, pluginId: string): Record<string, unknown> {
-  const plugins = isPlainObject(config.plugins) ? config.plugins : {};
-  const entries = isPlainObject(plugins.entries) ? plugins.entries : {};
-  const entry = isPlainObject(entries[pluginId]) ? entries[pluginId] : {};
-  return isPlainObject(entry.config) ? entry.config : {};
-}
-
-export async function saveOpenClawConfig(configPath: string, config: Record<string, any>): Promise<void> {
-  await mkdir(path.dirname(configPath), { recursive: true });
-  await writeFile(configPath, JSON.stringify(config, null, 2) + "\n", "utf8");
 }
 
 export function formatMemory(memory: any, index?: number): string {

@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { chmodSync, constants, existsSync, lstatSync, mkdirSync, statSync } from "node:fs";
-import { lstat, open } from "node:fs/promises";
-import { dirname } from "node:path";
+import { lstat, open, rename, rm } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 
 type ExecFile = typeof execFileSync;
 
@@ -13,6 +14,14 @@ export interface PrivatePathOptions {
 
 export interface PrivateFileReadOptions extends PrivatePathOptions {
   beforeOpen?: () => void | Promise<void>;
+}
+
+export interface PrivateFileWriteOptions extends PrivatePathOptions {
+  beforeTempSync?: () => void | Promise<void>;
+  afterTempSync?: () => void | Promise<void>;
+  beforeRename?: () => void | Promise<void>;
+  afterRename?: () => void | Promise<void>;
+  beforeDirectorySync?: () => void | Promise<void>;
 }
 
 interface WindowsAclAccessRule {
@@ -402,5 +411,80 @@ export function ensurePrivateDirectory(path: string, options: PrivatePathOptions
   for (const directory of missing.reverse()) {
     mkdirSync(directory, { recursive: false, mode: 0o700 });
     enforcePrivatePath(directory, { ...options, kind: "directory" });
+  }
+}
+
+async function assertPrivateWriteTarget(path: string): Promise<void> {
+  try {
+    const status = await lstat(path);
+    if (status.isSymbolicLink()) {
+      throw new Error("CLAWLORE_PRIVATE_WRITE_TARGET_SYMLINK_REJECTED");
+    }
+    if (!status.isFile()) {
+      throw new Error("CLAWLORE_PRIVATE_WRITE_TARGET_KIND_INVALID");
+    }
+  } catch (error: any) {
+    if (error?.code === "ENOENT") return;
+    throw error;
+  }
+}
+
+async function syncPrivateDirectory(path: string, platform: NodeJS.Platform): Promise<void> {
+  if (platform === "win32") return;
+  const handle = await open(path, "r");
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Atomically replace a private regular file through a same-directory temporary
+ * file. The temporary payload is durable before rename; the target is never
+ * followed through a symlink; and the containing directory is synced after
+ * the rename on POSIX.
+ */
+export async function writePrivateFileAtomic(
+  path: string,
+  contents: string,
+  options: PrivateFileWriteOptions = {},
+): Promise<void> {
+  const platform = options.platform ?? process.platform;
+  const directory = dirname(path);
+  ensurePrivateDirectory(directory, options);
+  await assertPrivateWriteTarget(path);
+
+  const temporary = join(
+    directory,
+    `.${basename(path)}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`,
+  );
+  let renamed = false;
+  try {
+    const handle = await open(temporary, "wx", 0o600);
+    try {
+      await handle.writeFile(contents, { encoding: "utf8" });
+      if (platform !== "win32") {
+        await handle.chmod(0o600);
+      }
+      await options.beforeTempSync?.();
+      await handle.sync();
+      await options.afterTempSync?.();
+    } finally {
+      await handle.close();
+    }
+    enforcePrivatePath(temporary, { ...options, kind: "file" });
+    await options.beforeRename?.();
+    await assertPrivateWriteTarget(path);
+    await rename(temporary, path);
+    renamed = true;
+    await options.afterRename?.();
+    enforcePrivatePath(path, { ...options, kind: "file" });
+    await options.beforeDirectorySync?.();
+    await syncPrivateDirectory(directory, platform);
+  } finally {
+    if (!renamed) {
+      await rm(temporary, { force: true }).catch(() => undefined);
+    }
   }
 }

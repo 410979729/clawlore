@@ -11,6 +11,7 @@ import {
 const CLI_SOURCE_FILES = [
   "../cli.ts",
   "../src/cli/auth-commands.ts",
+  "../src/cli/auth-config-transaction.ts",
   "../src/cli/memory-commands.ts",
   "../src/cli/diagnostic-commands.ts",
   "../src/cli/governance-commands.ts",
@@ -675,6 +676,8 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   assert.match(gate, /CLAWLORE_ALLOW_NESTED_GIT_ROOT/);
   assert.match(gate, /packed-lancedb-smoke\.mjs/);
   assert.equal(packageJson.files.includes("scripts/packed-lancedb-smoke.mjs"), true);
+  assert.match(gate, /packed-legacy-identity-smoke\.mjs/);
+  assert.equal(packageJson.files.includes("scripts/packed-legacy-identity-smoke.mjs"), true);
   assert.match(gate, /SCOPE_RECALL_ALLOW_NESTED_GIT_ROOT/);
   assert.match(gate, /CLAWLORE_SOURCE_ONLY/);
   assert.match(gate, /SCOPE_RECALL_SOURCE_ONLY/);
@@ -693,6 +696,8 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   assert.match(gate, /"npm", \[\s*"install"/);
   assert.match(gate, /packedRuntimeSmoke: true/);
   assert.match(gate, /installed-tarball OpenClaw inspect/);
+  assert.match(gate, /legacy-migrated effective ClawLore config/);
+  assert.match(gate, /migrated legacy identity doctor did not report ok=true/);
   assert.match(gate, /packedOpenClawCliSmoke: true/);
   assert.match(gate, /clawlore\.release-evidence\.v2/);
   assert.match(gate, /packageLockSha256/);
@@ -701,6 +706,7 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   assert.match(gate, /checked-in release evidence does not match current release inputs/);
   assert.match(gate, /stableReleaseEvidenceMatches/);
   assert.match(gate, /CLI_SOURCE_PATHS/);
+  assert.match(gate, /src\/cli\/auth-config-transaction\.ts/);
   assert.match(gate, /src\/cli\/diagnostic-commands\.ts/);
   assert.match(gate, /src\/cli\/experience-commands\.ts/);
   assert.match(gate, /src\/cli\/governance-commands\.ts/);

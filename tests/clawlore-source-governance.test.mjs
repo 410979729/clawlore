@@ -83,7 +83,8 @@ const ROOT_MODULES_BY_LAYER = {
   ],
   operator: [
     "adapters/openclaw/runtime-rollout-control.ts",
-    "cli/auth-commands.ts", "cli/cli-runtime-policy.ts", "cli/diagnostic-commands.ts",
+    "cli/auth-commands.ts", "cli/auth-config-transaction.ts", "cli/cli-runtime-policy.ts",
+    "cli/diagnostic-commands.ts",
     "cli/experience-commands.ts", "cli/governance-commands.ts", "cli/memory-commands.ts",
     "cli/migration-commands.ts", "diagnostic-redaction.ts", "diagnostics-redaction.ts", "migrate.ts",
     "operator-dashboard.ts", "release-provenance.ts", "self-improvement-files.ts",
@@ -206,6 +207,7 @@ const HOTSPOT_LINE_BUDGETS = new Map([
 const LEGACY_BRAND_BUDGETS = new Map([
   ["openclaw.plugin.json", 3],
   ["package.json", 1],
+  ["scripts/packed-legacy-identity-smoke.mjs", 4],
   ["scripts/packed-runtime-smoke.mjs", 1],
   ["scripts/release-gate.mjs", 3],
   ["src/experience-promotion.ts", 1],

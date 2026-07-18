@@ -36,7 +36,8 @@
     "package.json",
     "package-lock.json",
     "scripts/packed-runtime-smoke.mjs",
-    "scripts/packed-lancedb-smoke.mjs"
+    "scripts/packed-lancedb-smoke.mjs",
+    "scripts/packed-legacy-identity-smoke.mjs"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

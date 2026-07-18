@@ -207,6 +207,7 @@ const requiredFiles = [
   "scripts/golden-benchmark.mjs",
   "scripts/packed-runtime-smoke.mjs",
   "scripts/packed-lancedb-smoke.mjs",
+  "scripts/packed-legacy-identity-smoke.mjs",
   "scripts/smoke-vector-repair.mjs",
   releaseScriptContract.evidenceFile,
 ];
@@ -324,6 +325,7 @@ if (!indexSource.includes("registerExperienceTools(") || !indexSource.includes("
 const CLI_SOURCE_PATHS = Object.freeze([
   "cli.ts",
   "src/cli/auth-commands.ts",
+  "src/cli/auth-config-transaction.ts",
   "src/cli/cli-runtime-policy.ts",
   "src/cli/diagnostic-commands.ts",
   "src/cli/experience-commands.ts",
@@ -579,6 +581,7 @@ for (const required of [
   "dist/index.js",
   "scripts/packed-runtime-smoke.mjs",
   "scripts/packed-lancedb-smoke.mjs",
+  "scripts/packed-legacy-identity-smoke.mjs",
   "docs/operator-runbook.md",
   "docs/release-readiness-template.md",
   "benchmarks/experience-replay-cases.json",
@@ -727,6 +730,77 @@ try {
     if (!versionOutput.includes(packageJson.version)) {
       throw new Error(`release gate failed: installed-tarball ${command} version smoke failed`);
     }
+  }
+
+  const legacyState = resolve(packScanRoot, "openclaw-legacy-state");
+  await mkdir(legacyState, { recursive: true });
+  const legacyConfigPath = resolve(legacyState, "openclaw.json");
+  const legacyDbPath = resolve(legacyState, "memory/clawlore");
+  const legacyRuntimeEnv = {
+    ...process.env,
+    OPENCLAW_HOME: legacyState,
+    OPENCLAW_STATE_DIR: legacyState,
+    OPENCLAW_CONFIG_PATH: legacyConfigPath,
+    CLAWLORE_RELEASE_FIXTURE_CREDENTIAL: "fixture-not-a-secret",
+    npm_config_registry: "https://registry.npmjs.org",
+  };
+  runOpenClawCapture(packedOpenClawCli, ["config", "set", "gateway.mode", "local"], { env: legacyRuntimeEnv });
+  runOpenClawCapture(packedOpenClawCli, ["config", "set", "gateway.port", "29998", "--strict-json"], { env: legacyRuntimeEnv });
+  runOpenClawCapture(
+    packedOpenClawCli,
+    ["config", "set", "plugins.entries.clawlore", isolatedPluginEntry, "--strict-json"],
+    { env: legacyRuntimeEnv },
+  );
+  runOpenClawCapture(packedOpenClawCli, ["plugins", "install", tarball], { env: legacyRuntimeEnv });
+  run("node", [
+    resolve(installedRoot, "scripts/packed-legacy-identity-smoke.mjs"),
+    legacyConfigPath,
+    legacyDbPath,
+  ], { cwd: installedRoot, env: legacyRuntimeEnv });
+
+  const legacyValidation = parseJsonWithPreamble(
+    runOpenClawCapture(packedOpenClawCli, ["config", "validate", "--json"], { env: legacyRuntimeEnv }),
+    "legacy-migrated OpenClaw config validation",
+  );
+  if (legacyValidation.valid !== true) {
+    throw new Error("release gate failed: legacy-migrated config did not validate in real OpenClaw");
+  }
+  const effectiveLegacyConfig = parseJsonWithPreamble(
+    runOpenClawCapture(
+      packedOpenClawCli,
+      ["config", "get", "plugins.entries.clawlore.config", "--json"],
+      { env: legacyRuntimeEnv },
+    ),
+    "legacy-migrated effective ClawLore config",
+  );
+  if (
+    Object.keys(effectiveLegacyConfig).length !== 30 ||
+    effectiveLegacyConfig.dbPath !== legacyDbPath ||
+    effectiveLegacyConfig.llm?.apiKey?.source !== "env" ||
+    effectiveLegacyConfig.llm?.apiKey?.provider !== "default" ||
+    effectiveLegacyConfig.llm?.apiKey?.id !== "CLAWLORE_RELEASE_FIXTURE_CREDENTIAL"
+  ) {
+    throw new Error("release gate failed: real OpenClaw changed or truncated the migrated 30-key config");
+  }
+  const legacyInspect = parseJsonWithPreamble(
+    runOpenClawCapture(packedOpenClawCli, ["plugins", "inspect", "clawlore", "--json"], { env: legacyRuntimeEnv }),
+    "legacy-migrated installed-tarball OpenClaw inspect",
+  );
+  if (
+    legacyInspect.plugin?.id !== "clawlore" ||
+    legacyInspect.plugin?.status !== "loaded" ||
+    legacyInspect.plugin?.enabled !== true ||
+    legacyInspect.plugin?.activated !== true
+  ) {
+    throw new Error("release gate failed: migrated legacy identity did not activate canonical ClawLore");
+  }
+  runOpenClawCapture(packedOpenClawCli, ["clawlore", "experience", "debt", "--json"], { env: legacyRuntimeEnv });
+  const legacyDoctor = parseJsonWithPreamble(
+    runOpenClawCapture(packedOpenClawCli, ["clawlore", "doctor", "--json", "--quiet"], { env: legacyRuntimeEnv }),
+    "legacy-migrated installed-tarball OpenClaw doctor",
+  );
+  if (legacyDoctor.ok !== true) {
+    throw new Error("release gate failed: migrated legacy identity doctor did not report ok=true");
   }
 } finally {
   await rm(packScanRoot, { recursive: true, force: true });
