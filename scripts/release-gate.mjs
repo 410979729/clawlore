@@ -788,14 +788,29 @@ try {
   );
   const migratedSourceConfig = JSON.parse(await readFile(legacyConfigPath, "utf8"));
   const expectedLegacyConfig = migratedSourceConfig.plugins?.entries?.clawlore?.config;
+  const rawLegacyApiKey = expectedLegacyConfig?.llm?.apiKey;
+  const expectedEffectiveLegacyConfig = expectedLegacyConfig
+    ? structuredClone(expectedLegacyConfig)
+    : undefined;
+  if (expectedEffectiveLegacyConfig?.llm?.apiKey) {
+    expectedEffectiveLegacyConfig.llm.apiKey = {
+      source: "__OPENCLAW_REDACTED__",
+      provider: "__OPENCLAW_REDACTED__",
+      id: "__OPENCLAW_REDACTED__",
+    };
+  }
   if (
     !expectedLegacyConfig ||
     Object.keys(expectedLegacyConfig).length !== 30 ||
-    !isDeepSubset(expectedLegacyConfig, effectiveLegacyConfig) ||
+    expectedLegacyConfig.dbPath !== legacyDbPath ||
+    rawLegacyApiKey?.source !== "env" ||
+    rawLegacyApiKey?.provider !== "default" ||
+    rawLegacyApiKey?.id !== "CLAWLORE_RELEASE_FIXTURE_CREDENTIAL" ||
+    !isDeepSubset(expectedEffectiveLegacyConfig, effectiveLegacyConfig) ||
     effectiveLegacyConfig.dbPath !== legacyDbPath ||
-    effectiveLegacyConfig.llm?.apiKey?.source !== "env" ||
-    effectiveLegacyConfig.llm?.apiKey?.provider !== "default" ||
-    effectiveLegacyConfig.llm?.apiKey?.id !== "CLAWLORE_RELEASE_FIXTURE_CREDENTIAL"
+    effectiveLegacyConfig.llm?.apiKey?.source !== "__OPENCLAW_REDACTED__" ||
+    effectiveLegacyConfig.llm?.apiKey?.provider !== "__OPENCLAW_REDACTED__" ||
+    effectiveLegacyConfig.llm?.apiKey?.id !== "__OPENCLAW_REDACTED__"
   ) {
     throw new Error("release gate failed: real OpenClaw changed or truncated the migrated 30-key config");
   }
