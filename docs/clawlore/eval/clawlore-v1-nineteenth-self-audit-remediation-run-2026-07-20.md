@@ -32,6 +32,12 @@ The complete candidate was committed locally as
 contracts, and formal project documentation as one exact candidate. No remote
 or external ref was changed.
 
+Audit-ledger-only commit `76d651f3afb5a0c2b2da224d3cfb6aa6d02624bd`
+then recorded that candidate. The release-input contract explicitly excludes
+`TODO-clawlore.md`, `docs/clawlore/project-handoff.md`, and
+`docs/clawlore/eval/`; later ledger corrections therefore do not change the
+tested source/package identity.
+
 Therefore the honest boundary is:
 
 - **code/test/package candidate: GO for push after canonical remote setup**;
@@ -152,8 +158,8 @@ Final supported host: Linux x64, Node 24.15.0.
 | `npm pack --dry-run` | 260 files; 530,048 packed bytes |
 | 200K known-answer recall | 1 |
 | 200K cross-scope leakage | 0 |
-| 200K FTS latency | p50 0.033 ms; p95 0.046 ms; max 0.141 ms |
-| 200K lifecycle | stats 438.003 ms; health 348.704 ms; counts 89.296 ms |
+| 200K FTS latency | p50 0.034 ms; p95 0.045 ms; max 0.141 ms |
+| 200K lifecycle | stats 452.696 ms; health 352.786 ms; counts 99.907 ms |
 
 The real checkout's `release:prepush` stops at the expected package/origin
 mismatch. To distinguish provenance failure from a product failure, the exact
@@ -172,16 +178,18 @@ passed, including:
 Stable evidence identities from that clean candidate:
 
 - release input:
-  `e5cb307c3e1d4b044d9d212208fbd278c562ef1b0c45c8c7b12510dad3fbf3cf`
+  `1974bef5aa74dc31611bada2589511e14e9b86c8c13d685a0c02e03cd9f59088`
 - runtime:
   `2b0446f09dba4465595a51078decf81326645806cc503e21b7458d8c41692756`
 - package lock:
   `f92541f2bc73ae374a071a1f48fcc9f3ac33ede38c4aeb839a21a5384a2251d4`
 
-The first isolated controller attempt was discarded because its controller
-removed the checkout before the child process completed, producing `uv_cwd`.
-It is not counted as candidate evidence. The second run waited for completion
-and exited 0.
+An earlier pre-commit isolated controller attempt was discarded because its
+controller removed the checkout before the child process completed, producing
+`uv_cwd`. It is not counted as candidate evidence. After staged whitespace
+checks changed one test-file byte, both platforms were rerun on final release
+input `1974bef5...`; the final Linux run exited 0 and removed its exact
+temporary root.
 
 ## 4. Authorized Windows verification
 
@@ -199,7 +207,7 @@ The official Node archive SHA-256 was
 `cc5149eabd53779ce1e7bdc5401643622d0c7e6800ade18928a767e940bb0e62`
 and matched the official `SHASUMS256.txt`. The transferred candidate archive
 SHA-256 was
-`6443b8fd53fb7a14434f8b4fc5cf8972ec74d402466d482c60310a0e8e3873df`.
+`890a31d2b9e6345e15597f5115554c664d3697d28cdfb30d1d731d167b8e93c5`.
 
 The complete Windows pre-push gate exited 0:
 
@@ -214,8 +222,8 @@ The complete Windows pre-push gate exited 0:
 | SBOM | 45 components |
 | 200K known-answer recall | 1 |
 | 200K cross-scope leakage | 0 |
-| 200K FTS latency | p50 0.024 ms; p95 0.033 ms; max 0.226 ms |
-| 200K lifecycle | stats 288.060 ms; health 198.668 ms; counts 89.386 ms |
+| 200K FTS latency | p50 0.018 ms; p95 0.021 ms; max 0.130 ms |
+| 200K lifecycle | stats 250.991 ms; health 192.062 ms; counts 58.925 ms |
 
 The lower Windows test total and 17 skips are platform-conditioned selections;
 the gate records zero failures. Release-input, runtime, and package-lock
@@ -230,9 +238,9 @@ Only these actions remain before an actual repository update can be claimed:
    rename the existing `scope-recall-openclaw` repository.
 2. Update `origin` to that reachable canonical repository without weakening
    the identity gate.
-3. Run the real pre-push gate from clean candidate commit `977e203`, push its
-   exact branch,
-   then run the strict post-push evidence gate against the reachable ref.
+3. Run the real pre-push gate from the clean branch containing candidate
+   `977e203`, push its exact branch, then run the strict post-push evidence
+   gate against the reachable ref.
 4. Obtain a fresh independent read-only review of that exact commit before tag
    or release publication.
 

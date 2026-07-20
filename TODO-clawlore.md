@@ -304,7 +304,8 @@ Detailed evidence:
       and update `origin`. The real gate intentionally rejects the current
       legacy origin; the clean isolated pass proves the candidate rather than
       bypassing provenance.
-- [ ] Run the real pre-push gate on `977e203`, push that exact branch, run the
+- [ ] After canonical origin setup, run the real pre-push gate on the clean
+      branch containing candidate `977e203`, push that exact branch, run the
       strict post-push evidence gate, and obtain one fresh independent review
       of that exact ref before tag/release publication.
 - [ ] Keep live deployment, recall/Experience cutover, V2/data governance, and

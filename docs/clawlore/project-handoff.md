@@ -459,13 +459,14 @@ The real remote is not yet publishable. Package metadata names
 `410979729/scope-recall-openclaw`; and the canonical repository is not
 reachable. The real gate rejects this as designed. Joy must choose repository
 creation versus rename, after which the exact sequence is: update origin, run
-real pre-push on `977e203`, push the exact branch, run strict post-push
-evidence, and obtain a fresh independent review before tag/release.
+real pre-push on the clean branch containing `977e203`, push the exact branch,
+run strict post-push evidence, and obtain a fresh independent review before
+tag/release.
 
 Live recall/Experience effectiveness, V2/data governance, and the
 low-confidence live secret candidate remain separate operational work. No
-live plugin, config, database/vector, Gateway, service, remote, commit, tag,
-release, work environment, or deferred SATA/SSD state was changed. Detailed
+live plugin, config, database/vector, Gateway, service, remote, push, tag,
+release, work environment, or deferred SATA/SSD state was changed.
 The final workspace hygiene audit reports 105 overlapping out-of-workspace
 state/session/third-party residues; no task-owned Linux or Windows test root
 remains. Detailed evidence:
