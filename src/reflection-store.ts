@@ -133,10 +133,8 @@ function buildLegacyCombinedPayload(params: {
   return {
     kind: "combined-legacy",
     text: [
-      `reflection · ${params.scope} · ${dateYmd}`,
+      `reflection · ${dateYmd}`,
       `Session Reflection (${new Date(params.runAt).toISOString()})`,
-      `Session Key: ${params.sessionKey}`,
-      `Session ID: ${params.sessionId}`,
       "",
       "Invariants:",
       ...(params.slices.invariants.length > 0 ? params.slices.invariants.map((x) => `- ${x}`) : ["- (none captured)"]),

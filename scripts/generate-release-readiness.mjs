@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { createJiti } from "jiti";
+import { assertFinalReadinessPointer } from "./release-readiness-path.mjs";
 
 const root = process.cwd();
 const jiti = createJiti(import.meta.url);
@@ -72,6 +73,12 @@ const testLog = required("CLAWLORE_TEST_LOG");
 const configPath = required("CLAWLORE_CONFIG");
 const sqlitePath = required("CLAWLORE_SQLITE");
 const readinessOut = required("CLAWLORE_READINESS_OUT");
+const rawConfig = JSON.parse(readFileSync(configPath, "utf8"));
+const config = pluginConfig(rawConfig);
+assertFinalReadinessPointer({
+  configuredReadinessFile: config.runtime?.readinessFile,
+  readinessOut,
+});
 const sourceCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
 const dirty = execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: root, encoding: "utf8" }).trim();
 if (dirty) throw new Error(`release provenance requires a clean source tree:\n${dirty}`);
@@ -89,8 +96,6 @@ const buildProvenance = {
 mkdirSync(resolve(root, "dist"), { recursive: true });
 writeFileSync(resolve(root, "dist", BUILD_PROVENANCE_FILE), `${JSON.stringify(buildProvenance, null, 2)}\n`, { mode: 0o644 });
 
-const rawConfig = JSON.parse(readFileSync(configPath, "utf8"));
-const config = pluginConfig(rawConfig);
 const binding = computeRuntimeReleaseBinding({ pluginRoot: root, config, sqlitePath });
 const gatesPassed = process.env.CLAWLORE_RELEASE_GATES_PASSED === "1";
 const evidence = {

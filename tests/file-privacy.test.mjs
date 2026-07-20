@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, lstatSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,11 +9,66 @@ const require = createRequire(import.meta.url);
 const { createJiti } = require("jiti");
 const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: false });
 const {
+  appendPrivateFile,
   enforcePrivatePath,
   ensurePrivateDirectory,
   preparePrivateFileForRead,
   verifyPrivatePath,
+  writePrivateFileExclusive,
 } = jiti("../src/file-privacy.ts");
+
+test("private append tightens the file and refuses symlink targets", {
+  skip: process.platform === "win32",
+}, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "clawlore-private-append-"));
+  const file = join(dir, "projection.md");
+  const target = join(dir, "target.md");
+  const link = join(dir, "linked.md");
+  try {
+    writeFileSync(file, "first\n", { mode: 0o644 });
+    await appendPrivateFile(file, "second\n", { platform: "linux" });
+    assert.equal(readFileSync(file, "utf8"), "first\nsecond\n");
+    assert.equal(lstatSync(file).mode & 0o777, 0o600);
+
+    writeFileSync(target, "unchanged\n", { mode: 0o600 });
+    symlinkSync(target, link);
+    await assert.rejects(
+      () => appendPrivateFile(link, "must-not-write\n", { platform: "linux" }),
+      /CLAWLORE_PRIVATE_WRITE_TARGET_SYMLINK_REJECTED/,
+    );
+    assert.equal(readFileSync(target, "utf8"), "unchanged\n");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("exclusive private writes refuse existing files and symlink targets", {
+  skip: process.platform === "win32",
+}, async () => {
+  const root = mkdtempSync(join(tmpdir(), "clawlore-private-exclusive-"));
+  try {
+    const file = join(root, "artifact.md");
+    await writePrivateFileExclusive(file, "first\n", { platform: "linux" });
+    assert.equal(readFileSync(file, "utf8"), "first\n");
+    assert.equal(lstatSync(file).mode & 0o077, 0);
+    await assert.rejects(
+      () => writePrivateFileExclusive(file, "second\n", { platform: "linux" }),
+      /EEXIST/u,
+    );
+
+    const target = join(root, "target.md");
+    const link = join(root, "linked-artifact.md");
+    writeFileSync(target, "unchanged\n", { mode: 0o600 });
+    symlinkSync(target, link);
+    await assert.rejects(
+      () => writePrivateFileExclusive(link, "must-not-write\n", { platform: "linux" }),
+      /SYMLINK/u,
+    );
+    assert.equal(readFileSync(target, "utf8"), "unchanged\n");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("POSIX private path adapter tightens file and directory modes", {
   skip: process.platform === "win32",

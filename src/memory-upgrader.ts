@@ -19,6 +19,8 @@ import type { MemoryCategory } from "./memory-categories.js";
 import type { MemoryTier } from "./memory-categories.js";
 import { buildSmartMetadata, stringifySmartMetadata } from "./smart-metadata.js";
 import { diagnosticErrorSummary, diagnosticIdentifier } from "./diagnostic-redaction.js";
+import { isMemoryEntrySafeForEgress } from "./memory-egress-policy.js";
+import { evaluateMemoryMergePayload } from "./memory-merge-policy.js";
 
 // ============================================================================
 // Types
@@ -303,6 +305,9 @@ export class MemoryUpgrader {
     noLlm: boolean,
     rewriteText: boolean,
   ): Promise<void> {
+    if (!isMemoryEntrySafeForEgress(entry)) {
+      throw new Error("legacy memory rejected by egress safety policy");
+    }
     // Step 1: Reverse-map category
     let newCategory = reverseMapCategory(entry.category, entry.text);
 
@@ -324,10 +329,18 @@ export class MemoryUpgrader {
           throw new Error(detail || "LLM returned null");
         }
 
+        const enrichedDecision = evaluateMemoryMergePayload({
+          abstract: llmResult.l0_abstract,
+          overview: llmResult.l1_overview,
+          content: llmResult.l2_content,
+        });
+        if (!enrichedDecision.allowed) {
+          throw new Error(`LLM enrichment rejected: ${enrichedDecision.reason}`);
+        }
         enriched = {
-          l0_abstract: llmResult.l0_abstract || simpleEnrich(entry.text, newCategory).l0_abstract,
-          l1_overview: llmResult.l1_overview || simpleEnrich(entry.text, newCategory).l1_overview,
-          l2_content: llmResult.l2_content || entry.text,
+          l0_abstract: enrichedDecision.value.abstract,
+          l1_overview: enrichedDecision.value.overview,
+          l2_content: enrichedDecision.value.content,
         };
 
         // LLM may have resolved the ambiguous fact→profile/cases

@@ -7,6 +7,7 @@ import { filterNoise } from "./noise-filter.js";
 import { getDecayableFromEntry, isMemoryActiveAt, parseSupportInfo, parseSmartMetadata, toLifecycleMemory, } from "./smart-metadata.js";
 import { TraceCollector } from "./retrieval-trace.js";
 import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
+import { filterUnsafeMemoryResults, memoryTextRequiresLocalProcessing, redactMemoryTextForOutput } from "./memory-egress-policy.js";
 // ============================================================================
 // Default Configuration
 // ============================================================================
@@ -233,20 +234,26 @@ export class MemoryRetriever {
     filterActiveResults(results) {
         return results.filter((result) => isMemoryActiveAt(parseSmartMetadata(result.entry.metadata, result.entry)));
     }
+    filterEgressResults(results, trace) {
+        trace?.startStage("secret_egress_filter", results.map((result) => result.entry.id));
+        const filtered = filterUnsafeMemoryResults(results);
+        trace?.endStage(filtered.map((result) => result.entry.id), filtered.map((result) => result.score));
+        return filtered;
+    }
     async retrieve(context) {
         const { query, limit, scopeFilter, category, source, signal } = context;
         const safeLimit = clampInt(limit, 1, 20);
-        // Create trace only when stats collector is active (zero overhead otherwise)
         const trace = this._statsCollector ? new TraceCollector() : undefined;
-        // Check if query contains tag prefixes -> use BM25-only + mustContain.
-        // Auto-recall is latency-sensitive and runs inline during prompt assembly.
-        // Route it through local BM25-only retrieval so prompt building never waits
-        // on remote embedding / rerank providers.
+        // Auto-recall and secret-shaped queries stay on local BM25 to avoid provider egress/latency.
         const tagTokens = this.extractTagTokens(query);
-        const useLightweightAutoRecall = source === "auto-recall";
+        const localOnly = source === "auto-recall" || memoryTextRequiresLocalProcessing(query);
         let results;
         let mode;
-        if (tagTokens.length > 0 || useLightweightAutoRecall) {
+        if (localOnly && !this.store.hasFtsSupport) {
+            mode = "bm25";
+            results = [];
+        }
+        else if (tagTokens.length > 0 || localOnly) {
             mode = "bm25";
             results = await this.bm25OnlyRetrieval(query, tagTokens, safeLimit, scopeFilter, category, trace);
         }
@@ -258,12 +265,11 @@ export class MemoryRetriever {
             mode = "hybrid";
             results = await this.hybridRetrieval(query, safeLimit, scopeFilter, category, trace, signal);
         }
-        // Feed completed trace to stats collector
+        results = this.filterEgressResults(results, trace);
         if (trace && this._statsCollector) {
-            const finalTrace = trace.finalize(query, mode);
+            const finalTrace = trace.finalize(redactMemoryTextForOutput(query), mode);
             this._statsCollector.recordQuery(finalTrace, source || "unknown");
         }
-        // Record access for reinforcement (manual recall only)
         if (this.accessTracker && source === "manual" && results.length > 0) {
             this.accessTracker.recordAccess(results.map((r) => r.entry.id));
         }
@@ -278,10 +284,14 @@ export class MemoryRetriever {
         const safeLimit = clampInt(limit, 1, 20);
         const trace = new TraceCollector();
         const tagTokens = this.extractTagTokens(query);
-        const useLightweightAutoRecall = source === "auto-recall";
+        const localOnly = source === "auto-recall" || memoryTextRequiresLocalProcessing(query);
         let results;
         let mode;
-        if (tagTokens.length > 0 || useLightweightAutoRecall) {
+        if (localOnly && !this.store.hasFtsSupport) {
+            mode = "bm25";
+            results = [];
+        }
+        else if (tagTokens.length > 0 || localOnly) {
             mode = "bm25";
             results = await this.bm25OnlyRetrieval(query, tagTokens, safeLimit, scopeFilter, category, trace);
         }
@@ -293,7 +303,8 @@ export class MemoryRetriever {
             mode = "hybrid";
             results = await this.hybridRetrieval(query, safeLimit, scopeFilter, category, trace, signal);
         }
-        const finalTrace = trace.finalize(query, mode);
+        results = this.filterEgressResults(results, trace);
+        const finalTrace = trace.finalize(redactMemoryTextForOutput(query), mode);
         if (this._statsCollector) {
             this._statsCollector.recordQuery(finalTrace, source || "debug");
         }
@@ -454,18 +465,15 @@ export class MemoryRetriever {
             const allScores = [...vectorResults.map((r) => r.score), ...bm25Results.map((r) => r.score)];
             trace.endStage(allSearchIds, allScores);
         }
-        // Fuse results using RRF
         const allInputIds = [
             ...new Set([...vectorResults.map((r) => r.entry.id), ...bm25Results.map((r) => r.entry.id)]),
         ];
         trace?.startStage("rrf_fusion", allInputIds);
         const fusedResults = await this.fuseResults(vectorResults, bm25Results);
         trace?.endStage(fusedResults.map((r) => r.entry.id), fusedResults.map((r) => r.score));
-        // Apply minimum score threshold
         trace?.startStage("min_score_filter", fusedResults.map((r) => r.entry.id));
         const filtered = fusedResults.filter((r) => r.score >= this.config.minScore);
         trace?.endStage(filtered.map((r) => r.entry.id), filtered.map((r) => r.score));
-        // Rerank if enabled — only emit trace stage when rerank actually runs
         let reranked;
         if (this.config.rerank !== "none") {
             trace?.startStage("rerank", filtered.map((r) => r.entry.id));
@@ -513,7 +521,6 @@ export class MemoryRetriever {
     }
     async runVectorSearch(queryVector, limit, scopeFilter, category) {
         const results = await this.store.vectorSearch(queryVector, limit, 0.1, scopeFilter, { excludeInactive: true });
-        // Filter by category if specified
         const filtered = category
             ? results.filter((r) => r.entry.category === category)
             : results;
@@ -524,7 +531,6 @@ export class MemoryRetriever {
     }
     async runBM25Search(query, limit, scopeFilter, category) {
         const results = await this.store.bm25Search(query, limit, scopeFilter, { excludeInactive: true });
-        // Filter by category if specified
         const filtered = category
             ? results.filter((r) => r.entry.category === category)
             : results;
@@ -534,7 +540,6 @@ export class MemoryRetriever {
         }));
     }
     async fuseResults(vectorResults, bm25Results) {
-        // Create maps for quick lookup
         const vectorMap = new Map();
         const bm25Map = new Map();
         vectorResults.forEach((result) => {
@@ -543,9 +548,7 @@ export class MemoryRetriever {
         bm25Results.forEach((result) => {
             bm25Map.set(result.entry.id, result);
         });
-        // Get all unique document IDs
         const allIds = new Set([...vectorMap.keys(), ...bm25Map.keys()]);
-        // Calculate RRF scores
         const fusedResults = [];
         for (const id of allIds) {
             const vectorResult = vectorMap.get(id);
@@ -563,7 +566,6 @@ export class MemoryRetriever {
                     // If hasId fails, keep the result (fail-open)
                 }
             }
-            // Use the result with more complete data (prefer vector result if both exist)
             const baseResult = vectorResult || bm25Result;
             // Use vector similarity as the base score.
             // BM25 hit acts as a bonus (keyword match confirms relevance).
@@ -591,7 +593,6 @@ export class MemoryRetriever {
                 },
             });
         }
-        // Sort by fused score descending
         return fusedResults.sort((a, b) => b.score - a.score);
     }
     /**
@@ -599,10 +600,10 @@ export class MemoryRetriever {
      * Falls back to cosine similarity if API is unavailable or fails.
      */
     async rerankResults(query, queryVector, results) {
+        results = filterUnsafeMemoryResults(results);
         if (results.length === 0) {
             return results;
         }
-        // Try cross-encoder rerank via configured provider API
         if (this.config.rerank === "cross-encoder" && this.config.rerankApiKey) {
             try {
                 const provider = this.config.rerankProvider || "jina";

@@ -1,4 +1,5 @@
 import { adaptLegacyContextSources } from "./legacy-context-sources.js";
+import { filterUnsafeMemoryResults } from "../../memory-egress-policy.js";
 function actorAddress(request) {
     const boundary = request.boundary;
     return {
@@ -32,7 +33,7 @@ export function createLegacyShadowCandidateRetrieverV1(dependencies) {
             ...(request.signal ? { signal: request.signal } : {}),
         });
         return adaptLegacyContextSources({
-            autoRecall: results.map((result) => ({
+            autoRecall: filterUnsafeMemoryResults(results).map((result) => ({
                 id: result.entry.id,
                 text: result.entry.text,
                 category: result.entry.category,

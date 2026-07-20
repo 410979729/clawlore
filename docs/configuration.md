@@ -153,7 +153,7 @@ use the new value. Standalone CLI commands read current config on each run.
 
 | Key | Default | Risk | Restart | Notes |
 | --- | --- | --- | --- | --- |
-| `autoBackup` | `false` | high | yes | Writes plaintext JSONL backups. |
+| `autoBackup` | `false` | high | no | Deprecated compatibility no-op. `true` creates no backup and makes doctor report an issue; use encrypted snapshot/export. |
 | `mdMirror.enabled` | `false` | high | yes | Writes human-readable Markdown mirror. |
 | `mdMirror.dir` | unset | high | yes | Local mirror directory. |
 | `workspaceBoundary.userMdExclusive.enabled` | `false` | high | yes | Routes USER.md-exclusive facts away from plugin recall. |

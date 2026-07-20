@@ -1,6 +1,8 @@
-import { mkdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
+import { isDeepStrictEqual } from "node:util";
+import { enforcePrivatePath, ensurePrivateDirectory } from "../../file-privacy.js";
 import type { ExperienceStoreV2Port } from "../application/ports/experience-store.js";
 import type {
   ChildScratchV2,
@@ -9,6 +11,14 @@ import type {
   ProceduralPlaybookV2,
   SubagentSnapshotV2,
 } from "../domain/experience.js";
+import {
+  assertChildScratchSafeForPersistence,
+  assertExperienceEpisodeSafeForPersistence,
+  assertExperienceEventSafeForPersistence,
+  assertProceduralPlaybookSafeForPersistence,
+  assertSubagentSnapshotSafeForPersistence,
+} from "../domain/experience-write-policy.js";
+import { memoryAddressKey } from "../domain/memory-address.js";
 
 const require = createRequire(import.meta.url);
 type DatabaseSync = any;
@@ -54,6 +64,17 @@ function parseJson<T>(value: unknown): T {
   return JSON.parse(String(value)) as T;
 }
 
+function withoutKeys(value: Record<string, unknown>, keys: string[]): Record<string, unknown> {
+  const omitted = new Set(keys);
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !omitted.has(key)));
+}
+
+function enforcePrivateSqliteFamily(path: string): void {
+  for (const candidate of [path, `${path}-wal`, `${path}-shm`]) {
+    if (existsSync(candidate)) enforcePrivatePath(candidate, { kind: "file" });
+  }
+}
+
 export class SqliteExperienceStoreV2 implements ExperienceStoreV2Port {
   private db: DatabaseSync | null = null;
 
@@ -62,18 +83,23 @@ export class SqliteExperienceStoreV2 implements ExperienceStoreV2Port {
   open(): void {
     if (this.db) return;
     const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: new (path: string) => DatabaseSync };
-    mkdirSync(dirname(this.path), { recursive: true });
+    ensurePrivateDirectory(dirname(this.path));
+    enforcePrivateSqliteFamily(this.path);
     this.db = new DatabaseSync(this.path);
     this.db.exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");
     this.ensureSchema();
+    enforcePrivateSqliteFamily(this.path);
   }
 
   close(): void {
     this.db?.close();
     this.db = null;
+    enforcePrivateSqliteFamily(this.path);
   }
 
   saveSnapshot(snapshot: SubagentSnapshotV2): void {
+    assertSubagentSnapshotSafeForPersistence(snapshot);
+    if (snapshot.status !== "active") throw new Error("new subagent snapshot must be active");
     this.requireDb().prepare(`INSERT INTO subagent_snapshots_v2
       (snapshot_id,parent_session_id,child_session_id,run_id,mode,status,payload_json,created_at)
       VALUES (?,?,?,?,?,?,?,?)`).run(
@@ -89,6 +115,11 @@ export class SqliteExperienceStoreV2 implements ExperienceStoreV2Port {
   }
 
   saveScratch(scratch: ChildScratchV2): void {
+    assertChildScratchSafeForPersistence(scratch);
+    const snapshot = this.getSnapshot(scratch.snapshotId);
+    if (!snapshot || snapshot.status !== "active" || snapshot.childSessionId !== scratch.childSessionId) {
+      throw new Error("active child-owned snapshot is required for scratch persistence");
+    }
     this.requireDb().prepare(`INSERT INTO subagent_scratch_v2
       (scratch_id,snapshot_id,child_session_id,retention,lifecycle,payload_json,created_at)
       VALUES (?,?,?,?,?,?,?)`).run(
@@ -98,6 +129,25 @@ export class SqliteExperienceStoreV2 implements ExperienceStoreV2Port {
   }
 
   finalizeSnapshot(snapshot: SubagentSnapshotV2, episode: ExperienceEpisodeV2): void {
+    assertSubagentSnapshotSafeForPersistence(snapshot);
+    assertExperienceEpisodeSafeForPersistence(episode);
+    const current = this.getSnapshot(snapshot.snapshotId);
+    if (!current || current.status !== "active" || snapshot.status !== "revoked") {
+      throw new Error("active snapshot must transition to revoked");
+    }
+    if (!isDeepStrictEqual(
+      withoutKeys(current as unknown as Record<string, unknown>, ["status"]),
+      withoutKeys(snapshot as unknown as Record<string, unknown>, ["status"]),
+    )) throw new Error("subagent snapshot immutable fields changed during finalization");
+    if (episode.parentVerification !== "pending" || episode.lifecycle !== "candidate"
+      || episode.snapshotId !== snapshot.snapshotId
+      || episode.parentSessionId !== snapshot.parentSessionId
+      || episode.childSessionId !== snapshot.childSessionId
+      || episode.runId !== snapshot.runId
+      || episode.taskGoal !== snapshot.taskGoal
+      || memoryAddressKey(episode.actorAddress) !== memoryAddressKey(snapshot.actorAddress)) {
+      throw new Error("experience episode does not match its snapshot boundary");
+    }
     const db = this.requireDb();
     db.exec("BEGIN IMMEDIATE");
     try {
@@ -128,6 +178,16 @@ export class SqliteExperienceStoreV2 implements ExperienceStoreV2Port {
   }
 
   updateEpisode(episode: ExperienceEpisodeV2): void {
+    assertExperienceEpisodeSafeForPersistence(episode);
+    const current = this.getEpisode(episode.episodeId);
+    if (!current) throw new Error("experience episode update target missing");
+    if (!isDeepStrictEqual(
+      withoutKeys(current as unknown as Record<string, unknown>, ["parentVerification", "lifecycle", "verificationReason", "updatedAt"]),
+      withoutKeys(episode as unknown as Record<string, unknown>, ["parentVerification", "lifecycle", "verificationReason", "updatedAt"]),
+    )) throw new Error("experience episode immutable fields cannot change");
+    if (current.parentVerification !== "pending" || current.lifecycle !== "candidate") {
+      throw new Error("experience episode review is already terminal");
+    }
     const result = this.requireDb().prepare(`UPDATE experience_episodes_v2 SET
       parent_verification=?,lifecycle=?,payload_json=?,updated_at=? WHERE episode_id=?`).run(
       episode.parentVerification, episode.lifecycle, JSON.stringify(episode), episode.updatedAt, episode.episodeId,
@@ -137,6 +197,7 @@ export class SqliteExperienceStoreV2 implements ExperienceStoreV2Port {
 
   listEpisodes(episodeIds: string[]): ExperienceEpisodeV2[] {
     if (episodeIds.length === 0) return [];
+    if (episodeIds.length > 256) throw new Error("episode lookup exceeds the size limit");
     const placeholders = episodeIds.map(() => "?").join(",");
     const rows = this.requireDb().prepare(`SELECT payload_json FROM experience_episodes_v2
       WHERE episode_id IN (${placeholders})`).all(...episodeIds) as Array<Record<string, unknown>>;
@@ -144,6 +205,19 @@ export class SqliteExperienceStoreV2 implements ExperienceStoreV2Port {
   }
 
   savePlaybook(playbook: ProceduralPlaybookV2): void {
+    assertProceduralPlaybookSafeForPersistence(playbook);
+    if (playbook.lifecycle !== "candidate" || playbook.operatorReviewed || playbook.supersededBy != null) {
+      throw new Error("new procedural playbook must begin as an unreviewed candidate");
+    }
+    const episodes = this.listEpisodes(playbook.evidenceEpisodeIds);
+    if (episodes.length === 0 || episodes.length !== playbook.evidenceEpisodeIds.length
+      || episodes.some((episode) => episode.outcome !== "success"
+        || episode.parentVerification !== "parent_verified"
+        || episode.lifecycle !== "candidate"
+        || episode.taskClass !== playbook.taskClass
+        || memoryAddressKey(episode.actorAddress) !== memoryAddressKey(playbook.scopeAddress))) {
+      throw new Error("playbook persistence requires matching parent-verified evidence");
+    }
     this.requireDb().prepare(`INSERT INTO procedural_playbooks_v2
       (playbook_id,version,task_class,lifecycle,operator_reviewed,predecessor_id,
        superseded_by,payload_json,created_at,updated_at)
@@ -161,6 +235,33 @@ export class SqliteExperienceStoreV2 implements ExperienceStoreV2Port {
   }
 
   updatePlaybook(playbook: ProceduralPlaybookV2): void {
+    assertProceduralPlaybookSafeForPersistence(playbook);
+    const current = this.getPlaybook(playbook.playbookId);
+    if (!current) throw new Error("procedural playbook update target missing");
+    if (!isDeepStrictEqual(
+      withoutKeys(current as unknown as Record<string, unknown>, ["lifecycle", "operatorReviewed", "supersededBy", "updatedAt"]),
+      withoutKeys(playbook as unknown as Record<string, unknown>, ["lifecycle", "operatorReviewed", "supersededBy", "updatedAt"]),
+    )) throw new Error("procedural playbook immutable fields cannot change");
+    if (current.operatorReviewed && !playbook.operatorReviewed) {
+      throw new Error("operator review cannot be revoked");
+    }
+    const transition = `${current.lifecycle}->${playbook.lifecycle}`;
+    if (!["candidate->promoted", "candidate->quarantined", "promoted->quarantined", "promoted->superseded"].includes(transition)) {
+      throw new Error("procedural playbook lifecycle transition is unsupported");
+    }
+    if (playbook.lifecycle === "promoted" && !playbook.operatorReviewed) {
+      const episodes = this.listEpisodes(playbook.evidenceEpisodeIds);
+      const verifiedRuns = new Set(episodes
+        .filter((episode) => episode.outcome === "success" && episode.parentVerification === "parent_verified")
+        .map((episode) => episode.runId));
+      if (verifiedRuns.size < 2) throw new Error("playbook promotion requires repeated verified runs");
+    }
+    if (playbook.lifecycle === "superseded") {
+      const successor = playbook.supersededBy ? this.getPlaybook(playbook.supersededBy) : null;
+      if (!successor || successor.predecessorId !== playbook.playbookId) {
+        throw new Error("superseded playbook requires a persisted successor");
+      }
+    }
     const result = this.requireDb().prepare(`UPDATE procedural_playbooks_v2 SET
       lifecycle=?,operator_reviewed=?,superseded_by=?,payload_json=?,updated_at=? WHERE playbook_id=?`).run(
       playbook.lifecycle, playbook.operatorReviewed ? 1 : 0, playbook.supersededBy ?? null,
@@ -170,6 +271,7 @@ export class SqliteExperienceStoreV2 implements ExperienceStoreV2Port {
   }
 
   appendEvent(event: ExperienceEventV2): void {
+    assertExperienceEventSafeForPersistence(event);
     this.requireDb().prepare(`INSERT INTO experience_events_v2
       (event_id,entity_type,entity_id,event_type,actor,reason,created_at)
       VALUES (?,?,?,?,?,?,?)`).run(

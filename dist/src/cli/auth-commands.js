@@ -154,7 +154,7 @@ export function registerAuthCommands(runtime) {
             console.log(`Updated ${pluginId} config: llm.auth=oauth, llm.oauthProvider=${selectedProvider.providerId}, llm.oauthPath=${oauthPath}, llm.model=${oauthModel}`);
         }
         catch (error) {
-            console.error("OAuth login failed:", error);
+            console.error(`OAuth login failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });
@@ -197,7 +197,7 @@ export function registerAuthCommands(runtime) {
             console.log(`oauth file: ${tokenInfo}`);
         }
         catch (error) {
-            console.error("OAuth status failed:", error);
+            console.error(`OAuth status failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });
@@ -219,7 +219,7 @@ export function registerAuthCommands(runtime) {
             console.log(`Updated ${pluginId} config: llm.auth=api-key`);
         }
         catch (error) {
-            console.error("OAuth logout failed:", error);
+            console.error(`OAuth logout failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });

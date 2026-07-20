@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { evaluateCaptureSafety, sanitizeCaptureText } from "./capture-safety.js";
 import { isNoise } from "./noise-filter.js";
 import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
+import { digestLedgerRowForOutput, digestPreviewFor as previewFor, digestSafeJson as safeJson, digestSourceIdentifier, parseDigestJsonObject as safeParseJsonObject, requireDigestBoundaryIdentifier, requireDigestSourceType, } from "./digest-boundary-policy.js";
+import { isMemoryEntrySafeForEgress } from "./memory-egress-policy.js";
 function nowIso() {
     return new Date().toISOString();
 }
@@ -18,35 +20,6 @@ function cleanText(value) {
     return sanitizeCaptureText(value || "")
         .replace(/\s+/g, " ")
         .trim();
-}
-function previewFor(value) {
-    return cleanText(value)
-        .replace(/\/home\/[^\s"',;)}\]]+/g, "[redacted:path]")
-        .replace(/\/Users\/[^\s"',;)}\]]+/g, "[redacted:path]")
-        .replace(/[A-Z]:\\[^\s"',;)}\]]+/g, "[redacted:path]")
-        .slice(0, 220);
-}
-function safeJson(value) {
-    return JSON.stringify(value, (_key, item) => {
-        if (!item || typeof item !== "object" || Array.isArray(item))
-            return item;
-        return Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b)));
-    });
-}
-function safeParseJsonObject(raw) {
-    if (!raw)
-        return {};
-    if (typeof raw === "object" && !Array.isArray(raw))
-        return raw;
-    try {
-        const parsed = JSON.parse(String(raw));
-        return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-            ? parsed
-            : {};
-    }
-    catch {
-        return {};
-    }
 }
 function tableExists(db, name) {
     return Boolean(db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual') AND name = ?").get(name));
@@ -106,9 +79,9 @@ export function ensureDigestSchema(db) {
 function explicitChunk(params) {
     return {
         id: `chunk-${randomUUID()}`,
-        source_type: params.sourceType || "explicit",
-        source_id: params.sourceId || "explicit-input",
-        scope: params.scope,
+        source_type: requireDigestSourceType(params.sourceType, "explicit"),
+        source_id: digestSourceIdentifier(params.sourceId || "explicit-input"),
+        scope: requireDigestBoundaryIdentifier(params.scope, "digest scope", "agent:main"),
         text: params.text,
     };
 }
@@ -129,22 +102,28 @@ function collectReflectionChunks(db, scope, maxChunks) {
     ORDER BY updated_at DESC, timestamp DESC
     LIMIT ?
   `).all(scope, Math.max(1, Math.min(200, maxChunks)));
-    return rows.map((row) => {
+    return rows.flatMap((row) => {
+        // Digest sends only semantic text to the provider. Legacy provenance stays
+        // local and is normalized separately below, so an old private path in
+        // metadata must not discard otherwise-safe durable text.
+        if (!isMemoryEntrySafeForEgress({ text: row.text || "" }))
+            return [];
         const metadata = safeParseJsonObject(row.metadata);
-        const sourceId = typeof metadata.eventId === "string" && metadata.eventId.trim()
+        const rawSourceId = typeof metadata.eventId === "string" && metadata.eventId.trim()
             ? metadata.eventId.trim()
             : row.id;
-        return {
-            id: `chunk-${row.id}`,
-            source_type: "reflection_event",
-            source_id: sourceId,
-            scope: row.scope || scope,
-            text: row.text || "",
-        };
+        const sourceId = digestSourceIdentifier(rawSourceId, "reflection-source");
+        return [{
+                id: `chunk-${digestSourceIdentifier(row.id, "memory")}`,
+                source_type: "reflection_event",
+                source_id: sourceId,
+                scope,
+                text: row.text || "",
+            }];
     });
 }
 export function collectDigestChunks(db, options = {}) {
-    const scope = options.scope || "agent:main";
+    const scope = requireDigestBoundaryIdentifier(options.scope, "digest scope", "agent:main");
     const maxChunks = Math.max(1, Math.min(200, Math.trunc(options.maxChunks ?? 25)));
     if (typeof options.inputText === "string" && options.inputText.trim()) {
         return [explicitChunk({
@@ -326,12 +305,14 @@ function updateRun(db, row) {
   `).run(row.completed_at, row.status, row.chunk_count, row.candidate_count, row.stored_count, row.skipped_count, row.error_count, row.notes, row.id);
 }
 function insertChunkEvent(db, params) {
+    const sourceId = digestSourceIdentifier(params.chunk.source_id);
+    const scope = requireDigestBoundaryIdentifier(params.chunk.scope, "digest scope", "agent:main");
     db.prepare(`
     INSERT INTO openclaw_digest_chunks (
       id, run_id, source_type, source_id, scope, status, reason,
       preview, candidate_ids, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(params.id, params.runId, params.chunk.source_type, params.chunk.source_id, params.chunk.scope || "agent:main", params.status, params.reason, previewFor(params.chunk.text), safeJson(params.candidateIds || []), nowIso());
+  `).run(params.id, params.runId, params.chunk.source_type, sourceId, scope, params.status, params.reason, previewFor(params.chunk.text), safeJson((params.candidateIds || []).map((id) => digestSourceIdentifier(id, "memory"))), nowIso());
 }
 function runStatusFrom(params) {
     if (params.chunkCount === 0)
@@ -361,8 +342,8 @@ export async function runDigestPipeline(db, options = {}) {
     const chunks = collectDigestChunks(db, options);
     const runId = `digest-${randomUUID()}`;
     const startedAt = nowIso();
-    const actor = options.actor || "clawlore:cli";
-    const sourceType = chunks[0]?.source_type || options.sourceType || "reflection_event";
+    const actor = requireDigestBoundaryIdentifier(options.actor, "digest actor", "clawlore:cli");
+    const sourceType = requireDigestSourceType(chunks[0]?.source_type ?? options.sourceType, "reflection_event");
     const runRow = {
         id: runId,
         run_date: nowRunDate(),
@@ -420,7 +401,7 @@ export async function runDigestPipeline(db, options = {}) {
         let chunkCandidates = [];
         if (options.useLlm === true && options.llmClient) {
             try {
-                chunkCandidates = await llmCandidates(chunk, options.llmClient);
+                chunkCandidates = await llmCandidates({ ...chunk, text: cleaned }, options.llmClient);
             }
             catch (err) {
                 llmParseErrors += 1;
@@ -536,7 +517,7 @@ export function digestReport(db, options = {}) {
     }
     const sampleLimit = Math.max(0, Math.min(25, Math.trunc(options.sampleLimit ?? 8)));
     const total = Number(db.prepare("SELECT COUNT(*) AS count FROM openclaw_digest_runs").get()?.count || 0);
-    const lastRun = db.prepare("SELECT * FROM openclaw_digest_runs ORDER BY started_at DESC LIMIT 1").get() || {};
+    const lastRun = digestLedgerRowForOutput((db.prepare("SELECT * FROM openclaw_digest_runs ORDER BY started_at DESC LIMIT 1").get() || {}));
     const candidateRows = tableExists(db, "memory_truth")
         ? Number(db.prepare(`
         SELECT COUNT(*) AS count
@@ -552,7 +533,7 @@ export function digestReport(db, options = {}) {
         FROM openclaw_digest_chunks
         ORDER BY created_at DESC
         LIMIT ?
-      `).all(sampleLimit)
+      `).all(sampleLimit).map((row) => digestLedgerRowForOutput(row))
         : [];
     const failedStatuses = ["parse_error", "retry_exhausted", "dead_letter"];
     const failed = Number(db.prepare(`
@@ -594,7 +575,7 @@ export function digestRecoveryReport(db, options = {}) {
     WHERE status IN ('parse_error', 'retry_exhausted', 'dead_letter')
     ORDER BY created_at ASC
     LIMIT ?
-  `).all(limit);
+  `).all(limit).map((row) => digestLedgerRowForOutput(row));
     return {
         status: rows.length > 0 ? "needs_recovery" : "ready",
         candidate_count: rows.length,
@@ -610,14 +591,15 @@ export function recoverDigestChunks(db, options = {}) {
         return { ...report, dry_run: dryRun, recovered: 0 };
     }
     const at = nowIso();
+    const actor = requireDigestBoundaryIdentifier(options.actor, "digest recovery actor", "clawlore:cli");
     for (const row of rows) {
         db.prepare(`
       UPDATE openclaw_digest_chunks
       SET status = 'pending_recovery',
-          reason = reason || '; recovery_requested_by:${options.actor || "clawlore:cli"} @ ${at}'
+          reason = reason || ?
       WHERE id = ?
         AND status IN ('parse_error', 'retry_exhausted', 'dead_letter')
-    `).run(row.id);
+    `).run(`; recovery_requested_by:${actor} @ ${at}`, row.id);
     }
     return {
         status: "recovery_scheduled",

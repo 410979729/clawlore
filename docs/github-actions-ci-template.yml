@@ -6,7 +6,11 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -14,16 +18,32 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24.15.0"
+          cache: npm
 
-      - name: Install dependencies
-        run: npm install
+      - name: Prepare a trusted Windows test temp root
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $path = Join-Path $env:USERPROFILE ".clawlore-ci-temp"
+          New-Item -ItemType Directory -Path $path -Force | Out-Null
+          "TEMP=$path" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "TMP=$path" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install locked dependencies
+        run: npm ci --include=dev
+
+      - name: Install the supported OpenClaw host fixture
+        run: npm install --prefix "${{ runner.temp }}/clawlore-openclaw-host" --ignore-scripts --no-audit --no-fund openclaw@2026.7.1-beta.5
 
       - name: Run tests
         run: npm test
 
-      - name: Run release gate
-        run: npm run release:gate
+      - name: Run non-authorizing pre-push release checks
+        run: npm run release:prepush
+        env:
+          OPENCLAW_PACKAGE_DIR: ${{ runner.temp }}/clawlore-openclaw-host/node_modules/openclaw
+          OPENCLAW_CLI: ${{ runner.temp }}/clawlore-openclaw-host/node_modules/openclaw/openclaw.mjs
 
       - name: Inspect package
         run: npm pack --dry-run --json

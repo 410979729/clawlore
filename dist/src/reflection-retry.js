@@ -1,3 +1,4 @@
+import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
 const REFLECTION_TRANSIENT_PATTERNS = [
     /unexpected eof/i,
     /\beconnreset\b/i,
@@ -65,12 +66,6 @@ function toErrorMessage(error) {
         return String(error);
     }
 }
-function clipSingleLine(text, maxLen = 260) {
-    const oneLine = text.replace(/\s+/g, " ").trim();
-    if (oneLine.length <= maxLen)
-        return oneLine;
-    return `${oneLine.slice(0, maxLen - 3)}...`;
-}
 export function isTransientReflectionUpstreamError(error) {
     const msg = toErrorMessage(error);
     return REFLECTION_TRANSIENT_PATTERNS.some((pattern) => pattern.test(msg));
@@ -80,7 +75,7 @@ export function isReflectionNonRetryError(error) {
     return REFLECTION_NON_RETRY_PATTERNS.some((pattern) => pattern.test(msg));
 }
 export function classifyReflectionRetry(input) {
-    const normalizedError = clipSingleLine(toErrorMessage(input.error), 260);
+    const normalizedError = diagnosticErrorSummary(input.error);
     if (!input.inReflectionScope) {
         return { retryable: false, reason: "not_reflection_scope", normalizedError };
     }
@@ -128,7 +123,7 @@ export async function runWithReflectionTransientRetryOnce(params) {
         }
         catch (retryError) {
             params.onLog?.("warn", `memory-${params.scope}: retry exhausted (${params.runner}). ` +
-                `error=${clipSingleLine(toErrorMessage(retryError), 260)}`);
+                `error=${diagnosticErrorSummary(retryError)}`);
             throw retryError;
         }
     }

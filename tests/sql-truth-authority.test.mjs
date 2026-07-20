@@ -406,4 +406,36 @@ for (const backend of BACKENDS) {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test(`${backend}: vector rebuild never sends legacy secret rows to the embedder`, async () => {
+    const dir = mkdtempSync(join(tmpdir(), `clawlore-sql-egress-${backend}-`));
+    const id = "50000000-0000-4000-8000-000000000005";
+    const secret = "synthetic-rebuild-secret-987654";
+    let store;
+    try {
+      store = new MemoryStore({ dbPath: dir, vectorDim: 4, vectorBackend: backend });
+      await store.importEntry(entry(id, "safe historical row"));
+      const db = await store.getSqlTruthDb();
+      db.prepare("UPDATE memory_truth SET text = ?, updated_at = ? WHERE id = ?")
+        .run(`databasePassword: ${secret}`, Date.now(), id);
+
+      let embedCalls = 0;
+      const embedder = { embedPassage: async () => { embedCalls += 1; return [1, 0, 0, 0]; } };
+      const dryRun = await store.rebuildVectorCompanion(embedder, { fullRebuild: true, dryRun: true });
+      assert.equal(dryRun.processed, 1);
+      assert.equal(dryRun.rebuilt, 0);
+      assert.equal(dryRun.skipped, 1);
+      assert.equal(JSON.stringify(dryRun).includes(secret), false);
+
+      const repaired = await store.rebuildVectorCompanion(embedder, { fullRebuild: true });
+      assert.equal(repaired.processed, 1);
+      assert.equal(repaired.rebuilt, 0);
+      assert.equal(repaired.skipped, 1);
+      assert.equal(embedCalls, 0);
+      assert.equal(JSON.stringify(repaired).includes(secret), false);
+    } finally {
+      await store?.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 }

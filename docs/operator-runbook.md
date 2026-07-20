@@ -12,10 +12,10 @@ Run from the plugin workspace:
 ```bash
 npm ci --ignore-scripts --include=dev
 npm run preflight:dependencies
-npm run release:gate:source
+npm run release:prepush
 ```
 
-The source gate includes the full test/typecheck/build/benchmark/package scan,
+The pre-push gate includes the full test/typecheck/build/benchmark/package scan,
 SBOM, dependency-integrity preflight, and an advisory audit pinned to the
 official npm registry. A missing dependency, advisory endpoint failure, or
 transport failure is a red gate; none may be interpreted as zero findings.
@@ -27,6 +27,19 @@ installed `clawlore`, `scope-recall`, and `memory-pro` CLI registration surface.
 The package metadata marks `smoke:packed-runtime` as the only published runtime
 script; all other npm scripts require a source checkout and are not public
 installed-package capabilities.
+
+Pre-push mode is explicitly non-authorizing: it requires a clean commit and a
+canonical origin identity, but does not claim the commit is already published
+and cannot write canonical release evidence. After the commit is pushed, run
+the strict source gate against the exact remote ref:
+
+```bash
+npm run release:gate:source -- --release-ref refs/heads/main
+# or: --release-ref refs/tags/vX.Y.Z
+```
+
+Only the strict post-push gate verifies remote publication and canonical
+release evidence. A green pre-push result is never a release authorization.
 
 Do not continue to live rollout until all source gates pass and an independent
 audit approves the exact candidate commit.
@@ -96,6 +109,40 @@ consumed the bounded 5,000-row scan before enough SQL-valid results were found.
 Run vector-repair dry-run, review the debt, apply repair only under operator
 authority, and then recheck diagnostics.
 
+Lifecycle diagnostics use the rebuildable `memory_lifecycle_projection`
+auxiliary tables. They are not SQL authority. Fresh authority creation and the
+explicit receipt-backed legacy upgrade initialize projection state; ordinary
+startup never creates, backfills, or repairs it. Truth mutations update an
+already healthy projection in the same transaction and fail closed if its
+schema is unavailable. Doctor is read-only with respect to SQL truth and this
+projection: it reports schema, row-count, or revision drift without rebuilding
+the auxiliary tables, including while reopening an established database. If it
+reports drift, stop and inspect the SQL authority; do not edit projection rows
+by hand or interpret a partial projection as truth. Preview and apply the
+bounded repair explicitly only after confirming SQL truth is healthy:
+
+```bash
+openclaw clawlore repair-lifecycle-projection --json
+openclaw clawlore repair-lifecycle-projection --apply --json
+```
+
+The bare command is a dry run. The apply form transactionally rebuilds the
+projection table, state row, and index from `memory_truth`, then verifies row
+and revision parity before reporting success.
+
+TaskEpisodes created before the explicit promotion-review gate are reported as
+`legacy_episode_historical`. They are intentionally ineligible for automatic
+promotion. Do not edit their metadata to manufacture `promotion_eligible` or
+reviewer approval. Until a separate actor/reason/evidence review receipt flow
+is implemented, treat them as non-promotable historical records.
+
+For V2 write operators, convergence, integrity, and foreign-key checks must
+pass before commit. If a committed run returns
+`CLAWLORE_V2_POST_COMMIT_RECOVERY_REQUIRED`, do not retry against the same
+destination and do not claim that a transaction rollback restored it. Restore
+the verified encrypted pre-write snapshot to a new location, validate that
+copy, preserve V1 fallback, and obtain a fresh bounded plan before any retry.
+
 ## Live Rollout
 
 1. Record the candidate commit and recursive artifact digest.
@@ -112,8 +159,27 @@ authority, and then recheck diagnostics.
    both exist with different contents, they stop without writing. OAuth login
    also refuses plaintext API-key backup material, and logout commits the
    restored config before deleting OAuth files.
-5. Restart once, then run `npm run release:gate` from the clean candidate so
-   recursive source/live identity and runtime smoke are checked.
+5. Push the clean candidate commit to the exact release branch or tag. The gate
+   defaults to `refs/heads/main` and requires local `HEAD` to equal that remote
+   ref; remote reachability alone is not sufficient.
+6. If `legacyAgentScopePrincipals` is non-empty, obtain the exact canonical
+   `platform:account:principal` key from trusted OpenClaw adapter metadata for
+   the direct user being authorized. Do not derive it from a display name, chat
+   title, group id, wildcard, or user-supplied envelope text. Confirm that the
+   same exact key appears in the reviewed allowlist.
+7. Restart once, then run the live gate from the clean candidate:
+
+   ```bash
+   npm run release:gate -- \
+     --principal 'telegram:default:<numeric-user-id>' \
+     --release-ref refs/heads/main
+   ```
+
+   Omit `--principal` only when there is no legacy allowlist and no principal-
+   specific visibility decision. `CLAWLORE_RUNTIME_PRINCIPAL` and
+   `CLAWLORE_RELEASE_REF` are environment-variable equivalents for controlled
+   automation. A missing principal with an active exact allowlist, a mismatched
+   principal, or an unpushed local commit fails with a directed error.
 
 ## Live Smoke
 

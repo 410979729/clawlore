@@ -16,6 +16,7 @@ export function stableReleaseEvidence(value) {
     releaseInput: value.releaseInput,
     runtimeDigest: value.runtimeDigest,
     sourceOnly: value.sourceOnly,
+    publicationVerified: value.publicationVerified,
     dirty: value.dirty,
     packFileCount: value.packFileCount,
     packageLockSha256: value.packageLockSha256,

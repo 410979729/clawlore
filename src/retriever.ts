@@ -23,6 +23,7 @@ import {
 import { TraceCollector, type RetrievalTrace } from "./retrieval-trace.js";
 import { RetrievalStatsCollector } from "./retrieval-stats.js";
 import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
+import { filterUnsafeMemoryResults, memoryTextRequiresLocalProcessing, redactMemoryTextForOutput } from "./memory-egress-policy.js";
 
 // ============================================================================
 // Types & Configuration
@@ -395,23 +396,29 @@ export class MemoryRetriever {
     );
   }
 
+  private filterEgressResults(results: RetrievalResult[], trace?: TraceCollector): RetrievalResult[] {
+    trace?.startStage("secret_egress_filter", results.map((result) => result.entry.id));
+    const filtered = filterUnsafeMemoryResults(results);
+    trace?.endStage(filtered.map((result) => result.entry.id), filtered.map((result) => result.score));
+    return filtered;
+  }
+
   async retrieve(context: RetrievalContext): Promise<RetrievalResult[]> {
     const { query, limit, scopeFilter, category, source, signal } = context;
     const safeLimit = clampInt(limit, 1, 20);
 
-    // Create trace only when stats collector is active (zero overhead otherwise)
     const trace = this._statsCollector ? new TraceCollector() : undefined;
 
-    // Check if query contains tag prefixes -> use BM25-only + mustContain.
-    // Auto-recall is latency-sensitive and runs inline during prompt assembly.
-    // Route it through local BM25-only retrieval so prompt building never waits
-    // on remote embedding / rerank providers.
+    // Auto-recall and secret-shaped queries stay on local BM25 to avoid provider egress/latency.
     const tagTokens = this.extractTagTokens(query);
-    const useLightweightAutoRecall = source === "auto-recall";
+    const localOnly = source === "auto-recall" || memoryTextRequiresLocalProcessing(query);
     let results: RetrievalResult[];
     let mode: "bm25" | "vector" | "hybrid";
 
-    if (tagTokens.length > 0 || useLightweightAutoRecall) {
+    if (localOnly && !this.store.hasFtsSupport) {
+      mode = "bm25";
+      results = [];
+    } else if (tagTokens.length > 0 || localOnly) {
       mode = "bm25";
       results = await this.bm25OnlyRetrieval(
         query, tagTokens, safeLimit, scopeFilter, category, trace,
@@ -428,13 +435,12 @@ export class MemoryRetriever {
       );
     }
 
-    // Feed completed trace to stats collector
+    results = this.filterEgressResults(results, trace);
     if (trace && this._statsCollector) {
-      const finalTrace = trace.finalize(query, mode);
+      const finalTrace = trace.finalize(redactMemoryTextForOutput(query), mode);
       this._statsCollector.recordQuery(finalTrace, source || "unknown");
     }
 
-    // Record access for reinforcement (manual recall only)
     if (this.accessTracker && source === "manual" && results.length > 0) {
       this.accessTracker.recordAccess(results.map((r) => r.entry.id));
     }
@@ -454,11 +460,14 @@ export class MemoryRetriever {
     const trace = new TraceCollector();
 
     const tagTokens = this.extractTagTokens(query);
-    const useLightweightAutoRecall = source === "auto-recall";
+    const localOnly = source === "auto-recall" || memoryTextRequiresLocalProcessing(query);
     let results: RetrievalResult[];
     let mode: "bm25" | "vector" | "hybrid";
 
-    if (tagTokens.length > 0 || useLightweightAutoRecall) {
+    if (localOnly && !this.store.hasFtsSupport) {
+      mode = "bm25";
+      results = [];
+    } else if (tagTokens.length > 0 || localOnly) {
       mode = "bm25";
       results = await this.bm25OnlyRetrieval(
         query, tagTokens, safeLimit, scopeFilter, category, trace,
@@ -475,7 +484,8 @@ export class MemoryRetriever {
       );
     }
 
-    const finalTrace = trace.finalize(query, mode);
+    results = this.filterEgressResults(results, trace);
+    const finalTrace = trace.finalize(redactMemoryTextForOutput(query), mode);
 
     if (this._statsCollector) {
       this._statsCollector.recordQuery(finalTrace, source || "debug");
@@ -690,7 +700,6 @@ export class MemoryRetriever {
       trace.endStage(allSearchIds, allScores);
     }
 
-    // Fuse results using RRF
     const allInputIds = [
       ...new Set([...vectorResults.map((r) => r.entry.id), ...bm25Results.map((r) => r.entry.id)]),
     ];
@@ -698,12 +707,10 @@ export class MemoryRetriever {
     const fusedResults = await this.fuseResults(vectorResults, bm25Results);
     trace?.endStage(fusedResults.map((r) => r.entry.id), fusedResults.map((r) => r.score));
 
-    // Apply minimum score threshold
     trace?.startStage("min_score_filter", fusedResults.map((r) => r.entry.id));
     const filtered = fusedResults.filter((r) => r.score >= this.config.minScore);
     trace?.endStage(filtered.map((r) => r.entry.id), filtered.map((r) => r.score));
 
-    // Rerank if enabled — only emit trace stage when rerank actually runs
     let reranked: RetrievalResult[];
     if (this.config.rerank !== "none") {
       trace?.startStage("rerank", filtered.map((r) => r.entry.id));
@@ -771,7 +778,6 @@ export class MemoryRetriever {
       { excludeInactive: true },
     );
 
-    // Filter by category if specified
     const filtered = category
       ? results.filter((r) => r.entry.category === category)
       : results;
@@ -790,7 +796,6 @@ export class MemoryRetriever {
   ): Promise<Array<MemorySearchResult & { rank: number }>> {
     const results = await this.store.bm25Search(query, limit, scopeFilter, { excludeInactive: true });
 
-    // Filter by category if specified
     const filtered = category
       ? results.filter((r) => r.entry.category === category)
       : results;
@@ -805,7 +810,6 @@ export class MemoryRetriever {
     vectorResults: Array<MemorySearchResult & { rank: number }>,
     bm25Results: Array<MemorySearchResult & { rank: number }>,
   ): Promise<RetrievalResult[]> {
-    // Create maps for quick lookup
     const vectorMap = new Map<string, MemorySearchResult & { rank: number }>();
     const bm25Map = new Map<string, MemorySearchResult & { rank: number }>();
 
@@ -817,10 +821,8 @@ export class MemoryRetriever {
       bm25Map.set(result.entry.id, result);
     });
 
-    // Get all unique document IDs
     const allIds = new Set([...vectorMap.keys(), ...bm25Map.keys()]);
 
-    // Calculate RRF scores
     const fusedResults: RetrievalResult[] = [];
 
     for (const id of allIds) {
@@ -839,7 +841,6 @@ export class MemoryRetriever {
         }
       }
 
-      // Use the result with more complete data (prefer vector result if both exist)
       const baseResult = vectorResult || bm25Result!;
 
       // Use vector similarity as the base score.
@@ -876,7 +877,6 @@ export class MemoryRetriever {
       });
     }
 
-    // Sort by fused score descending
     return fusedResults.sort((a, b) => b.score - a.score);
   }
 
@@ -889,11 +889,11 @@ export class MemoryRetriever {
     queryVector: number[],
     results: RetrievalResult[],
   ): Promise<RetrievalResult[]> {
+    results = filterUnsafeMemoryResults(results);
     if (results.length === 0) {
       return results;
     }
 
-    // Try cross-encoder rerank via configured provider API
     if (this.config.rerank === "cross-encoder" && this.config.rerankApiKey) {
       try {
         const provider = this.config.rerankProvider || "jina";

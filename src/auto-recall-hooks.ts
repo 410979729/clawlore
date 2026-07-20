@@ -1,6 +1,7 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 
 import { shouldSkipRetrieval } from "./adaptive-retrieval.js";
+import { BoundedTtlMap } from "./bounded-ttl-map.js";
 import { autoRecallGovernanceEligibility } from "./auto-capture-governance.js";
 import {
   AutoRecallSessionCache,
@@ -24,6 +25,7 @@ import { isSystemBypassId, type createScopeManager } from "./scopes.js";
 import { parseSmartMetadata } from "./smart-metadata.js";
 import type { MemoryStore } from "./store.js";
 import { isReusableTaskExperience } from "./task-experience.js";
+import { redactMemoryTextForOutput } from "./memory-egress-policy.js";
 import type { resolveRuntimeMemoryAccess } from "./runtime-memory-boundary.js";
 import { filterUserMdExclusiveRecallResults } from "./workspace-boundary.js";
 
@@ -33,7 +35,7 @@ type RuntimeAccessResolver = (
 ) => { agentId: string; access: ReturnType<typeof resolveRuntimeMemoryAccess> };
 
 function sanitizeForContext(text: string): string {
-  return text
+  return redactMemoryTextForOutput(text)
     .replace(/[\r\n]+/g, " ")
     .replace(/<\/?[a-zA-Z][^>]*>/g, "")
     .replace(/</g, "\uFF1C")
@@ -70,30 +72,46 @@ export function registerAutoRecallHooks(params: {
     }
     return results;
   };
-  const recallHistory = new Map<string, Map<string, number>>();
-  const turnCounter = new Map<string, number>();
+  const sessionStates = new BoundedTtlMap<string, { turn: number; history: Map<string, number> }>({
+    ttlMs: 30 * 60 * 1_000,
+    maxEntries: 2_048,
+    onEvict: (_key, reason) => api.logger.debug?.(`clawlore: auto-recall session state evicted reason=${reason}`),
+  });
   const sessionCache = new AutoRecallSessionCache();
 
   api.on("message_received", (event: any, ctx: any) => {
     const { access } = params.resolveRuntimeAccess(event, ctx);
-    if (!access.denied) sessionCache.remember(event, ctx);
+    if (!access.denied) sessionCache.remember(event, ctx, access.boundary.scope);
   });
 
   const timeoutMs = parsePositiveInt(config.autoRecallTimeoutMs) ?? 5_000;
   api.on("before_prompt_build", async (event: any, ctx: any) => {
     const { agentId: traceAgentId, access: memoryAccess } = params.resolveRuntimeAccess(event, ctx);
     if (memoryAccess.denied) return;
-    const sessionBoundary = resolveAutoRecallSessionBoundary(event, ctx);
+    const sessionBoundary = resolveAutoRecallSessionBoundary(event, ctx, memoryAccess.boundary.scope);
     const querySelection = sessionCache.select(
       event,
       ctx,
-      event.prompt,
       config.autoRecallQueryMaxChars ?? 4_000,
+      memoryAccess.boundary.scope,
     );
-    const gatingText = querySelection.query || event.prompt || "";
-    if (!querySelection.query || shouldSkipRetrieval(gatingText, config.autoRecallMinLength)) return;
-    const currentTurn = sessionBoundary ? (turnCounter.get(sessionBoundary) || 0) + 1 : 1;
-    if (sessionBoundary) turnCounter.set(sessionBoundary, currentTurn);
+    if (querySelection.duplicate) {
+      api.logger.debug?.(`clawlore: skipped duplicate auto-recall turn=${diagnosticIdentifier(querySelection.turnKey ?? "unknown")}`);
+      return;
+    }
+    if (querySelection.correlationIssue) {
+      api.logger.debug?.(`clawlore: auto-recall skipped reason=${querySelection.correlationIssue}`);
+      return;
+    }
+    if (!querySelection.query || shouldSkipRetrieval(querySelection.query, config.autoRecallMinLength)) return;
+    const trackedSession = sessionBoundary
+      ? sessionStates.get(sessionBoundary) ?? { turn: 0, history: new Map<string, number>() }
+      : undefined;
+    const currentTurn = trackedSession ? trackedSession.turn + 1 : 1;
+    if (sessionBoundary && trackedSession) {
+      trackedSession.turn = currentTurn;
+      sessionStates.set(sessionBoundary, trackedSession);
+    }
 
     // Abort the whole recall chain before it can hold the host session lock indefinitely.
     const recallAbort = new AbortController();
@@ -153,7 +171,7 @@ export function registerAutoRecallHooks(params: {
             agent_id: traceAgentId,
             channel: String(ctx?.channelId || ctx?.conversationId || ""),
             query_source: querySelection.source,
-            query: querySelection.query,
+            query: redactMemoryTextForOutput(querySelection.query),
             current_scope: traceCurrentScope,
             decision: input.decision,
             reason: input.reason,
@@ -214,9 +232,7 @@ export function registerAutoRecallHooks(params: {
       let dedupFilteredCount = 0;
       let finalResults = rankedResults;
       if (minRepeated > 0) {
-        const sessionHistory = sessionBoundary
-          ? recallHistory.get(sessionBoundary) || new Map<string, number>()
-          : new Map<string, number>();
+        const sessionHistory = trackedSession?.history ?? new Map<string, number>();
         const filtered = rankedResults.filter((result) => {
           const lastTurn = sessionHistory.get(result.entry.id) ?? -999;
           const redundant = currentTurn - lastTurn < minRepeated;
@@ -369,11 +385,9 @@ export function registerAutoRecallHooks(params: {
 
       throwIfAborted();
       if (minRepeated > 0) {
-        const sessionHistory = sessionBoundary
-          ? recallHistory.get(sessionBoundary) || new Map<string, number>()
-          : new Map<string, number>();
+        const sessionHistory = trackedSession?.history ?? new Map<string, number>();
         for (const item of selected) sessionHistory.set(item.id, currentTurn);
-        if (sessionBoundary) recallHistory.set(sessionBoundary, sessionHistory);
+        if (sessionBoundary && trackedSession) sessionStates.set(sessionBoundary, trackedSession);
       }
       const memoryContext = selected.map((item) => item.line).join("\n");
       const selectedIds = new Set(selected.map((item) => item.id));
@@ -441,10 +455,10 @@ export function registerAutoRecallHooks(params: {
   }, { priority: 10 });
 
   api.on("session_end", (event: any, ctx: any) => {
-    const boundary = sessionCache.clear(event, ctx);
+    const { access } = params.resolveRuntimeAccess(event, ctx);
+    const boundary = sessionCache.clear(event, ctx, access.boundary.scope);
     if (boundary) {
-      recallHistory.delete(boundary);
-      turnCounter.delete(boundary);
+      sessionStates.delete(boundary);
     }
   }, { priority: 10 });
 }

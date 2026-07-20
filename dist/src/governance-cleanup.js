@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { evaluateCaptureSafety, sanitizeCaptureText } from "./capture-safety.js";
+import { ensureLifecycleProjection, syncLifecycleProjectionFromTruth, } from "./sql-lifecycle-projection.js";
 export const TEMPLATE_NOISE_REASONS = [
     "template.operations-workflow-summary",
     "template.journal-digest-memory",
@@ -179,6 +180,7 @@ export function applyCleanup(db, options = {}) {
     const now = Date.now();
     db.exec("BEGIN IMMEDIATE");
     try {
+        ensureLifecycleProjection(db);
         let archived = 0;
         for (const item of items) {
             const row = db.prepare(`
@@ -198,6 +200,7 @@ export function applyCleanup(db, options = {}) {
             metadata.rollback_batch_id = batchId;
             db.prepare("UPDATE memory_truth SET metadata = ?, updated_at = ? WHERE id = ?")
                 .run(JSON.stringify(metadata), now, item.id);
+            syncLifecycleProjectionFromTruth(db, item.id);
             const after = { ...before, updated_at: now, metadata };
             recordAuditEvent(db, {
                 eventType: "memory_cleanup",
@@ -246,6 +249,7 @@ export function rollbackCleanupBatch(db, options) {
     const actor = options.actor || "governance-cleanup";
     db.exec("BEGIN IMMEDIATE");
     try {
+        ensureLifecycleProjection(db);
         let restored = 0;
         for (const audit of rows) {
             const id = String(audit.target_id || "");
@@ -259,6 +263,7 @@ export function rollbackCleanupBatch(db, options) {
                 continue;
             db.prepare("UPDATE memory_truth SET metadata = ?, updated_at = ? WHERE id = ?")
                 .run(jsonStable(beforeMetadata), Date.now(), id);
+            syncLifecycleProjectionFromTruth(db, id);
             recordAuditEvent(db, {
                 eventType: "memory_cleanup",
                 action: "rollback_soft_archive",

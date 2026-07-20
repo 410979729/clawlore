@@ -361,9 +361,10 @@ export function listEpisodes(
   const conditions: string[] = [];
   const values: unknown[] = [];
 
-  if (filters.scope_id) {
-    conditions.push("scope_id = ?");
-    values.push(filters.scope_id);
+  if (filters.scope_id !== undefined) {
+    const scope = experienceScopeClause([filters.scope_id], "scope_id", "shared_scope_id");
+    conditions.push(scope.sql);
+    values.push(...scope.params);
   }
   if (filters.status) {
     conditions.push("status = ?");
@@ -516,21 +517,21 @@ export function searchPlaybooks(
 
   if (filters.scope_ids && filters.scope_ids.length > 0) {
     const placeholders = filters.scope_ids.map(() => "?").join(",");
-    conditions.push(`(scope_id IN (${placeholders}) OR shared_scope_id IN (${placeholders}))`);
+    conditions.push(`(p.scope_id IN (${placeholders}) OR p.shared_scope_id IN (${placeholders}))`);
     values.push(...filters.scope_ids, ...filters.scope_ids);
   }
 
   if (filters.task_class) {
-    conditions.push("task_class = ?");
+    conditions.push("p.task_class = ?");
     values.push(filters.task_class);
   }
 
   if (filters.status) {
-    conditions.push("status = ?");
+    conditions.push("p.status = ?");
     values.push(filters.status);
   } else {
     // Exclude quarantined and superseded by default
-    conditions.push("status NOT IN ('quarantined', 'superseded')");
+    conditions.push("p.status NOT IN ('quarantined', 'superseded')");
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -540,35 +541,23 @@ export function searchPlaybooks(
     const safeFtsQuery = buildSafeFtsQuery(filters.query);
     if (!safeFtsQuery) return [];
 
-    // Use FTS for text search
-    const ftsRows = db.prepare(`
-      SELECT playbook_id, rank
-      FROM procedural_playbooks_fts
-      WHERE procedural_playbooks_fts MATCH ?
-      ORDER BY rank
-      LIMIT ?
-    `).all(safeFtsQuery, limit) as { playbook_id: string; rank: number }[];
-
-    if (ftsRows.length === 0) return [];
-
-    const playbookIds = ftsRows.map((r) => r.playbook_id);
-    const idPlaceholders = playbookIds.map(() => "?").join(",");
-
     const rows = db.prepare(`
-      SELECT * FROM procedural_playbooks
-      WHERE id IN (${idPlaceholders}) ${conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : ""}
-    `).all(...playbookIds, ...values) as Record<string, unknown>[];
-
-    const scoreMap = new Map(ftsRows.map((r) => [r.playbook_id, -r.rank]));
+      SELECT p.*, procedural_playbooks_fts.rank AS fts_rank
+      FROM procedural_playbooks_fts
+      JOIN procedural_playbooks p ON p.id = procedural_playbooks_fts.playbook_id
+      WHERE procedural_playbooks_fts MATCH ? AND ${conditions.join(" AND ")}
+      ORDER BY procedural_playbooks_fts.rank
+      LIMIT ?
+    `).all(safeFtsQuery, ...values, limit) as Record<string, unknown>[];
 
     return rows.map((row) => {
       const playbook = rowToPlaybook(row);
-      return { ...playbook, score: scoreMap.get(playbook.id) ?? 0 };
+      return { ...playbook, score: -Number(row.fts_rank ?? 0) };
     }).sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
   }
 
   const rows = db.prepare(
-    `SELECT * FROM procedural_playbooks ${where} ORDER BY confidence DESC, updated_at DESC LIMIT ?`,
+    `SELECT p.* FROM procedural_playbooks p ${where} ORDER BY p.confidence DESC, p.updated_at DESC LIMIT ?`,
   ).all(...values, limit) as Record<string, unknown>[];
 
   return rows.map(rowToPlaybook);

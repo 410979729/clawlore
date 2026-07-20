@@ -3,10 +3,33 @@
  * Memory management tools for AI agents
  */
 import { Type } from "@sinclair/typebox";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { rm, rmdir } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve } from "node:path";
+import { ensurePrivateDirectory, readPrivateFile, writePrivateFileAtomic, writePrivateFileExclusive, } from "./file-privacy.js";
+import { normalizeSelfImprovementSummary } from "./self-improvement-content-policy.js";
 import { appendSelfImprovementEntry, ensureSelfImprovementLearningFiles } from "./self-improvement-files.js";
 import { escapeRegExp, resolveWorkspaceDir, safeToolFailure, stringEnum } from "./tool-runtime-policy.js";
+function resolveSkillOutput(workspaceDir, outputDir, skillName) {
+    const normalized = outputDir.trim().replace(/\\/gu, "/") || "skills";
+    if (/^(?:\/|[A-Za-z]:\/)/u.test(normalized)) {
+        throw new Error("skill outputDir must be relative to the workspace");
+    }
+    const segments = normalized.split("/");
+    if (segments.some((segment) => !segment || segment === "." || segment === "..")) {
+        throw new Error("skill outputDir contains an invalid path segment");
+    }
+    const workspaceRoot = resolve(workspaceDir);
+    const skillDir = resolve(workspaceRoot, ...segments, skillName);
+    const relation = relative(workspaceRoot, skillDir);
+    if (!relation || relation.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`)
+        || relation === ".." || isAbsolute(relation)) {
+        throw new Error("skill output path escapes the workspace");
+    }
+    return {
+        skillDir,
+        relativeSkillDir: [...segments, skillName].join("/"),
+    };
+}
 export function registerSelfImprovementLogTool(api, context) {
     api.registerTool((toolCtx) => ({
         name: "self_improvement_log",
@@ -25,7 +48,7 @@ export function registerSelfImprovementLogTool(api, context) {
             const { type, summary, details = "", suggestedAction = "", category = "best_practice", area = "config", priority = "medium", } = params;
             try {
                 const workspaceDir = resolveWorkspaceDir(toolCtx, context.workspaceDir);
-                const { id: entryId, filePath } = await appendSelfImprovementEntry({
+                const { id: entryId } = await appendSelfImprovementEntry({
                     baseDir: workspaceDir,
                     type,
                     summary,
@@ -39,7 +62,7 @@ export function registerSelfImprovementLogTool(api, context) {
                 const fileName = type === "learning" ? "LEARNINGS.md" : "ERRORS.md";
                 return {
                     content: [{ type: "text", text: `Logged ${type} entry ${entryId} to .learnings/${fileName}` }],
-                    details: { action: "logged", type, id: entryId, filePath },
+                    details: { action: "logged", type, id: entryId, file: `.learnings/${fileName}` },
                 };
             }
             catch (error) {
@@ -77,9 +100,9 @@ export function registerSelfImprovementExtractSkillTool(api, context) {
                 const workspaceDir = resolveWorkspaceDir(toolCtx, context.workspaceDir);
                 await ensureSelfImprovementLearningFiles(workspaceDir);
                 const learningsPath = join(workspaceDir, ".learnings", sourceFile);
-                const learningBody = await readFile(learningsPath, "utf-8");
+                const learningBody = await readPrivateFile(learningsPath);
                 const escapedLearningId = escapeRegExp(learningId.trim());
-                const entryRegex = new RegExp(`## \\[${escapedLearningId}\\][\\s\\S]*?(?=\\n## \\[|$)`, "m");
+                const entryRegex = new RegExp(`## \\[${escapedLearningId}\\][^\\n]*[\\s\\S]*?(?=\\n## \\[(?:LRN|ERR)-\\d{8}-\\d{3}\\]|$)`);
                 const match = learningBody.match(entryRegex);
                 if (!match) {
                     return {
@@ -87,15 +110,10 @@ export function registerSelfImprovementExtractSkillTool(api, context) {
                         details: { error: "learning_not_found", learningId, sourceFile },
                     };
                 }
-                const summaryMatch = match[0].match(/### Summary\n([\s\S]*?)\n###/m);
-                const summary = (summaryMatch?.[1] ?? "Summarize the source learning here.").trim();
-                const safeOutputDir = outputDir
-                    .replace(/\\/g, "/")
-                    .split("/")
-                    .filter((segment) => segment && segment !== "." && segment !== "..")
-                    .join("/");
-                const skillDir = join(workspaceDir, safeOutputDir || "skills", skillName);
-                await mkdir(skillDir, { recursive: true });
+                const summaryMatch = match[0].match(/(?:^|\n)### Summary\r?\n([\s\S]*?)(?=\r?\n### (?:Details|Suggested Action|Metadata)(?:\r?\n|$)|$)/u);
+                const summary = normalizeSelfImprovementSummary(summaryMatch?.[1] ?? "Summarize the source learning here.");
+                const { skillDir, relativeSkillDir } = resolveSkillOutput(workspaceDir, outputDir, skillName);
+                ensurePrivateDirectory(skillDir);
                 const skillPath = join(skillDir, "SKILL.md");
                 const skillTitle = skillName
                     .split("-")
@@ -124,9 +142,8 @@ export function registerSelfImprovementExtractSkillTool(api, context) {
                     `- Source File: .learnings/${sourceFile}`,
                     "",
                 ].join("\n");
-                await writeFile(skillPath, skillContent, "utf-8");
                 const promotedMarker = `**Status**: promoted_to_skill`;
-                const skillPathMarker = `- Skill-Path: ${safeOutputDir || "skills"}/${skillName}`;
+                const skillPathMarker = `- Skill-Path: ${relativeSkillDir}`;
                 let updatedEntry = match[0];
                 updatedEntry = updatedEntry.includes("**Status**:")
                     ? updatedEntry.replace(/\*\*Status\*\*:\s*.+/m, promotedMarker)
@@ -135,14 +152,27 @@ export function registerSelfImprovementExtractSkillTool(api, context) {
                     updatedEntry = `${updatedEntry.trimEnd()}\n${skillPathMarker}\n`;
                 }
                 const updatedLearningBody = learningBody.replace(match[0], updatedEntry);
-                await writeFile(learningsPath, updatedLearningBody, "utf-8");
+                let skillCreated = false;
+                try {
+                    await writePrivateFileExclusive(skillPath, skillContent);
+                    skillCreated = true;
+                    await writePrivateFileAtomic(learningsPath, updatedLearningBody);
+                }
+                catch (error) {
+                    if (skillCreated) {
+                        await writePrivateFileAtomic(learningsPath, learningBody).catch(() => undefined);
+                        await rm(skillPath, { force: true }).catch(() => undefined);
+                        await rmdir(skillDir).catch(() => undefined);
+                    }
+                    throw error;
+                }
                 return {
-                    content: [{ type: "text", text: `Extracted skill scaffold to ${safeOutputDir || "skills"}/${skillName}/SKILL.md and updated ${learningId}.` }],
+                    content: [{ type: "text", text: `Extracted skill scaffold to ${relativeSkillDir}/SKILL.md and updated ${learningId}.` }],
                     details: {
                         action: "skill_extracted",
                         learningId,
                         sourceFile,
-                        skillPath: `${safeOutputDir || "skills"}/${skillName}/SKILL.md`,
+                        skillPath: `${relativeSkillDir}/SKILL.md`,
                     },
                 };
             }
@@ -166,7 +196,7 @@ export function registerSelfImprovementReviewTool(api, context) {
                 const files = ["LEARNINGS.md", "ERRORS.md"];
                 const stats = { pending: 0, high: 0, promoted: 0, total: 0 };
                 for (const f of files) {
-                    const content = await readFile(join(learningsDir, f), "utf-8").catch(() => "");
+                    const content = await readPrivateFile(join(learningsDir, f));
                     stats.total += (content.match(/^## \[/gm) || []).length;
                     stats.pending += (content.match(/\*\*Status\*\*:\s*pending/gi) || []).length;
                     stats.high += (content.match(/\*\*Priority\*\*:\s*(high|critical)/gi) || []).length;

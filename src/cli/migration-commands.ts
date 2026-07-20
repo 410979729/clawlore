@@ -2,7 +2,9 @@
  * CLI Commands for Memory Management
  */
 
+import { diagnosticErrorSummary } from "../diagnostic-redaction.js";
 import { createMemoryUpgrader } from "../memory-upgrader.js";
+import { isMemoryEntrySafeForEgress, redactMemoryTextForOutput } from "../memory-egress-policy.js";
 import { loadLanceDB, type MemoryEntry } from "../store.js";
 
 import {
@@ -79,12 +81,19 @@ export function registerMigrationCommands(runtime: CliRegistrationContext): void
 
         if (limit) query = query.limit(limit);
 
-        const rows = (await query.toArray())
+        const sourceRows = (await query.toArray())
           .filter((r: any) => r && typeof r.text === "string" && r.text.trim().length > 0)
           .filter((r: any) => r.id && r.id !== "__schema__");
+        const rows = sourceRows.filter((row: any) => isMemoryEntrySafeForEgress({
+          text: String(row.text),
+          metadata: typeof row.metadata === "string" ? row.metadata : undefined,
+        }));
+        const safetySkipped = sourceRows.length - rows.length;
 
         if (rows.length === 0) {
-          console.log("No source memories found.");
+          console.log(safetySkipped > 0
+            ? `No safe source memories found; ${safetySkipped} row(s) rejected by egress safety policy.`
+            : "No source memories found.");
           return;
         }
 
@@ -94,13 +103,13 @@ export function registerMigrationCommands(runtime: CliRegistrationContext): void
 
         if (dryRun) {
           console.log("DRY RUN - No memories will be written");
-          console.log(`First example: ${rows[0].id?.slice?.(0, 8)} ${String(rows[0].text).slice(0, 80)}`);
+          console.log(`First example: ${rows[0].id?.slice?.(0, 8)} ${redactMemoryTextForOutput(String(rows[0].text)).slice(0, 80)}`);
           return;
         }
 
-        let processed = 0;
+        let processed = safetySkipped;
         let imported = 0;
-        let skipped = 0;
+        let skipped = safetySkipped;
 
         for (let i = 0; i < rows.length; i += batchSize) {
           const batch = rows.slice(i, i + batchSize);
@@ -141,14 +150,14 @@ export function registerMigrationCommands(runtime: CliRegistrationContext): void
             imported++;
           }
 
-          if (processed % 100 === 0 || processed === rows.length) {
-            console.log(`Progress: ${processed}/${rows.length} processed, ${imported} imported, ${skipped} skipped`);
+          if (processed % 100 === 0 || processed === sourceRows.length) {
+            console.log(`Progress: ${processed}/${sourceRows.length} processed, ${imported} imported, ${skipped} skipped`);
           }
         }
 
         console.log(`Re-embed completed: ${imported} imported, ${skipped} skipped (processed=${processed}).`);
       } catch (error) {
-        console.error("Re-embed failed:", error);
+        console.error(`Re-embed failed: ${diagnosticErrorSummary(error)}`);
         process.exit(1);
       }
     });
@@ -223,7 +232,7 @@ export function registerMigrationCommands(runtime: CliRegistrationContext): void
           }
         }
       } catch (error) {
-        console.error("Upgrade failed:", error);
+        console.error(`Upgrade failed: ${diagnosticErrorSummary(error)}`);
         process.exit(1);
       }
     });
@@ -251,7 +260,7 @@ export function registerMigrationCommands(runtime: CliRegistrationContext): void
         }
         console.log(`• Migration needed: ${check.needed ? 'Yes' : 'No'}`);
       } catch (error) {
-        console.error("Migration check failed:", error);
+        console.error(`Migration check failed: ${diagnosticErrorSummary(error)}`);
         process.exit(1);
       }
     });
@@ -286,7 +295,7 @@ export function registerMigrationCommands(runtime: CliRegistrationContext): void
           process.exit(1);
         }
       } catch (error) {
-        console.error("Migration failed:", error);
+        console.error(`Migration failed: ${diagnosticErrorSummary(error)}`);
         process.exit(1);
       }
     });
@@ -313,7 +322,7 @@ export function registerMigrationCommands(runtime: CliRegistrationContext): void
           process.exit(1);
         }
       } catch (error) {
-        console.error("Verification failed:", error);
+        console.error(`Verification failed: ${diagnosticErrorSummary(error)}`);
         process.exit(1);
       }
     });
@@ -330,11 +339,11 @@ export function registerMigrationCommands(runtime: CliRegistrationContext): void
         if (result.success) {
           console.log("✅ FTS index rebuilt successfully");
         } else {
-          console.error("❌ FTS rebuild failed:", result.error);
+          console.error(`❌ FTS rebuild failed: ${diagnosticErrorSummary(result.error)}`);
           process.exit(1);
         }
       } catch (error) {
-        console.error("FTS rebuild error:", error);
+        console.error(`FTS rebuild error: ${diagnosticErrorSummary(error)}`);
         process.exit(1);
       }
     });

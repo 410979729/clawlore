@@ -6,6 +6,7 @@
 import { Type } from "@sinclair/typebox";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { getDisplayCategoryTag } from "./reflection-metadata.js";
+import { redactMemoryTextForOutput } from "./memory-egress-policy.js";
 import {
   parseSmartMetadata
 } from "./smart-metadata.js";
@@ -126,7 +127,7 @@ export function registerMemoryRecallTool(
             if (results.length === 0) {
               return {
                 content: [{ type: "text", text: "No relevant memories found." }],
-                details: { count: 0, query, scopes: scopeFilter },
+                details: { count: 0, query: redactMemoryTextForOutput(query), scopes: scopeFilter },
               };
             }
 
@@ -168,7 +169,7 @@ export function registerMemoryRecallTool(
               for (let i = 0; i < results.length; i++) {
                 const metadata = parseSmartMetadata(results[i].entry.metadata, results[i].entry);
                 (serializedMemories[i] as Record<string, unknown>).fullText =
-                  metadata.l2_content || metadata.l1_overview || results[i].entry.text;
+                  redactMemoryTextForOutput(metadata.l2_content || metadata.l1_overview || results[i].entry.text);
               }
             }
 
@@ -182,7 +183,7 @@ export function registerMemoryRecallTool(
               details: {
                 count: results.length,
                 memories: serializedMemories,
-                query,
+                query: redactMemoryTextForOutput(query),
                 scopes: scopeFilter,
                 retrievalMode: runtimeContext.retriever.getConfig().mode,
               },

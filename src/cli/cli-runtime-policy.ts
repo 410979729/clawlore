@@ -16,6 +16,7 @@ import {
   type ExistingKnowledgeDoc
 } from "../knowledge-skill-bridge.js";
 import type { LlmClient } from "../llm-client.js";
+import { redactMemoryTextForOutput } from "../memory-egress-policy.js";
 import {
   getDefaultOauthModelForProvider,
   isOauthModelSupported,
@@ -48,6 +49,7 @@ export interface CLIContext {
   llmClient?: LlmClient;
   pluginId?: string;
   pluginConfig?: Record<string, unknown>;
+  runtimeDiagnosticFile?: string;
   oauthTestHooks?: {
     openUrl?: (url: string) => void | Promise<void>;
     authorizeUrl?: (url: string) => void | Promise<void>;
@@ -246,9 +248,9 @@ export function formatMemory(memory: any, index?: number): string {
   const prefix = index !== undefined ? `${index + 1}. ` : "";
   const id = memory?.id ? String(memory.id) : "unknown";
   const date = new Date(memory.timestamp || memory.createdAt || Date.now()).toISOString().split('T')[0];
-  const fullText = String(memory.text || "");
+  const fullText = redactMemoryTextForOutput(String(memory.text || ""));
   const text = fullText.slice(0, 100) + (fullText.length > 100 ? "..." : "");
-  return `${prefix}[${id}] [${memory.category}:${memory.scope}] ${text} (${date})`;
+  return `${prefix}[${id}] [${redactMemoryTextForOutput(String(memory.category || ""))}:${redactMemoryTextForOutput(String(memory.scope || ""))}] ${text} (${date})`;
 }
 
 export function formatJson(obj: any): string {

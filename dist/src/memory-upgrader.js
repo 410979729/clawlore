@@ -14,6 +14,8 @@
  */
 import { buildSmartMetadata, stringifySmartMetadata } from "./smart-metadata.js";
 import { diagnosticErrorSummary, diagnosticIdentifier } from "./diagnostic-redaction.js";
+import { isMemoryEntrySafeForEgress } from "./memory-egress-policy.js";
+import { evaluateMemoryMergePayload } from "./memory-merge-policy.js";
 // ============================================================================
 // Reverse Category Mapping
 // ============================================================================
@@ -199,6 +201,9 @@ export class MemoryUpgrader {
      * Upgrade a single legacy memory entry.
      */
     async upgradeEntry(entry, noLlm, rewriteText) {
+        if (!isMemoryEntrySafeForEgress(entry)) {
+            throw new Error("legacy memory rejected by egress safety policy");
+        }
         // Step 1: Reverse-map category
         let newCategory = reverseMapCategory(entry.category, entry.text);
         // Step 2: Generate L0/L1/L2
@@ -211,10 +216,18 @@ export class MemoryUpgrader {
                     const detail = this.llm.getLastError();
                     throw new Error(detail || "LLM returned null");
                 }
+                const enrichedDecision = evaluateMemoryMergePayload({
+                    abstract: llmResult.l0_abstract,
+                    overview: llmResult.l1_overview,
+                    content: llmResult.l2_content,
+                });
+                if (!enrichedDecision.allowed) {
+                    throw new Error(`LLM enrichment rejected: ${enrichedDecision.reason}`);
+                }
                 enriched = {
-                    l0_abstract: llmResult.l0_abstract || simpleEnrich(entry.text, newCategory).l0_abstract,
-                    l1_overview: llmResult.l1_overview || simpleEnrich(entry.text, newCategory).l1_overview,
-                    l2_content: llmResult.l2_content || entry.text,
+                    l0_abstract: enrichedDecision.value.abstract,
+                    l1_overview: enrichedDecision.value.overview,
+                    l2_content: enrichedDecision.value.content,
                 };
                 // LLM may have resolved the ambiguous fact→profile/cases
                 if (llmResult.resolved_category) {

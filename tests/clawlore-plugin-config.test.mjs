@@ -100,7 +100,7 @@ test("plugin config fails closed for missing or malformed hosted credentials", (
 });
 
 test("plugin config rejects malformed legacy principal migration allowlists", () => {
-  for (const principal of ["main", " telegram:default:8176453077", "telegram::8176453077", "*:default:8176453077", 7]) {
+  for (const principal of ["main", " telegram:default:8176453077", "telegram::8176453077", "*:default:8176453077", "telegram:default:*", 7]) {
     assert.throws(
       () => parsePluginConfig({
         embedding: {},

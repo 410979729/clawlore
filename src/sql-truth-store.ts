@@ -2,18 +2,16 @@ import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { existsSync, rmSync } from "node:fs";
-import type { MemoryEntry, MemorySearchResult } from "./store.js";
+import type { MemoryEntry, MemorySearchResult, MemoryTruthStats } from "./memory-store-ports.js";
 import { parseSmartMetadata, isMemoryActiveAt } from "./smart-metadata.js";
+import { deleteLifecycleProjection, ensureLifecycleProjection,
+  openLifecycleProjectionReadAccess, upsertLifecycleProjection } from "./sql-lifecycle-projection.js";
 import { enforcePrivatePath, ensurePrivateDirectory } from "./file-privacy.js";
-
 const require = createRequire(import.meta.url);
-
 type DatabaseSync = any;
-
 function runSql(db: DatabaseSync, statement: string): void {
   (db as Record<string, (sql: string) => void>)["exec"](statement);
 }
-
 interface SqlRow {
   id: string;
   text: string;
@@ -25,18 +23,10 @@ interface SqlRow {
   metadata_text: string;
   raw_bm25?: number | null;
 }
-
 interface ScopeClause {
   sql: string;
   params: unknown[];
 }
-
-export interface SqlTruthStats {
-  totalCount: number;
-  scopeCounts: Record<string, number>;
-  categoryCounts: Record<string, number>;
-}
-
 export interface SqlTruthFtsReport {
   truthRows: number;
   ftsRows: number;
@@ -825,6 +815,8 @@ export class SqlTruthStore {
     const db = this.requireDb();
     const metadata = entry.metadata || "{}";
     const metadataText = metadataSearchText(metadata);
+    const storedCategory = entry.category || "other", storedScope = entry.scope || "global";
+    const storedTimestamp = Number(entry.timestamp) || Date.now(), updatedAt = Date.now();
     db.prepare(
       `
       INSERT INTO memory_truth (
@@ -843,14 +835,16 @@ export class SqlTruthStore {
     ).run(
       entry.id,
       entry.text || "",
-      entry.category || "other",
-      entry.scope || "global",
+      storedCategory,
+      storedScope,
       Number(entry.importance) || 0,
-      Number(entry.timestamp) || Date.now(),
+      storedTimestamp,
       metadata,
       metadataText,
-      Date.now(),
+      updatedAt,
     );
+    upsertLifecycleProjection(db, { ...entry, text: entry.text || "", category: storedCategory,
+      scope: storedScope, timestamp: storedTimestamp, metadata }, updatedAt);
     this.injectFault("truth_after_upsert");
     this.replaceFts(entry.id, entry.text || "", metadataText);
   }
@@ -876,6 +870,7 @@ export class SqlTruthStore {
     this.injectFault("fts_before_delete");
     db.prepare("DELETE FROM memory_truth_fts WHERE memory_id = ?").run(id);
     db.prepare("DELETE FROM memory_truth WHERE id = ?").run(id);
+    deleteLifecycleProjection(db, id);
   }
 
   /**
@@ -1093,13 +1088,11 @@ export class SqlTruthStore {
     ).all(...params, safeLimit, safeOffset) as SqlRow[];
     return rows.map(toMemoryEntry);
   }
-
-  stats(scopeFilter?: string[]): SqlTruthStats {
+  stats(scopeFilter?: string[]): MemoryTruthStats {
     const db = this.requireDb();
     const scope = this.scopeClause("m", scopeFilter);
-    const total = db.prepare(
-      `SELECT COUNT(*) AS count FROM memory_truth m WHERE ${scope.sql}`,
-    ).get(...scope.params) as { count: number };
+    const total = db.prepare(`SELECT COUNT(*) AS count FROM memory_truth m WHERE ${scope.sql}`)
+      .get(...scope.params) as { count: number };
     const scopeRows = db.prepare(
       `
       SELECT COALESCE(m.scope, 'global') AS scope, COUNT(*) AS count
@@ -1116,14 +1109,18 @@ export class SqlTruthStore {
       GROUP BY m.category
       `,
     ).all(...scope.params) as Array<{ category: string; count: number }>;
-
+    const lifecycleAccess = openLifecycleProjectionReadAccess(db);
+    const lifecycle = lifecycleAccess.readScopeCounts
+      ? lifecycleAccess.readScopeCounts({ scopeSql: scope.sql, scopeParams: scope.params })
+      : { totalCount: 0, counts: {} };
     return {
       totalCount: Number(total?.count || 0),
       scopeCounts: Object.fromEntries(scopeRows.map((row) => [row.scope, Number(row.count)])),
       categoryCounts: Object.fromEntries(categoryRows.map((row) => [row.category, Number(row.count)])),
+      lifecycleScopeCounts: lifecycle.counts,
+      lifecycleProjection: lifecycleAccess.health,
     };
   }
-
   bulkDelete(scopeFilter: string[], beforeTimestamp?: number): string[] {
     const db = this.requireDb();
     const clauses: string[] = [];
@@ -1308,10 +1305,11 @@ export class SqlTruthStore {
     this.withTransaction(() => {
       runSql(db, `${EXPECTED_SCHEMA_OBJECTS.map(([, , sql]) => sql).join(";\n")};`);
       this.injectFault("schema_after_ddl");
+      // Existing authorities require explicit repair; only creation/migration may initialize.
+      if (marker) ensureLifecycleProjection(db, { force: marker.origin === "legacy-upgrade" });
       this.reconcileFts();
       this.injectFault("schema_after_fts_reconcile");
       if (!marker) return;
-
       const now = marker.evidence?.completedAt ?? Date.now();
       if (marker.origin === "legacy-upgrade") {
         const evidence = marker.evidence;

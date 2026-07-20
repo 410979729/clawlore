@@ -36,6 +36,7 @@ const { registerAllMemoryTools } = jiti("../src/tools.ts");
 const { EXPERIENCE_TOOL_NAMES } = jiti("../src/experience-tools.ts");
 const { buildSecretIndex } = jiti("../src/secret-index.ts");
 const { SmartExtractor } = jiti("../src/smart-extractor.ts");
+const { storeReflectionToLanceDB } = jiti("../src/reflection-store.ts");
 const { resolveRuntimeMemoryAccess } = jiti("../src/runtime-memory-boundary.ts");
 const { parseRuntimePluginConfig } = jiti("../src/plugin-config.ts");
 
@@ -79,6 +80,7 @@ function createWritableToolMap(toolCtx = {}, options = {}) {
   const tools = new Map();
   const stored = [];
   const retrieved = [];
+  const embedded = [];
   const api = {
     registerTool(factory, meta) {
       tools.set(meta.name, factory(toolCtx));
@@ -104,7 +106,7 @@ function createWritableToolMap(toolCtx = {}, options = {}) {
         };
       },
       update: async () => null,
-      vectorSearch: async () => [],
+      vectorSearch: options.vectorSearch ?? (async () => []),
     },
     scopeManager: {
       getDefaultScope(agentId) {
@@ -117,7 +119,12 @@ function createWritableToolMap(toolCtx = {}, options = {}) {
         return scope === "global" || scope === `agent:${agentId}`;
       },
     },
-    embedder: { embedPassage: async () => [0.1, 0.2, 0.3] },
+    embedder: {
+      async embedPassage(text) {
+        embedded.push(text);
+        return [0.1, 0.2, 0.3];
+      },
+    },
     workspaceDir: "/workspace/default",
     principalIsolation: options.principalIsolation,
   };
@@ -126,7 +133,7 @@ function createWritableToolMap(toolCtx = {}, options = {}) {
     enableSelfImprovementTools: false,
     secretIndexToolsEnabled: options.secretIndexToolsEnabled === true,
   });
-  return { tools, stored, retrieved };
+  return { tools, stored, retrieved, embedded };
 }
 
 function createSystemBypassToolMap() {
@@ -355,6 +362,20 @@ test("secret index rejects plaintext secrets in free-text metadata fields", () =
     () => buildSecretIndex({ label: "invalid digest", secretFingerprintSha256: "plaintext-secret" }),
     /locally generated 64-character SHA-256 digest/,
   );
+  assert.throws(
+    () => buildSecretIndex({
+      label: "entity boundary",
+      entities: ['{"databasePassword":"synthetic-entity-value"}'],
+    }),
+    /secret index field 'entities' rejected/,
+  );
+  assert.throws(
+    () => buildSecretIndex({
+      label: "tag boundary",
+      tags: ["Authorization: Digest synthetic-tag-credential-material"],
+    }),
+    /secret index field 'tags' rejected/,
+  );
 });
 
 test("memory_store persists deterministic runtime scope metadata", async () => {
@@ -399,12 +420,37 @@ test("memory_store persists deterministic runtime scope metadata", async () => {
   assert.equal(metadata.account_id, "default");
   assert.equal(metadata.conversation_id, "8176453077");
   assert.equal(metadata.thread_id, "direct");
-  assert.equal(metadata.workspace_dir, "/workspace/runtime");
+  assert.equal(metadata.workspace_bound, true);
+  assert.equal("workspace_dir" in metadata, false);
+  assert.equal(JSON.stringify(metadata).includes("/workspace/runtime"), false);
   assert.equal(metadata.scope_id, expectedScope);
   assert.deepEqual(metadata.scope_filter, [expectedScope]);
   assert.equal(metadata.scope_filter_mode, "restricted");
   assert.equal(metadata.memory_boundary, "private");
   assert.equal(metadata.principal_hash.length, 16);
+  assert.equal(metadata.dedup_skipped, false);
+});
+
+test("memory_store records when its fail-open duplicate precheck was unavailable", async () => {
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    const { tools, stored } = createWritableToolMap({}, {
+      vectorSearch: async () => { throw new Error("vector lane unavailable"); },
+    });
+    const result = await tools.get("memory_store").execute(
+      "test-call",
+      { text: "Record dedup precheck availability in memory metadata." },
+      undefined,
+      undefined,
+      { agentId: "main", sessionKey: "agent:main:telegram:default:direct:8176453077" },
+    );
+    assert.equal(result.details.action, "created");
+    assert.equal(result.details.dedupSkipped, true);
+    assert.equal(JSON.parse(stored[0].metadata).dedup_skipped, true);
+  } finally {
+    console.warn = originalWarn;
+  }
 });
 
 test("memory_store denies inaccessible scopes before embedding or storing", async () => {
@@ -426,6 +472,28 @@ test("memory_store denies inaccessible scopes before embedding or storing", asyn
 
   assert.equal(result.details.error, "scope_access_denied");
   assert.equal(stored.length, 0);
+});
+
+test("memory_update rejects secret-bearing text before provider embedding", async () => {
+  const { tools, embedded, stored } = createWritableToolMap();
+  const result = await tools.get("memory_update").execute(
+    "test-call",
+    {
+      memoryId: "11111111-1111-1111-1111-111111111111",
+      text: "databasePassword: SyntheticUpdateSecret123",
+    },
+    undefined,
+    undefined,
+    {
+      agentId: "main",
+      sessionKey: "agent:main:telegram:default:direct:8176453077",
+    },
+  );
+
+  assert.equal(result.details.action, "capture_safety_filtered");
+  assert.equal(embedded.length, 0);
+  assert.equal(stored.length, 0);
+  assert.doesNotMatch(JSON.stringify(result), /SyntheticUpdateSecret123/u);
 });
 
 test("memory_recall denies inaccessible scopes before retrieval", async () => {
@@ -450,6 +518,7 @@ test("memory_recall denies inaccessible scopes before retrieval", async () => {
 
 test("smart extraction persists runtime scope metadata on auto-captured memories", async () => {
   const stored = [];
+  const providerInputs = [];
   const store = {
     vectorSearch: async () => [],
     async store(entry) {
@@ -460,10 +529,14 @@ test("smart extraction persists runtime scope metadata on auto-captured memories
     update: async () => null,
   };
   const embedder = {
-    embed: async () => [0.4, 0.5, 0.6],
+    embed: async (text) => {
+      providerInputs.push(text);
+      return [0.4, 0.5, 0.6];
+    },
   };
   const llm = {
-    async completeJson(_prompt, label) {
+    async completeJson(prompt, label) {
+      providerInputs.push(prompt);
       if (label === "extract-candidates") {
         return {
           memories: [
@@ -488,7 +561,7 @@ test("smart extraction persists runtime scope metadata on auto-captured memories
   const sessionKey = "agent:main:telegram:default:direct:8176453077";
 
   const stats = await extractor.extractAndPersist(
-    "Joy said OpenClaw release audits should include targeted regression tests.",
+    "Joy said OpenClaw release audits should include targeted regression tests.\n[Image attached at: /tmp/clawlore-private-audit.png]",
     sessionKey,
     {
       scope: "agent:main",
@@ -517,6 +590,194 @@ test("smart extraction persists runtime scope metadata on auto-captured memories
   assert.equal(metadata.scope_id, "agent:main");
   assert.deepEqual(metadata.scope_filter, ["agent:main", "global"]);
   assert.equal(metadata.scope_filter_mode, "restricted");
+  assert.equal(providerInputs.join("\n").includes("clawlore-private-audit.png"), false);
+});
+
+test("smart extraction keeps unsafe noise inputs and invalid provider fields out of providers and logs", async () => {
+  const syntheticValue = "SyntheticInvalidProviderValue7788";
+  const embedded = [];
+  const logs = [];
+  const extractor = new SmartExtractor(
+    {
+      vectorSearch: async () => [],
+      store: async () => fail("invalid candidates must not be stored"),
+      getById: async () => null,
+      update: async () => null,
+    },
+    {
+      async embed(text) {
+        embedded.push(text);
+        return [0.1, 0.2, 0.3];
+      },
+    },
+    {
+      async completeJson() {
+        return {
+          memories: [{
+            category: `databasePassword: ${syntheticValue}`,
+            abstract: `private ${syntheticValue}`,
+            overview: "invalid provider output",
+            content: "invalid provider output must be rejected",
+          }],
+        };
+      },
+      getLastError: () => null,
+    },
+    {
+      defaultScope: "agent:main",
+      log: (message) => logs.push(message),
+      debugLog: (message) => logs.push(message),
+      noiseBank: {
+        initialized: true,
+        isNoise: () => false,
+      },
+    },
+  );
+
+  const safeTexts = await extractor.filterNoiseByEmbedding([
+    "Release verification is required. [Image attached at: /tmp/clawlore-noise-private.png]",
+    `databasePassword: ${syntheticValue}`,
+  ]);
+  assert.deepEqual(safeTexts, ["Release verification is required."]);
+  assert.equal(embedded.length, 1);
+  assert.doesNotMatch(embedded.join("\n"), /clawlore-noise-private|SyntheticInvalidProviderValue/u);
+
+  const stats = await extractor.extractAndPersist(
+    "Release verification must run before updating the repository version.",
+    "agent:main:telegram:default:direct:8176453077",
+  );
+  assert.equal(stats.created, 0);
+  assert.doesNotMatch(logs.join("\n"), /SyntheticInvalidProviderValue/u);
+});
+
+test("reflection embeddings exclude direct runtime session identifiers", async () => {
+  const sessionKey = "agent:main:telegram:default:direct:8176453077";
+  const sessionId = "session-private-123";
+  const scope = "user:direct-principal-private";
+  const embedded = [];
+  const stored = [];
+
+  const result = await storeReflectionToLanceDB({
+    reflectionText: [
+      "## Invariants",
+      "- Release audits require independent regression evidence.",
+      "",
+      "## Derived",
+      "- Keep provider-bound semantic text free of runtime identifiers.",
+    ].join("\n"),
+    sessionKey,
+    sessionId,
+    agentId: "main",
+    command: "new",
+    scope,
+    toolErrorSignals: [],
+    runAt: 1_700_000_000_000,
+    usedFallback: false,
+    async embedPassage(text) {
+      embedded.push(text);
+      return [0.1, 0.2, 0.3];
+    },
+    vectorSearch: async () => [],
+    async store(entry) {
+      stored.push(entry);
+      return { ...entry, id: `reflection-${stored.length}`, timestamp: 1_700_000_000_000 };
+    },
+  });
+
+  assert.equal(result.stored, true);
+  assert.ok(embedded.length > 0);
+  for (const text of embedded) {
+    assert.doesNotMatch(text, new RegExp(sessionKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
+    assert.doesNotMatch(text, new RegExp(sessionId, "u"));
+    assert.doesNotMatch(text, new RegExp(scope, "u"));
+  }
+  assert.equal(JSON.parse(stored[0].metadata).sessionKey, sessionKey);
+});
+
+test("smart merge rejects unsafe provider output before embedding or update", async () => {
+  const syntheticValue = ["clawlore", "audit", "only", "merge", "value"].join("-");
+  const stored = [];
+  const updated = [];
+  const embedded = [];
+  const logs = [];
+  const existing = {
+    id: "10000000-0000-4000-8000-000000000001",
+    text: "Joy prefers concise release reports.",
+    vector: [0.2, 0.3, 0.4],
+    category: "preference",
+    scope: "agent:main",
+    importance: 0.8,
+    timestamp: 1_700_000_000_000,
+    metadata: JSON.stringify({
+      memory_category: "preferences",
+      l0_abstract: "Joy prefers concise release reports.",
+      l1_overview: "- Reports should stay concise.",
+      l2_content: "Joy prefers concise release reports with verification evidence.",
+    }),
+  };
+  const store = {
+    vectorSearch: async () => [{ entry: existing, score: 0.95 }],
+    getById: async () => existing,
+    async store(entry) {
+      stored.push(entry);
+      return { ...entry, id: `merge-fallback-${stored.length}`, timestamp: Date.now() };
+    },
+    async update(id, patch) {
+      updated.push({ id, patch });
+      return { ...existing, ...patch };
+    },
+  };
+  const embedder = {
+    async embed(text) {
+      embedded.push(text);
+      return [0.4, 0.5, 0.6];
+    },
+  };
+  const llm = {
+    async completeJson(_prompt, label) {
+      if (label === "extract-candidates") {
+        return {
+          memories: [{
+            category: "preferences",
+            abstract: "Joy prefers concise audited release reports.",
+            overview: "- Keep release reports concise and evidence-backed.",
+            content: "Joy prefers concise release reports that include concrete audit evidence.",
+          }],
+        };
+      }
+      if (label === "dedup-decision") {
+        return { decision: "merge", reason: "same preference", match_index: 1 };
+      }
+      if (label === "merge-memory") {
+        return {
+          abstract: "Joy prefers concise audited release reports.",
+          overview: "- Keep release reports concise and evidence-backed.",
+          content: `databasePassword: ${syntheticValue}`,
+        };
+      }
+      return null;
+    },
+    getLastError: () => null,
+  };
+  const extractor = new SmartExtractor(store, embedder, llm, {
+    defaultScope: "agent:main",
+    log: (message) => logs.push(message),
+    debugLog: () => {},
+  });
+
+  const stats = await extractor.extractAndPersist(
+    "Joy prefers concise release reports with concrete audit evidence.",
+    "agent:main:telegram:default:direct:8176453077",
+    { scope: "agent:main", scopeFilter: ["agent:main", "global"] },
+  );
+
+  assert.equal(stats.created, 1);
+  assert.equal(stats.merged, 0);
+  assert.equal(stored.length, 1);
+  assert.equal(updated.length, 0);
+  assert.equal(embedded.some((text) => text.includes(syntheticValue)), false);
+  assert.equal(JSON.stringify(stored).includes(syntheticValue), false);
+  assert.equal(logs.join("\n").includes(syntheticValue), false);
 });
 
 test("operator schemas include rejected memory state", () => {
@@ -607,6 +868,36 @@ test("vector repair CLI is dry-run-first and SQLite stores use busy timeout", ()
   assert.match(sqliteVectorStore, /PRAGMA busy_timeout = 10000/);
 });
 
+test("legacy CLI import rejects unsafe rows before retrieval or embedding", () => {
+  const source = readFileSync(new URL("../src/cli/experience-commands.ts", import.meta.url), "utf8");
+  const safetyGate = source.indexOf("isMemoryEntrySafeForEgress({ text, metadata })");
+  const retrieval = source.indexOf("context.retriever.retrieve({", safetyGate);
+  const embedding = source.indexOf("context.embedder.embedPassage(text)", safetyGate);
+
+  assert.ok(safetyGate >= 0);
+  assert.ok(retrieval > safetyGate);
+  assert.ok(embedding > safetyGate);
+});
+
+test("legacy CLI export fails closed on unsafe rows and uses private atomic writes", () => {
+  const source = readFileSync(new URL("../src/cli/experience-commands.ts", import.meta.url), "utf8");
+  const unsafeGate = source.indexOf("isMemoryEntrySafeForEgress(memory)");
+  const serialization = source.indexOf("formatJson(exportData)", unsafeGate);
+  const privateParent = source.indexOf("verifyPrivatePath(path.dirname(outputPath)", serialization);
+  const privateWrite = source.indexOf("writePrivateFileAtomic(outputPath, output)", privateParent);
+
+  assert.ok(unsafeGate >= 0);
+  assert.ok(serialization > unsafeGate);
+  assert.ok(privateParent > serialization);
+  assert.ok(privateWrite > privateParent);
+});
+
+test("operator CLI catch paths never print raw error objects", () => {
+  const cli = readClawLoreCliSources();
+  assert.doesNotMatch(cli, /console\.(?:error|warn)\([^;\n]*,\s*(?:error|err)\s*\)/u);
+  assert.doesNotMatch(cli, /console\.(?:error|warn)\(`[^`]*\$\{(?:error|err)\}[^`]*`\)/u);
+});
+
 test("operator CLI exposes Yuheng 1.6 governance function surface", () => {
   const cli = readClawLoreCliSources();
   for (const marker of [
@@ -649,6 +940,7 @@ test("operator CLI exposes Yuheng 1.6 governance function surface", () => {
 test("release gate includes source/live separation and OpenClaw runtime smoke", () => {
   const gate = readFileSync(new URL("../scripts/release-gate.mjs", import.meta.url), "utf8");
   const wrapper = readFileSync(new URL("../scripts/run-release-gate.mjs", import.meta.url), "utf8");
+  const operatorContract = readFileSync(new URL("../scripts/release-operator-contract.mjs", import.meta.url), "utf8");
   const preflight = readFileSync(new URL("../scripts/dependency-preflight.mjs", import.meta.url), "utf8");
   const reproducibility = readFileSync(new URL("../scripts/reproducible-install-gate.mjs", import.meta.url), "utf8");
   const workflow = readFileSync(new URL("../.github/workflows/release-gate.yml", import.meta.url), "utf8");
@@ -660,7 +952,8 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   const supplyChainAudit = readFileSync(new URL("../scripts/supply-chain-audit.mjs", import.meta.url), "utf8");
   assert.equal(packageJson.scripts["release:gate"], "node scripts/run-release-gate.mjs");
   assert.equal(packageJson.scripts["release:gate:source"], "node scripts/run-release-gate.mjs --source-only");
-  assert.equal(packageJson.engines.node, ">=24.0.0 <25");
+  assert.equal(packageJson.scripts["release:prepush"], "node scripts/run-release-gate.mjs --pre-push");
+  assert.equal(packageJson.engines.node, ">=24.15.0 <25");
   assert.deepEqual(packageJson.os, ["linux", "win32"]);
   assert.equal(packageJson.peerDependencies.openclaw, ">=2026.7.1-beta.5 <2027");
   assert.equal(packageJson.peerDependenciesMeta.openclaw.optional, true);
@@ -668,8 +961,12 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   assert.equal(packageJson.openclaw.compat.pluginApi, ">=2026.7.1-beta.5");
   assert.equal(packageJson.openclaw.compat.minGatewayVersion, "2026.7.1-beta.5");
   assert.equal(packageJson.clawloreRelease.evidenceFile, "docs/clawlore/eval/clawlore-v1-release-evidence.json");
-  assert.match(wrapper, /CLAWLORE_ALLOW_NESTED_GIT_ROOT/);
-  assert.match(wrapper, /CLAWLORE_SOURCE_ONLY/);
+  assert.match(operatorContract, /CLAWLORE_ALLOW_NESTED_GIT_ROOT/);
+  assert.match(operatorContract, /CLAWLORE_SOURCE_ONLY/);
+  assert.match(operatorContract, /CLAWLORE_PRE_PUSH/);
+  assert.match(operatorContract, /CLAWLORE_RUNTIME_PRINCIPAL/);
+  assert.match(operatorContract, /CLAWLORE_RELEASE_REF/);
+  assert.match(wrapper, /releaseGateEnvironment/);
   assert.match(wrapper, /shell:\s*false/);
   assert.match(packageJson.scripts["release:reproducibility"], /reproducible-install-gate/);
   assert.match(gate, /"rev-parse",\s*"--show-toplevel"/);
@@ -702,7 +999,9 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   assert.match(gate, /effectiveLegacyConfig\.llm\?\.apiKey\?\.id !== "__OPENCLAW_REDACTED__"/);
   assert.match(gate, /migrated legacy identity doctor did not report ok=true/);
   assert.match(gate, /packedOpenClawCliSmoke: true/);
-  assert.match(gate, /clawlore\.release-evidence\.v2/);
+  assert.match(gate, /clawlore\.release-evidence\.v3/);
+  assert.match(gate, /NON-AUTHORIZING pre-push mode/);
+  assert.match(gate, /publicationVerified: !prePush/);
   assert.match(gate, /packageLockSha256/);
   assert.match(gate, /committedGitBlobSha256/);
   assert.match(gate, /working-tree package-lock\.json bytes differ from the committed Git blob/);
@@ -726,7 +1025,7 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   assert.match(workflow, /ubuntu-latest/);
   assert.match(workflow, /windows-latest/);
   assert.match(workflow, /openclaw@2026\.7\.1-beta\.5/);
-  assert.match(workflow, /npm run release:gate:source/);
+  assert.match(workflow, /npm run release:prepush/);
   assert.equal(buildConfig.compilerOptions.newLine, "lf");
   assert.match(gitAttributes, /^\/package\.json text eol=lf$/m);
   assert.match(gitAttributes, /^\/package-lock\.json text eol=lf$/m);

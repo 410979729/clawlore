@@ -1,12 +1,63 @@
 import { createHash } from "node:crypto";
-import { memoryAddressKey } from "../domain/memory-address.js";
-const SECRET_PATTERNS = [
-    /\b(?:api[_-]?key|token|password|secret)\s*[:=]\s*[^\s]{8,}/i,
-    /\bsk-[A-Za-z0-9_-]{12,}\b/,
-    /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
-];
+import { memoryAddressKey, validateMemoryAddress } from "../domain/memory-address.js";
+import { evaluateCaptureSafety, sanitizeCaptureText } from "../../capture-safety.js";
+import { assertMemoryAddressIdentifiersSafe, normalizeIsoTimestamp, normalizeTruthIdentifier, } from "../domain/truth-write-policy.js";
 function normalizedContent(value) {
     return value.replace(/\s+/g, " ").trim();
+}
+const TRIGGERS = new Set([
+    "explicit", "auto_capture", "reflection", "digest", "task_experience",
+]);
+const CATEGORIES = new Set([
+    "profile", "preference", "fact", "decision", "commitment", "procedure", "pitfall",
+]);
+const SOURCE_ROLES = new Set(["user", "assistant", "tool"]);
+function safeIdentifiers(values, label, maxItems = 256) {
+    if (values == null)
+        return [];
+    if (!Array.isArray(values) || values.length > maxItems) {
+        throw new Error(`${label} list exceeds the size limit`);
+    }
+    return [...new Set(values.map((value) => normalizeTruthIdentifier(value, label, 512)))].sort();
+}
+function safeProviderText(value, label, required) {
+    if (value == null && !required)
+        return undefined;
+    if (typeof value !== "string" || value.length > 64_000) {
+        throw new Error(`${label} rejected by safety policy`);
+    }
+    const sanitized = sanitizeCaptureText(value);
+    if (!sanitized) {
+        if (required)
+            throw new Error(`${label} rejected by safety policy`);
+        return undefined;
+    }
+    if (!evaluateCaptureSafety(sanitized).allowed) {
+        if (required)
+            throw new Error(`${label} rejected by safety policy`);
+        return undefined;
+    }
+    return sanitized;
+}
+function normalizeEvent(event) {
+    if (!event || typeof event !== "object")
+        throw new Error("distillation event is required");
+    if (!validateMemoryAddress(event.address).valid)
+        throw new Error("invalid distillation memory address");
+    assertMemoryAddressIdentifiersSafe(event.address);
+    const trigger = event.trigger ?? "explicit";
+    if (!TRIGGERS.has(trigger))
+        throw new Error("distillation trigger is unsupported");
+    return {
+        ...event,
+        eventId: normalizeTruthIdentifier(event.eventId, "distillation event id", 512),
+        trigger,
+        sourceIds: safeIdentifiers(event.sourceIds, "distillation source id"),
+        toolReceiptIds: safeIdentifiers(event.toolReceiptIds, "distillation tool receipt id"),
+        userText: safeProviderText(event.userText, "distillation user text", true),
+        assistantText: safeProviderText(event.assistantText, "distillation assistant text", false),
+        observedAt: normalizeIsoTimestamp(event.observedAt, "distillation observedAt"),
+    };
 }
 function proposalKey(proposal, address) {
     return createHash("sha256")
@@ -27,13 +78,23 @@ function payloadHash(event) {
         .digest("hex");
 }
 function admission(proposal, event) {
+    if (!proposal || typeof proposal !== "object"
+        || !CATEGORIES.has(proposal.category) || !SOURCE_ROLES.has(proposal.sourceRole)) {
+        return { allowed: false, reason: "proposal_shape_invalid", lifecycle: "candidate", verification: "unverified" };
+    }
+    if (typeof proposal.content !== "string") {
+        return { allowed: false, reason: "proposal_shape_invalid", lifecycle: "candidate", verification: "unverified" };
+    }
     const content = normalizedContent(proposal.content);
     if (!content || content.length < 4)
         return { allowed: false, reason: "content_too_short", lifecycle: "candidate", verification: "unverified" };
     if (content.length > 4_000)
         return { allowed: false, reason: "content_too_long", lifecycle: "candidate", verification: "unverified" };
-    if (SECRET_PATTERNS.some((pattern) => pattern.test(content)))
-        return { allowed: false, reason: "secret_shaped_content", lifecycle: "candidate", verification: "unverified" };
+    const captureSafety = evaluateCaptureSafety(content);
+    if (sanitizeCaptureText(content) !== content || !captureSafety.allowed) {
+        const reason = captureSafety.reason === "secret" ? "secret_shaped_content" : "capture_unsafe_content";
+        return { allowed: false, reason, lifecycle: "candidate", verification: "unverified" };
+    }
     if (!Number.isFinite(proposal.confidence) || proposal.confidence < 0.55)
         return { allowed: false, reason: "confidence_below_threshold", lifecycle: "candidate", verification: "unverified" };
     if (event.explicitRemember === true && proposal.sourceRole === "user") {
@@ -57,7 +118,8 @@ export class UnifiedDistillationPipelineV2 {
         this.journal = journal;
         this.extractor = extractor;
     }
-    async process(event) {
+    async process(rawEvent) {
+        const event = normalizeEvent(rawEvent);
         if (await this.journal.has(event.eventId)) {
             return {
                 schemaVersion: 2, eventId: event.eventId, trigger: event.trigger ?? "explicit",
@@ -67,20 +129,23 @@ export class UnifiedDistillationPipelineV2 {
             };
         }
         const proposals = await this.extractor.extract(event);
+        if (!Array.isArray(proposals) || proposals.length > 256) {
+            throw new Error("distillation proposal list exceeds the size limit");
+        }
         const itemIds = [];
         const rejectionReasons = [];
         let duplicates = 0;
         let rejected = 0;
         for (const proposal of proposals) {
-            const key = proposalKey(proposal, event.address);
-            if (this.seen.has(key)) {
-                duplicates += 1;
-                continue;
-            }
             const decision = admission(proposal, event);
             if (!decision.allowed) {
                 rejected += 1;
                 rejectionReasons.push(decision.reason);
+                continue;
+            }
+            const key = proposalKey(proposal, event.address);
+            if (this.seen.has(key)) {
+                duplicates += 1;
                 continue;
             }
             this.seen.add(key);

@@ -1,7 +1,9 @@
 /**
  * CLI Commands for Memory Management
  */
+import { diagnosticErrorSummary } from "../diagnostic-redaction.js";
 import { formatJson, formatMemory, writeJson } from "./cli-runtime-policy.js";
+import { redactMemoryEntryForOutput } from "../memory-egress-policy.js";
 export function registerMemoryCommands(runtime) {
     const { program, memory, context, runSearch, getSqlDbOrThrow, parseScopeFilter, parseLimitOption, dryRunFromApplyOptions, loadKnowledgeDocs, hasTables, requireExperienceTables, } = runtime;
     // List memories
@@ -23,7 +25,7 @@ export function registerMemoryCommands(runtime) {
             }
             const memories = await context.store.list(scopeFilter, options.category, limit, offset);
             if (options.json) {
-                console.log(formatJson(memories));
+                console.log(formatJson(memories.map((memory) => redactMemoryEntryForOutput(memory))));
             }
             else {
                 if (memories.length === 0) {
@@ -38,7 +40,7 @@ export function registerMemoryCommands(runtime) {
             }
         }
         catch (error) {
-            console.error("Failed to list memories:", error);
+            console.error(`Failed to list memories: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });
@@ -82,7 +84,7 @@ export function registerMemoryCommands(runtime) {
             }
         }
         catch (error) {
-            console.error("Search failed:", error);
+            console.error(`Search failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });
@@ -137,7 +139,7 @@ export function registerMemoryCommands(runtime) {
             }
         }
         catch (error) {
-            console.error("Failed to get statistics:", error);
+            console.error(`Failed to get statistics: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });

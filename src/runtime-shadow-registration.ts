@@ -3,8 +3,18 @@ import { join } from "node:path";
 
 import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
 import type { PluginConfig } from "./plugin-config.js";
-import { computeRuntimeReleaseBinding, resolvePluginRoot } from "./release-provenance.js";
+import { canonicalDigest, computeRuntimeReleaseBinding, resolvePluginRoot } from "./release-provenance.js";
 import type { createRetriever } from "./retriever.js";
+import {
+  buildRuntimeDiagnosticReceipt,
+  createRuntimeInstanceIdentity,
+  invalidateRuntimeDiagnosticReceipt,
+  renewRuntimeDiagnosticReceipt,
+  resolveRuntimeDiagnosticFile,
+  RUNTIME_DIAGNOSTIC_HEARTBEAT_MS,
+  writeRuntimeDiagnosticReceipt,
+  type RuntimeDiagnosticReceiptV2,
+} from "./runtime-diagnostic-receipt.js";
 import { resolveScopeFilter } from "./scopes.js";
 import type { createScopeManager } from "./scopes.js";
 import {
@@ -24,6 +34,57 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+export function createRuntimeDiagnosticLeaseController(params: {
+  file: string;
+  baseReceipt: RuntimeDiagnosticReceiptV2;
+  logger: { warn(message: string): void };
+}): {
+  persist(): Promise<void>;
+  start(): Promise<void>;
+  stop(): Promise<void>;
+} {
+  let currentReceipt = params.baseReceipt;
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
+  let writeChain = Promise.resolve();
+  let generation = 0;
+  const queueWrite = (nextReceipt: RuntimeDiagnosticReceiptV2): Promise<void> => {
+    currentReceipt = nextReceipt;
+    writeChain = writeChain
+      .catch(() => undefined)
+      .then(() => writeRuntimeDiagnosticReceipt(params.file, nextReceipt));
+    return writeChain;
+  };
+  const persist = () => queueWrite(renewRuntimeDiagnosticReceipt(currentReceipt));
+  return {
+    persist,
+    async start() {
+      generation++;
+      const activeGeneration = generation;
+      if (heartbeat) clearInterval(heartbeat);
+      await queueWrite(renewRuntimeDiagnosticReceipt(params.baseReceipt));
+      heartbeat = setInterval(() => {
+        if (activeGeneration !== generation) return;
+        void persist().catch((error) => {
+          params.logger.warn(`clawlore: runtime diagnostic heartbeat failed: ${diagnosticErrorSummary(error)}`);
+        });
+      }, RUNTIME_DIAGNOSTIC_HEARTBEAT_MS);
+      heartbeat.unref?.();
+    },
+    async stop() {
+      generation++;
+      if (heartbeat) {
+        clearInterval(heartbeat);
+        heartbeat = undefined;
+      }
+      try {
+        await queueWrite(invalidateRuntimeDiagnosticReceipt(currentReceipt));
+      } catch (error) {
+        params.logger.warn(`clawlore: runtime diagnostic invalidation failed: ${diagnosticErrorSummary(error)}`);
+      }
+    },
+  };
+}
+
 /** Registers the read-only ClawLore shadow runtime; it never enables writes or prompt mutation. */
 export function registerClawLoreShadowRuntime(params: {
   api: OpenClawPluginApi;
@@ -32,7 +93,12 @@ export function registerClawLoreShadowRuntime(params: {
   retriever: ReturnType<typeof createRetriever>;
   scopeManager: ReturnType<typeof createScopeManager>;
   pluginEntryUrl: string;
-}): void {
+}): {
+  file: string;
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  persist(): Promise<void>;
+} {
   const { api, config, resolvedDbPath, retriever, scopeManager } = params;
   const retrieveWithRetry = async (input: {
     query: string;
@@ -138,4 +204,22 @@ export function registerClawLoreShadowRuntime(params: {
   api.logger.info(
     `clawlore: runtime status=${receipt.status} mode=${receipt.requestedMode} hooks=${receipt.registeredHooks.length} writes=${receipt.writeEnabled} promptMutation=${receipt.promptMutationEnabled} contextEngine=${receipt.contextEngineRegistered} blocks=${receipt.blockingReasons.join(",") || "none"}`,
   );
+  const instance = createRuntimeInstanceIdentity();
+  const diagnosticReceipt = buildRuntimeDiagnosticReceipt({
+    configDigest: canonicalDigest(config),
+    binding: releaseBinding,
+    readiness: rolloutControls.readiness,
+    readinessErrors: rolloutControls.errors,
+    runtime: receipt,
+    instance,
+  });
+  const file = resolveRuntimeDiagnosticFile(resolvedDbPath);
+  return {
+    file,
+    ...createRuntimeDiagnosticLeaseController({
+      file,
+      baseReceipt: diagnosticReceipt,
+      logger: api.logger,
+    }),
+  };
 }

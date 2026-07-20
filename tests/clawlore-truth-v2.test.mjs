@@ -163,6 +163,83 @@ test("Truth V2 correction preserves candidate lifecycle and cannot restore archi
   }
 });
 
+test("Truth V2 repository rejects unsafe or malformed writes before persistence", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clawlore-truth-policy-"));
+  const store = new SqliteTruthStoreV2(join(root, "truth.sqlite"), clock());
+  try {
+    store.open();
+    const valid = {
+      itemId: "policy-memory",
+      content: "A bounded\nmultiline memory",
+      category: " fact ",
+      address: address(),
+      lifecycle: "active",
+      verification: "tool_verified",
+      validUntil: "2026-07-11T12:00:00+01:00",
+      source: {
+        sourceType: "tool",
+        sourceId: "health-probe",
+        observedAt: "2026-07-11T11:00:00+01:00",
+        evidence: { status: "healthy" },
+      },
+      actor: "agent:main",
+      reason: "verified fixture",
+    };
+
+    assert.throws(() => store.remember({
+      ...valid, content: '{"databasePassword":"synthetic-truth-content-secret"}',
+    }), /safety policy/);
+    assert.throws(() => store.remember({
+      ...valid, source: { ...valid.source, evidence: { serviceToken: "synthetic-truth-evidence-secret" } },
+    }), /safety policy/);
+    assert.throws(() => store.remember({ ...valid, lifecycle: "purged" }), /initial lifecycle/);
+    assert.throws(() => store.remember({ ...valid, verification: "trusted" }), /verification/);
+    assert.throws(() => store.remember({
+      ...valid, source: { ...valid.source, sourceType: "network" },
+    }), /source type/);
+    assert.throws(() => store.remember({
+      ...valid, source: { ...valid.source, observedAt: "07/11/2026 10:00" },
+    }), /ISO-8601/);
+    assert.throws(() => store.remember({ ...valid, category: "  " }), /category is required/);
+    const cyclicEvidence = {};
+    cyclicEvidence.self = cyclicEvidence;
+    assert.throws(() => store.remember({
+      ...valid, source: { ...valid.source, evidence: cyclicEvidence },
+    }), /JSON serializable/);
+    assert.equal(store.count("memory_items"), 0);
+    assert.equal(store.count("memory_revisions"), 0);
+    assert.equal(store.count("memory_sources"), 0);
+
+    const receipt = store.remember(valid);
+    const record = store.get("policy-memory");
+    assert.equal(record.content, "A bounded\nmultiline memory");
+    assert.equal(record.category, "fact");
+    assert.equal(record.validUntil, "2026-07-11T11:00:00.000Z");
+    assert.equal(store.listMemoryCenterRows(address())[0].observedAt, "2026-07-11T10:00:00.000Z");
+
+    assert.throws(() => store.correct({
+      itemId: "policy-memory",
+      content: "Authorization: Bearer synthetic-correction-secret-material",
+      source: { sourceType: "tool", observedAt: "2026-07-11T10:00:00Z" },
+      actor: "agent:main",
+      reason: "unsafe correction",
+    }), /safety policy/);
+    assert.equal(store.get("policy-memory").revision, 1);
+    assert.throws(() => store.recordOutboxFailure(
+      receipt.outboxIds[0],
+      "token=synthetic-outbox-secret",
+    ), /safety policy/);
+    assert.throws(() => store.recordOutboxFailure(
+      receipt.outboxIds[0],
+      "projection_timeout",
+      "tomorrow",
+    ), /ISO-8601/);
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("legacy migration preview is read-only and preserves verification debt", async () => {
   const root = await mkdtemp(join(tmpdir(), "clawlore-legacy-preview-"));
   const path = join(root, "legacy.sqlite");

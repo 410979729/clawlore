@@ -4,12 +4,15 @@
 import JSON5 from "json5";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { diagnosticErrorSummary } from "../diagnostic-redaction.js";
 import { buildExperienceDebtReport } from "../experience-governance.js";
 import { runPromotionBatch } from "../experience-promotion-batch.js";
 import { promoteExperiences } from "../experience-promotion.js";
 import { loadReplayCases, runReplaySuite } from "../experience-replay.js";
 import { ensureExperienceSchema, getExperienceStats, reviewPlaybook, searchPlaybooks, } from "../experience-store.js";
 import { buildKnowledgeSkillDrafts } from "../knowledge-skill-bridge.js";
+import { verifyPrivatePath, writePrivateFileAtomic } from "../file-privacy.js";
+import { isMemoryEntrySafeForEgress } from "../memory-egress-policy.js";
 import { formatJson, writeJson } from "./cli-runtime-policy.js";
 export function registerExperienceCommands(runtime) {
     const { program, memory, context, runSearch, getSqlDbOrThrow, parseScopeFilter, parseLimitOption, dryRunFromApplyOptions, loadKnowledgeDocs, hasTables, requireExperienceTables, } = runtime;
@@ -43,7 +46,7 @@ export function registerExperienceCommands(runtime) {
             console.log(`• Runs: ${result.runs.total}`);
         }
         catch (error) {
-            console.error("Experience stats failed:", error);
+            console.error(`Experience stats failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });
@@ -83,7 +86,7 @@ export function registerExperienceCommands(runtime) {
             }
         }
         catch (error) {
-            console.error("Experience debt report failed:", error);
+            console.error(`Experience debt report failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });
@@ -117,7 +120,7 @@ export function registerExperienceCommands(runtime) {
             console.log(`• Needs review: ${result.playbooks_needing_review}`);
         }
         catch (error) {
-            console.error("Experience promotion failed:", error);
+            console.error(`Experience promotion failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });
@@ -156,7 +159,7 @@ export function registerExperienceCommands(runtime) {
                 console.log(`• Backup hint: ${result.backup_hint}`);
         }
         catch (error) {
-            console.error("Experience promotion batch failed:", error);
+            console.error(`Experience promotion batch failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });
@@ -198,7 +201,7 @@ export function registerExperienceCommands(runtime) {
             }
         }
         catch (error) {
-            console.error("Experience bridge draft generation failed:", error);
+            console.error(`Experience bridge draft generation failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });
@@ -238,7 +241,7 @@ export function registerExperienceCommands(runtime) {
             console.log(`• Failed: ${result.failed}`);
         }
         catch (error) {
-            console.error("Experience replay failed:", error);
+            console.error(`Experience replay failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });
@@ -282,7 +285,7 @@ export function registerExperienceCommands(runtime) {
             }
         }
         catch (error) {
-            console.error("Playbook list failed:", error);
+            console.error(`Playbook list failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });
@@ -309,13 +312,13 @@ export function registerExperienceCommands(runtime) {
                 return;
             }
             if (!result.reviewed) {
-                console.error(`Playbook review failed: ${result.error}`);
+                console.error(`Playbook review failed: ${diagnosticErrorSummary(result.error)}`);
                 process.exit(1);
             }
             console.log(`Playbook ${result.id} updated to ${result.status} (version ${result.version})`);
         }
         catch (error) {
-            console.error("Playbook review failed:", error);
+            console.error(`Playbook review failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });
@@ -340,13 +343,13 @@ export function registerExperienceCommands(runtime) {
                     return;
                 }
                 if (!result.reviewed) {
-                    console.error(`Playbook ${action} failed: ${result.error}`);
+                    console.error(`Playbook ${action} failed: ${diagnosticErrorSummary(result.error)}`);
                     process.exit(1);
                 }
                 console.log(`Playbook ${result.id} updated to ${result.status} (version ${result.version})`);
             }
             catch (error) {
-                console.error(`Playbook ${action} failed:`, error);
+                console.error(`Playbook ${action} failed: ${diagnosticErrorSummary(error)}`);
                 process.exit(1);
             }
         });
@@ -373,13 +376,13 @@ export function registerExperienceCommands(runtime) {
                 return;
             }
             if (!result.reviewed) {
-                console.error(`Playbook supersede failed: ${result.error}`);
+                console.error(`Playbook supersede failed: ${diagnosticErrorSummary(result.error)}`);
                 process.exit(1);
             }
             console.log(`Playbook ${result.id} superseded by ${options.supersededBy} (version ${result.version})`);
         }
         catch (error) {
-            console.error("Playbook supersede failed:", error);
+            console.error(`Playbook supersede failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });
@@ -404,7 +407,7 @@ export function registerExperienceCommands(runtime) {
             }
         }
         catch (error) {
-            console.error("Failed to delete memory:", error);
+            console.error(`Failed to delete memory: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });
@@ -443,14 +446,14 @@ export function registerExperienceCommands(runtime) {
             }
         }
         catch (error) {
-            console.error("Bulk delete failed:", error);
+            console.error(`Bulk delete failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });
     // Export memories
     memory
         .command("export")
-        .description("Export memories to JSON")
+        .description("Export secret-safe memories to JSON")
         .option("--scope <scope>", "Export specific scope")
         .option("--category <category>", "Export specific category")
         .option("--output <file>", "Output file (default: stdout)")
@@ -462,6 +465,10 @@ export function registerExperienceCommands(runtime) {
             }
             const memories = await context.store.list(scopeFilter, options.category, 1000 // Large limit for export
             );
+            const unsafeCount = memories.reduce((count, memory) => count + (isMemoryEntrySafeForEgress(memory) ? 0 : 1), 0);
+            if (unsafeCount > 0) {
+                throw new Error(`Export blocked: ${unsafeCount} memor${unsafeCount === 1 ? "y contains" : "ies contain"} secret-shaped text or metadata`);
+            }
             const exportData = {
                 version: "1.0",
                 exportedAt: new Date().toISOString(),
@@ -477,16 +484,17 @@ export function registerExperienceCommands(runtime) {
             };
             const output = formatJson(exportData);
             if (options.output) {
-                const fs = await import("node:fs/promises");
-                await fs.writeFile(options.output, output);
-                console.log(`Exported ${memories.length} memories to ${options.output}`);
+                const outputPath = path.resolve(options.output);
+                verifyPrivatePath(path.dirname(outputPath), { kind: "directory" });
+                await writePrivateFileAtomic(outputPath, output);
+                console.log(`Exported ${memories.length} memories to ${outputPath}`);
             }
             else {
                 console.log(output);
             }
         }
         catch (error) {
-            console.error("Export failed:", error);
+            console.error(`Export failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });
@@ -550,6 +558,13 @@ export function registerExperienceCommands(runtime) {
                             : "{}";
                     const idRaw = memory.id;
                     const id = typeof idRaw === "string" && idRaw.length > 0 ? idRaw : undefined;
+                    // Imported legacy rows are untrusted. Reject secret-bearing text or
+                    // metadata before retrieval/embedding so provider-backed lanes can
+                    // never receive plaintext that the final store gate would reject.
+                    if (!isMemoryEntrySafeForEgress({ text, metadata })) {
+                        skipped++;
+                        continue;
+                    }
                     // Idempotency: if the import file includes an id and we already have it, skip.
                     if (id && (await context.store.hasId(id))) {
                         skipped++;
@@ -593,14 +608,14 @@ export function registerExperienceCommands(runtime) {
                     imported++;
                 }
                 catch (error) {
-                    console.warn(`Failed to import memory: ${error}`);
+                    console.warn(`Failed to import memory: ${diagnosticErrorSummary(error)}`);
                     skipped++;
                 }
             }
             console.log(`Import completed: ${imported} imported, ${skipped} skipped`);
         }
         catch (error) {
-            console.error("Import failed:", error);
+            console.error(`Import failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });

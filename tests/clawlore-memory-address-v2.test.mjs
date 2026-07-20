@@ -65,6 +65,15 @@ test("private memory cannot cross principal", () => {
   assert.equal(decision.reasonCode, "private_principal_mismatch");
 });
 
+test("runtime address validation rejects forged enums, schema versions, and ambiguous identifiers", () => {
+  assert.equal(validateMemoryAddress({ ...address(), schemaVersion: 1 }).valid, false);
+  assert.equal(validateMemoryAddress({ ...address(), visibility: "shared-with-everyone" }).valid, false);
+  assert.equal(validateMemoryAddress({ ...address(), retention: "forever" }).valid, false);
+  assert.equal(validateMemoryAddress({ ...address(), principalId: " user-1" }).valid, false);
+  assert.equal(validateMemoryAddress({ ...address(), conversationId: "group-1\nforged" }).valid, false);
+  assert.equal(validateMemoryAddress(null).valid, false);
+});
+
 test("conversation memory requires the same conversation and thread", () => {
   const decision = decideMemoryAccess({
     actor: address({ visibility: "conversation", conversationId: "group-9", threadId: "topic-3" }),
@@ -99,4 +108,67 @@ test("global memory requires a grant and is never automatically injected by that
   assert.equal(withGrant.allowed, true);
   assert.equal(withGrant.injectable, false);
   assert.equal(withGrant.reasonCode, "explicit_grant");
+});
+
+test("grants bind exact private, conversation, and project targets", () => {
+  const actor = address();
+  const privateTarget = address({ principalId: "telegram:default:user-2" });
+  const broadPrivateGrant = {
+    id: "grant-private-broad",
+    effect: "allow",
+    operations: ["recall"],
+    subjectPrincipalId: actor.principalId,
+    tenantId: actor.tenantId,
+    agentId: actor.agentId,
+    visibility: "private",
+  };
+  assert.equal(decideMemoryAccess({
+    actor, target: privateTarget, operation: "recall", mode: "explicit", grants: [broadPrivateGrant],
+  }).allowed, false);
+  assert.equal(decideMemoryAccess({
+    actor, target: privateTarget, operation: "recall", mode: "explicit",
+    grants: [{ ...broadPrivateGrant, targetPrincipalId: privateTarget.principalId }],
+  }).allowed, true);
+
+  const conversationTarget = address({
+    visibility: "conversation", principalId: "telegram:default:user-2",
+    conversationId: "group-2", threadId: "topic-2",
+  });
+  const conversationGrant = {
+    id: "grant-conversation",
+    effect: "allow",
+    operations: ["recall"],
+    subjectPrincipalId: actor.principalId,
+    tenantId: actor.tenantId,
+    agentId: actor.agentId,
+    visibility: "conversation",
+    conversationId: "group-2",
+  };
+  assert.equal(decideMemoryAccess({
+    actor, target: conversationTarget, operation: "recall", mode: "explicit", grants: [conversationGrant],
+  }).allowed, false);
+  assert.equal(decideMemoryAccess({
+    actor, target: conversationTarget, operation: "recall", mode: "explicit",
+    grants: [{ ...conversationGrant, threadId: "topic-2" }],
+  }).allowed, true);
+
+  const projectTarget = address({
+    visibility: "project", principalId: "telegram:default:user-2", projectId: "project-2",
+  });
+  const projectGrant = {
+    id: "grant-project",
+    effect: "allow",
+    operations: ["recall"],
+    subjectPrincipalId: actor.principalId,
+    tenantId: actor.tenantId,
+    agentId: actor.agentId,
+    visibility: "project",
+  };
+  assert.equal(decideMemoryAccess({
+    actor, target: projectTarget, operation: "recall", mode: "explicit", grants: [projectGrant],
+  }).allowed, false);
+  assert.equal(decideMemoryAccess({
+    actor, target: projectTarget, operation: "recall", mode: "explicit",
+    grants: [{ ...projectGrant, projectId: "project-2" }],
+  }).allowed, true);
 });

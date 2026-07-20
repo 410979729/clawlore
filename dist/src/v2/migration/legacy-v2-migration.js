@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { mapLegacyAddress } from "../application/legacy-address-mapper.js";
+import { writePrivateFileExclusive } from "../../file-privacy.js";
 import { SqliteTruthStoreV2 } from "../storage/sqlite-truth-v2.js";
 import { classifyLegacySourceV2 } from "./legacy-v2-preview.js";
 const require = createRequire(import.meta.url);
@@ -163,13 +164,13 @@ export async function applyLegacyMigrationV2(input) {
             });
         }
         store.close();
-        await writeFile(markerPath, `${JSON.stringify({
+        await writePrivateFileExclusive(markerPath, `${JSON.stringify({
             schemaVersion: 1,
             migrationId,
             planDigest: plan.planDigest,
             rowsApplied: rows.length,
             appliedAt,
-        }, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+        }, null, 2)}\n`);
         return { schemaVersion: 2, migrationId, planDigest: plan.planDigest, rowsApplied: rows.length, markerPath, appliedAt };
     }
     catch (error) {

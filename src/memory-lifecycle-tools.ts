@@ -5,6 +5,7 @@
 
 import { Type } from "@sinclair/typebox";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
+import { evaluateCaptureSafety, sanitizeCaptureText } from "./capture-safety.js";
 import { TEMPORAL_VERSIONED_CATEGORIES } from "./memory-categories.js";
 import { isNoise } from "./noise-filter.js";
 import {
@@ -18,6 +19,7 @@ import {
 import {
   clamp01,
   MEMORY_CATEGORIES,
+  normalizeInlineText,
   requireRuntimeAgentId,
   requireRuntimeMemoryAccess,
   resolveToolContext,
@@ -25,6 +27,7 @@ import {
   safeToolFailure,
   sanitizeMemoryForSerialization,
   stringEnum,
+  truncateText,
   type ToolContext
 } from "./tool-runtime-policy.js";
 
@@ -141,14 +144,14 @@ export function registerMemoryForgetTool(
                   content: [
                     { type: "text", text: "No matching memories found." },
                   ],
-                  details: { found: 0, query },
+                  details: { found: 0, query: normalizeInlineText(query) },
                 };
               }
 
               const list = results
                 .map(
                   (r) =>
-                    `- [${r.entry.id.slice(0, 8)}] ${r.entry.text.slice(0, 60)}${r.entry.text.length > 60 ? "..." : ""}`,
+                    `- [${r.entry.id.slice(0, 8)}] ${truncateText(normalizeInlineText(r.entry.text), 60)}`,
                 )
                 .join("\n");
 
@@ -265,7 +268,7 @@ export function registerMemoryUpdateTool(
                       text: `No memory found matching "${memoryId}".`,
                     },
                   ],
-                  details: { error: "not_found", query: memoryId },
+                  details: { error: "not_found", query: normalizeInlineText(memoryId) },
                 };
               }
               if (results.length === 1 || results[0].score > 0.85) {
@@ -274,7 +277,7 @@ export function registerMemoryUpdateTool(
                 const list = results
                   .map(
                     (r) =>
-                      `- [${r.entry.id.slice(0, 8)}] ${r.entry.text.slice(0, 60)}${r.entry.text.length > 60 ? "..." : ""}`,
+                      `- [${r.entry.id.slice(0, 8)}] ${truncateText(normalizeInlineText(r.entry.text), 60)}`,
                   )
                   .join("\n");
                 return {
@@ -293,9 +296,25 @@ export function registerMemoryUpdateTool(
             }
 
             // If text changed, re-embed; reject noise
+            let updatedText = text;
             let newVector: number[] | undefined;
             if (text) {
-              if (isNoise(text)) {
+              const captureSafety = evaluateCaptureSafety(text);
+              if (!captureSafety.allowed) {
+                return {
+                  content: [{
+                    type: "text",
+                    text: `Skipped: updated text blocked by capture safety filter (${captureSafety.reason})`,
+                  }],
+                  details: {
+                    action: "capture_safety_filtered",
+                    reason: captureSafety.reason,
+                    pattern: captureSafety.pattern,
+                  },
+                };
+              }
+              updatedText = sanitizeCaptureText(text) || text;
+              if (isNoise(updatedText)) {
                 return {
                   content: [
                     {
@@ -306,21 +325,21 @@ export function registerMemoryUpdateTool(
                   details: { action: "noise_filtered" },
                 };
               }
-              newVector = await context.embedder.embedPassage(text);
+              newVector = await context.embedder.embedPassage(updatedText);
             }
 
             // --- Temporal supersede guard ---
             // For temporal-versioned categories (preferences/entities), changing
             // text must go through supersede to preserve the history chain.
-            if (text && newVector) {
+            if (updatedText && newVector) {
               const existing = await context.store.getById(resolvedId, scopeFilter);
               if (existing) {
                 const meta = parseSmartMetadata(existing.metadata, existing);
                 if (TEMPORAL_VERSIONED_CATEGORIES.has(meta.memory_category)) {
                   const factKey =
-                    meta.fact_key ?? deriveFactKey(meta.memory_category, text) ?? existing.id;
+                    meta.fact_key ?? deriveFactKey(meta.memory_category, updatedText) ?? existing.id;
                   const newEntry = await context.store.supersede(resolvedId, {
-                    text,
+                    text: updatedText,
                     vector: newVector,
                     category: category ? (category as any) : existing.category,
                     importance:
@@ -330,11 +349,11 @@ export function registerMemoryUpdateTool(
                     buildMetadata: ({ oldEntry, newId, now }) => {
                       const currentMeta = parseSmartMetadata(oldEntry.metadata, oldEntry);
                       const newMeta = buildSmartMetadata(
-                        { text, category: existing.category },
+                        { text: updatedText, category: existing.category },
                         {
-                          l0_abstract: text,
+                          l0_abstract: updatedText,
                           l1_overview: currentMeta.l1_overview,
-                          l2_content: text,
+                          l2_content: updatedText,
                           memory_category: currentMeta.memory_category,
                           tier: currentMeta.tier,
                           access_count: 0,
@@ -369,7 +388,7 @@ export function registerMemoryUpdateTool(
                     content: [
                       {
                         type: "text",
-                        text: `Superseded memory ${resolvedId.slice(0, 8)}... → new version ${newEntry.id.slice(0, 8)}...: "${text.slice(0, 80)}${text.length > 80 ? "..." : ""}"`,
+                        text: `Superseded memory ${resolvedId.slice(0, 8)}... → new version ${newEntry.id.slice(0, 8)}...: "${truncateText(normalizeInlineText(updatedText), 80)}"`,
                       },
                     ],
                     details: {
@@ -385,7 +404,7 @@ export function registerMemoryUpdateTool(
             // --- End temporal supersede guard ---
 
             const updates: Record<string, any> = {};
-            if (text) updates.text = text;
+            if (updatedText) updates.text = updatedText;
             if (newVector) updates.vector = newVector;
             if (importance !== undefined)
               updates.importance = clamp01(importance, 0.7);
@@ -413,7 +432,7 @@ export function registerMemoryUpdateTool(
               content: [
                 {
                   type: "text",
-                  text: `Updated memory ${updated.id.slice(0, 8)}...: "${updated.text.slice(0, 80)}${updated.text.length > 80 ? "..." : ""}"`,
+                  text: `Updated memory ${updated.id.slice(0, 8)}...: "${truncateText(normalizeInlineText(updated.text), 80)}"`,
                 },
               ],
               details: {

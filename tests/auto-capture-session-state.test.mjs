@@ -14,9 +14,53 @@ const {
 
 test("conversation keys align ingress and session suffixes without collapsing threads", () => {
   assert.equal(buildAutoCaptureConversationKeyFromIngress(" telegram ", " group:topic-2 "), "telegram:group:topic-2");
+  assert.equal(
+    buildAutoCaptureConversationKeyFromIngress("telegram", "user-1", "default", "dm"),
+    "telegram:default:direct:user-1",
+  );
   assert.equal(buildAutoCaptureConversationKeyFromSessionKey("agent:main:telegram:group:topic-2"), "telegram:group:topic-2");
   assert.equal(buildAutoCaptureConversationKeyFromIngress("", "group"), null);
   assert.equal(buildAutoCaptureConversationKeyFromSessionKey("unknown"), null);
+});
+
+test("real OpenClaw session keys correlate ingress without crossing agent identities", () => {
+  const state = new AutoCaptureSessionState();
+  const mainSession = "agent:main:telegram:default:direct:user-real";
+  const workerSession = "agent:worker:telegram:default:direct:user-real";
+  state.recordIngress({
+    channelId: "telegram", accountId: "default", conversationId: "user-real",
+    chatType: "direct", sessionKey: mainSession, content: "Main prefers exact session identity",
+  });
+  state.recordIngress({
+    channelId: "telegram", accountId: "default", conversationId: "user-real",
+    chatType: "direct", sessionKey: workerSession, content: "Worker prefers separate identity",
+  });
+
+  assert.deepEqual(state.consumeAgentEnd({
+    sessionKey: mainSession,
+    messages: [{ role: "user", content: "Main prefers exact session identity" }],
+    captureAssistant: false,
+  }).texts, ["Main prefers exact session identity"]);
+  assert.deepEqual(state.consumeAgentEnd({
+    sessionKey: workerSession,
+    messages: [{ role: "user", content: "Worker prefers separate identity" }],
+    captureAssistant: false,
+  }).texts, ["Worker prefers separate identity"]);
+});
+
+test("canonical ingress fallback aligns with the full OpenClaw session suffix", () => {
+  const state = new AutoCaptureSessionState();
+  state.recordIngress({
+    channelId: "telegram", accountId: "default", conversationId: "user-fallback",
+    chatType: "direct", content: "Fallback still correlates safely",
+  });
+  const result = state.consumeAgentEnd({
+    sessionKey: "agent:main:telegram:default:direct:user-fallback",
+    messages: [{ role: "user", content: "Fallback still correlates safely" }],
+    captureAssistant: false,
+  });
+  assert.deepEqual(result.texts, ["Fallback still correlates safely"]);
+  assert.equal(result.pendingIngressCount, 1);
 });
 
 test("message extraction preserves role policy, text blocks, and rejection counts", () => {
@@ -62,6 +106,56 @@ test("pending ingress is consumed once and repeated snapshots produce no new tex
   });
   assert.deepEqual(repeated.texts, []);
   assert.equal(repeated.pendingIngressCount, 0);
+});
+
+test("agent_end consumes only the proven ingress prefix and preserves a steered next message", () => {
+  const state = new AutoCaptureSessionState();
+  const ingress = (content) => state.recordIngress({
+    channelId: "telegram",
+    conversationId: "user-steer",
+    content,
+  });
+  assert.equal(ingress("Turn A decided to use SQLite"), true);
+  assert.equal(ingress("Turn B decided to use Postgres"), true);
+
+  const endedA = state.consumeAgentEnd({
+    sessionKey: "agent:main:telegram:user-steer",
+    messages: [{ role: "user", content: "Turn A decided to use SQLite" }],
+    captureAssistant: false,
+  });
+  assert.deepEqual(endedA.texts, ["Turn A decided to use SQLite"]);
+  assert.equal(endedA.pendingIngressCount, 1);
+  assert.equal(state.inspect().pendingConversations, 1);
+
+  const endedB = state.consumeAgentEnd({
+    sessionKey: "agent:main:telegram:user-steer",
+    messages: [
+      { role: "user", content: "Turn A decided to use SQLite" },
+      { role: "user", content: "Turn B decided to use Postgres" },
+    ],
+    captureAssistant: false,
+  });
+  assert.deepEqual(endedB.texts, ["Turn B decided to use Postgres"]);
+  assert.equal(endedB.pendingIngressCount, 1);
+  assert.equal(state.inspect().pendingConversations, 0);
+});
+
+test("duplicate ingress text is consumed by multiplicity instead of draining the queue", () => {
+  const state = new AutoCaptureSessionState();
+  for (let index = 0; index < 2; index += 1) {
+    state.recordIngress({
+      channelId: "telegram",
+      conversationId: "user-duplicate",
+      content: "Remember the same preference",
+    });
+  }
+  const first = state.consumeAgentEnd({
+    sessionKey: "agent:main:telegram:user-duplicate",
+    messages: [{ role: "user", content: "Remember the same preference" }],
+    captureAssistant: false,
+  });
+  assert.deepEqual(first.texts, ["Remember the same preference"]);
+  assert.equal(state.inspect().pendingConversations, 1);
 });
 
 test("history growth selects only new texts and explicit remember carries prior context", () => {

@@ -22,6 +22,8 @@
 
 import type { MemoryEntry } from "./store.js";
 import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
+import { readPrivateFile, writePrivateFileAtomic } from "./file-privacy.js";
+import { isMemoryEntrySafeForEgress } from "./memory-egress-policy.js";
 
 // ============================================================================
 // Types
@@ -302,7 +304,9 @@ export async function runCompaction(
   }
 
   // Filter out entries without vectors (shouldn't happen but be safe)
-  const valid = entries.filter((e) => e.vector && e.vector.length > 0);
+  const valid = entries.filter((entry) => entry.vector?.length > 0 && isMemoryEntrySafeForEgress(entry));
+  const safetyFiltered = entries.length - valid.length;
+  if (safetyFiltered > 0) logger?.warn(`memory-compactor: filtered ${safetyFiltered} unsafe or vectorless entries`);
 
   const plans = buildClusters(
     valid,
@@ -383,8 +387,7 @@ export async function shouldRunCompaction(
   cooldownHours: number,
 ): Promise<boolean> {
   try {
-    const { readFile } = await import("node:fs/promises");
-    const raw = await readFile(stateFile, "utf8");
+    const raw = await readPrivateFile(stateFile);
     const state = JSON.parse(raw) as { lastRunAt?: number };
     if (typeof state.lastRunAt === "number") {
       const elapsed = Date.now() - state.lastRunAt;
@@ -397,8 +400,5 @@ export async function shouldRunCompaction(
 }
 
 export async function recordCompactionRun(stateFile: string): Promise<void> {
-  const { writeFile, mkdir } = await import("node:fs/promises");
-  const { dirname } = await import("node:path");
-  await mkdir(dirname(stateFile), { recursive: true });
-  await writeFile(stateFile, JSON.stringify({ lastRunAt: Date.now() }), "utf8");
+  await writePrivateFileAtomic(stateFile, JSON.stringify({ lastRunAt: Date.now() }));
 }

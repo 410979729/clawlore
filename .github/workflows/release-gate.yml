@@ -19,7 +19,7 @@ jobs:
           - ubuntu-latest
           - windows-latest
         node:
-          - 24.14.0
+          - 24.15.0
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
@@ -40,8 +40,8 @@ jobs:
         run: npm ci --include=dev
       - name: Install the supported OpenClaw host fixture
         run: npm install --prefix "${{ runner.temp }}/clawlore-openclaw-host" --ignore-scripts --no-audit --no-fund openclaw@2026.7.1-beta.5
-      - name: Run the standard source release gate
-        run: npm run release:gate:source
+      - name: Run the non-authorizing pre-push source gate
+        run: npm run release:prepush
         env:
           OPENCLAW_PACKAGE_DIR: ${{ runner.temp }}/clawlore-openclaw-host/node_modules/openclaw
           OPENCLAW_CLI: ${{ runner.temp }}/clawlore-openclaw-host/node_modules/openclaw/openclaw.mjs

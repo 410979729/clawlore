@@ -1,16 +1,24 @@
+import { BoundedTtlMap } from "./bounded-ttl-map.js";
 import { parseReflectionMetadata } from "./reflection-metadata.js";
 import { DEFAULT_REFLECTION_DERIVED_MAX_AGE_MS, loadAgentReflectionSlicesFromEntries, } from "./reflection-store.js";
 export class ReflectionRuntimeState {
     #store;
     #sessionTtlMs;
     #maxTrackedSessions;
+    #now;
     #errors = new Map();
     #derived = new Map();
-    #agentSlices = new Map();
+    #agentSlices;
     constructor(params) {
         this.#store = params.store;
         this.#sessionTtlMs = params.sessionTtlMs;
         this.#maxTrackedSessions = params.maxTrackedSessions;
+        this.#now = params.now ?? Date.now;
+        this.#agentSlices = new BoundedTtlMap({
+            ttlMs: params.agentSliceTtlMs ?? 15_000,
+            maxEntries: params.maxTrackedSessions,
+            now: this.#now,
+        });
     }
     #pruneOldest(map) {
         if (map.size <= this.#maxTrackedSessions)
@@ -22,7 +30,7 @@ export class ReflectionRuntimeState {
                 map.delete(key);
         }
     }
-    prune(now = Date.now()) {
+    prune(now = this.#now()) {
         for (const [key, state] of this.#errors) {
             if (now - state.updatedAt > this.#sessionTtlMs)
                 this.#errors.delete(key);
@@ -31,6 +39,7 @@ export class ReflectionRuntimeState {
             if (now - state.updatedAt > this.#sessionTtlMs)
                 this.#derived.delete(key);
         }
+        this.#agentSlices.prune(now);
         this.#pruneOldest(this.#errors);
         this.#pruneOldest(this.#derived);
     }
@@ -38,14 +47,14 @@ export class ReflectionRuntimeState {
         const key = sessionKey.trim();
         const current = this.#errors.get(key);
         if (current) {
-            current.updatedAt = Date.now();
+            current.updatedAt = this.#now();
             return current;
         }
         const created = {
             entries: [],
             lastInjectedCount: 0,
             signatureSet: new Set(),
-            updatedAt: Date.now(),
+            updatedAt: this.#now(),
         };
         this.#errors.set(key, created);
         return created;
@@ -59,7 +68,7 @@ export class ReflectionRuntimeState {
             return;
         state.entries.push(signal);
         state.signatureSet.add(signal.signatureHash);
-        state.updatedAt = Date.now();
+        state.updatedAt = this.#now();
         if (state.entries.length > 30) {
             const removed = state.entries.length - 30;
             state.entries.splice(0, removed);
@@ -72,7 +81,7 @@ export class ReflectionRuntimeState {
         const state = this.#errors.get(sessionKey.trim());
         if (!state)
             return [];
-        state.updatedAt = Date.now();
+        state.updatedAt = this.#now();
         state.lastInjectedCount = Math.min(state.lastInjectedCount, state.entries.length);
         const pending = state.entries.slice(state.lastInjectedCount);
         if (pending.length === 0)
@@ -83,13 +92,16 @@ export class ReflectionRuntimeState {
     errorEntries(sessionKey, maxEntries) {
         return (this.#errors.get(sessionKey.trim())?.entries ?? []).slice(-maxEntries);
     }
-    setDerived(sessionKey, derived, updatedAt = Date.now()) {
+    setDerived(sessionKey, derived, updatedAt = this.#now()) {
+        this.prune(updatedAt);
         if (derived.length > 0)
             this.#derived.set(sessionKey.trim(), { updatedAt, derived });
         else
             this.#derived.delete(sessionKey.trim());
+        this.#pruneOldest(this.#derived);
     }
     getDerived(sessionKey) {
+        this.prune();
         return this.#derived.get(sessionKey.trim())?.derived ?? [];
     }
     clearSession(sessionKey) {
@@ -104,12 +116,13 @@ export class ReflectionRuntimeState {
         }
     }
     async loadAgentSlices(agentId, scopeFilter) {
+        this.prune();
         const scopeKey = Array.isArray(scopeFilter)
             ? `scopes:${[...scopeFilter].sort().join(",")}`
             : "<NO_SCOPE_FILTER>";
         const cacheKey = `${agentId}::${scopeKey}`;
         const cached = this.#agentSlices.get(cacheKey);
-        if (cached && Date.now() - cached.updatedAt < 15_000)
+        if (cached)
             return cached;
         let entries = await this.#store.list(scopeFilter, "reflection", 240, 0);
         let slices = loadAgentReflectionSlicesFromEntries({
@@ -135,7 +148,7 @@ export class ReflectionRuntimeState {
                 deriveMaxAgeMs: DEFAULT_REFLECTION_DERIVED_MAX_AGE_MS,
             });
         }
-        const next = { updatedAt: Date.now(), invariants: slices.invariants, derived: slices.derived };
+        const next = { invariants: slices.invariants, derived: slices.derived };
         this.#agentSlices.set(cacheKey, next);
         return next;
     }

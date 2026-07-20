@@ -1,4 +1,5 @@
 import { shouldSkipRetrieval } from "./adaptive-retrieval.js";
+import { BoundedTtlMap } from "./bounded-ttl-map.js";
 import { autoRecallGovernanceEligibility } from "./auto-capture-governance.js";
 import { AutoRecallSessionCache, resolveAutoRecallSessionBoundary, } from "./auto-recall-session-boundary.js";
 import { recordAutoRecallTrace, } from "./auto-recall-ledger.js";
@@ -9,9 +10,10 @@ import { evaluateRecallScopePolicy } from "./scope-policy.js";
 import { isSystemBypassId } from "./scopes.js";
 import { parseSmartMetadata } from "./smart-metadata.js";
 import { isReusableTaskExperience } from "./task-experience.js";
+import { redactMemoryTextForOutput } from "./memory-egress-policy.js";
 import { filterUserMdExclusiveRecallResults } from "./workspace-boundary.js";
 function sanitizeForContext(text) {
-    return text
+    return redactMemoryTextForOutput(text)
         .replace(/[\r\n]+/g, " ")
         .replace(/<\/?[a-zA-Z][^>]*>/g, "")
         .replace(/</g, "\uFF1C")
@@ -41,27 +43,42 @@ export function registerAutoRecallHooks(params) {
         }
         return results;
     };
-    const recallHistory = new Map();
-    const turnCounter = new Map();
+    const sessionStates = new BoundedTtlMap({
+        ttlMs: 30 * 60 * 1_000,
+        maxEntries: 2_048,
+        onEvict: (_key, reason) => api.logger.debug?.(`clawlore: auto-recall session state evicted reason=${reason}`),
+    });
     const sessionCache = new AutoRecallSessionCache();
     api.on("message_received", (event, ctx) => {
         const { access } = params.resolveRuntimeAccess(event, ctx);
         if (!access.denied)
-            sessionCache.remember(event, ctx);
+            sessionCache.remember(event, ctx, access.boundary.scope);
     });
     const timeoutMs = parsePositiveInt(config.autoRecallTimeoutMs) ?? 5_000;
     api.on("before_prompt_build", async (event, ctx) => {
         const { agentId: traceAgentId, access: memoryAccess } = params.resolveRuntimeAccess(event, ctx);
         if (memoryAccess.denied)
             return;
-        const sessionBoundary = resolveAutoRecallSessionBoundary(event, ctx);
-        const querySelection = sessionCache.select(event, ctx, event.prompt, config.autoRecallQueryMaxChars ?? 4_000);
-        const gatingText = querySelection.query || event.prompt || "";
-        if (!querySelection.query || shouldSkipRetrieval(gatingText, config.autoRecallMinLength))
+        const sessionBoundary = resolveAutoRecallSessionBoundary(event, ctx, memoryAccess.boundary.scope);
+        const querySelection = sessionCache.select(event, ctx, config.autoRecallQueryMaxChars ?? 4_000, memoryAccess.boundary.scope);
+        if (querySelection.duplicate) {
+            api.logger.debug?.(`clawlore: skipped duplicate auto-recall turn=${diagnosticIdentifier(querySelection.turnKey ?? "unknown")}`);
             return;
-        const currentTurn = sessionBoundary ? (turnCounter.get(sessionBoundary) || 0) + 1 : 1;
-        if (sessionBoundary)
-            turnCounter.set(sessionBoundary, currentTurn);
+        }
+        if (querySelection.correlationIssue) {
+            api.logger.debug?.(`clawlore: auto-recall skipped reason=${querySelection.correlationIssue}`);
+            return;
+        }
+        if (!querySelection.query || shouldSkipRetrieval(querySelection.query, config.autoRecallMinLength))
+            return;
+        const trackedSession = sessionBoundary
+            ? sessionStates.get(sessionBoundary) ?? { turn: 0, history: new Map() }
+            : undefined;
+        const currentTurn = trackedSession ? trackedSession.turn + 1 : 1;
+        if (sessionBoundary && trackedSession) {
+            trackedSession.turn = currentTurn;
+            sessionStates.set(sessionBoundary, trackedSession);
+        }
         // Abort the whole recall chain before it can hold the host session lock indefinitely.
         const recallAbort = new AbortController();
         const throwIfAborted = () => {
@@ -115,7 +132,7 @@ export function registerAutoRecallHooks(params) {
                         agent_id: traceAgentId,
                         channel: String(ctx?.channelId || ctx?.conversationId || ""),
                         query_source: querySelection.source,
-                        query: querySelection.query,
+                        query: redactMemoryTextForOutput(querySelection.query),
                         current_scope: traceCurrentScope,
                         decision: input.decision,
                         reason: input.reason,
@@ -167,9 +184,7 @@ export function registerAutoRecallHooks(params) {
             let dedupFilteredCount = 0;
             let finalResults = rankedResults;
             if (minRepeated > 0) {
-                const sessionHistory = sessionBoundary
-                    ? recallHistory.get(sessionBoundary) || new Map()
-                    : new Map();
+                const sessionHistory = trackedSession?.history ?? new Map();
                 const filtered = rankedResults.filter((result) => {
                     const lastTurn = sessionHistory.get(result.entry.id) ?? -999;
                     const redundant = currentTurn - lastTurn < minRepeated;
@@ -322,13 +337,11 @@ export function registerAutoRecallHooks(params) {
             }
             throwIfAborted();
             if (minRepeated > 0) {
-                const sessionHistory = sessionBoundary
-                    ? recallHistory.get(sessionBoundary) || new Map()
-                    : new Map();
+                const sessionHistory = trackedSession?.history ?? new Map();
                 for (const item of selected)
                     sessionHistory.set(item.id, currentTurn);
-                if (sessionBoundary)
-                    recallHistory.set(sessionBoundary, sessionHistory);
+                if (sessionBoundary && trackedSession)
+                    sessionStates.set(sessionBoundary, trackedSession);
             }
             const memoryContext = selected.map((item) => item.line).join("\n");
             const selectedIds = new Set(selected.map((item) => item.id));
@@ -395,10 +408,10 @@ export function registerAutoRecallHooks(params) {
         }
     }, { priority: 10 });
     api.on("session_end", (event, ctx) => {
-        const boundary = sessionCache.clear(event, ctx);
+        const { access } = params.resolveRuntimeAccess(event, ctx);
+        const boundary = sessionCache.clear(event, ctx, access.boundary.scope);
         if (boundary) {
-            recallHistory.delete(boundary);
-            turnCounter.delete(boundary);
+            sessionStates.delete(boundary);
         }
     }, { priority: 10 });
 }

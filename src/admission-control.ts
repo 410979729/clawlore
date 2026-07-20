@@ -1,8 +1,10 @@
 import { join } from "node:path";
 import type { LlmClient } from "./llm-client.js";
+import { normalizeProviderAnnotation } from "./provider-output-policy.js";
 import type { CandidateMemory, MemoryCategory } from "./memory-categories.js";
 import type { MemorySearchResult, MemoryStore } from "./store.js";
 import { parseSmartMetadata } from "./smart-metadata.js";
+import { diagnosticTextSummary } from "./diagnostic-redaction.js";
 
 export interface AdmissionWeights {
   utility: number;
@@ -624,7 +626,7 @@ async function scoreUtility(
 
   return {
     score: clamp01(response.utility, 0.5),
-    reason: typeof response.reason === "string" ? response.reason.trim() : undefined,
+    reason: normalizeProviderAnnotation(response.reason),
   };
 }
 
@@ -741,7 +743,8 @@ export class AdmissionController {
     };
 
     this.debugLog(
-      `clawlore: admission-control: decision=${audit.decision} hint=${audit.hint ?? "n/a"} score=${audit.score.toFixed(3)} candidate=${JSON.stringify(params.candidate.abstract.slice(0, 80))}`,
+      `clawlore: admission-control: decision=${audit.decision} hint=${audit.hint ?? "n/a"} ` +
+      `score=${audit.score.toFixed(3)} candidate=${diagnosticTextSummary(params.candidate.abstract)}`,
     );
 
     return { decision, hint, audit };

@@ -86,7 +86,10 @@ export function registerMemoryGovernTool(
             content: [{ type: "text", text: `Memory governance candidates (${candidates.length}):\n\n${lines.join("\n")}` }],
             details: {
               count: candidates.length,
-              candidates,
+              candidates: candidates.map((candidate) => ({
+                ...candidate,
+                text: normalizeInlineText(candidate.text),
+              })),
               scopes: scopeFilter,
             },
           };
@@ -477,7 +480,7 @@ export function registerMemoryExplainRankTool(
           if (results.length === 0) {
             return {
               content: [{ type: "text", text: "No relevant memories found." }],
-              details: { action: "empty", query, scopeFilter },
+              details: { action: "empty", query: normalizeInlineText(query), scopeFilter },
             };
           }
 
@@ -499,7 +502,7 @@ export function registerMemoryExplainRankTool(
             content: [{ type: "text", text: lines.join("\n") }],
             details: {
               action: "explain_rank",
-              query,
+              query: normalizeInlineText(query),
               count: results.length,
               results: sanitizeMemoryForSerialization(results),
             },

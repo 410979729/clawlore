@@ -23,7 +23,7 @@ Fields accepted when present:
 - `threadId` / `thread_id` / `messageThreadId` / `message_thread_id` /
   `topicId` / `topic_id`
 - `platform` / `provider` / `surface`
-- `workspaceDir` / `workspace_dir`
+- `workspaceDir` / `workspace_dir` (routing input only; the absolute path is not persisted)
 
 Field handling rules:
 
@@ -44,7 +44,8 @@ The runtime metadata helper writes these stable keys where source data exists:
 - `sessionKey`, `session_key`, `source_session`
 - `sessionId`, `session_id`
 - `channel_id`, `account_id`, `conversation_id`, `thread_id`, `platform`
-- `workspace_dir`
+- `workspace_bound`: `true` when a workspace boundary was resolved; the absolute
+  path remains runtime-local
 - `scope_id`
 - `scope_filter`
 - `scope_filter_mode`: `restricted`, `deny_all`, or `bypass`

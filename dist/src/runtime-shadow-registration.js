@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
-import { computeRuntimeReleaseBinding, resolvePluginRoot } from "./release-provenance.js";
+import { canonicalDigest, computeRuntimeReleaseBinding, resolvePluginRoot } from "./release-provenance.js";
+import { buildRuntimeDiagnosticReceipt, createRuntimeInstanceIdentity, invalidateRuntimeDiagnosticReceipt, renewRuntimeDiagnosticReceipt, resolveRuntimeDiagnosticFile, RUNTIME_DIAGNOSTIC_HEARTBEAT_MS, writeRuntimeDiagnosticReceipt, } from "./runtime-diagnostic-receipt.js";
 import { resolveScopeFilter } from "./scopes.js";
 import { createLegacyShadowCandidateRetrieverV1, } from "./adapters/openclaw/legacy-shadow-retrieval.js";
 import { createNativeShadowCandidateRetrieverV1, } from "./adapters/openclaw/native-shadow-retrieval.js";
@@ -9,6 +10,51 @@ import { loadRuntimeRolloutControlsV1 } from "./adapters/openclaw/runtime-rollou
 import { filterUserMdExclusiveRecallResults } from "./workspace-boundary.js";
 async function sleep(ms) {
     await new Promise((resolve) => setTimeout(resolve, ms));
+}
+export function createRuntimeDiagnosticLeaseController(params) {
+    let currentReceipt = params.baseReceipt;
+    let heartbeat;
+    let writeChain = Promise.resolve();
+    let generation = 0;
+    const queueWrite = (nextReceipt) => {
+        currentReceipt = nextReceipt;
+        writeChain = writeChain
+            .catch(() => undefined)
+            .then(() => writeRuntimeDiagnosticReceipt(params.file, nextReceipt));
+        return writeChain;
+    };
+    const persist = () => queueWrite(renewRuntimeDiagnosticReceipt(currentReceipt));
+    return {
+        persist,
+        async start() {
+            generation++;
+            const activeGeneration = generation;
+            if (heartbeat)
+                clearInterval(heartbeat);
+            await queueWrite(renewRuntimeDiagnosticReceipt(params.baseReceipt));
+            heartbeat = setInterval(() => {
+                if (activeGeneration !== generation)
+                    return;
+                void persist().catch((error) => {
+                    params.logger.warn(`clawlore: runtime diagnostic heartbeat failed: ${diagnosticErrorSummary(error)}`);
+                });
+            }, RUNTIME_DIAGNOSTIC_HEARTBEAT_MS);
+            heartbeat.unref?.();
+        },
+        async stop() {
+            generation++;
+            if (heartbeat) {
+                clearInterval(heartbeat);
+                heartbeat = undefined;
+            }
+            try {
+                await queueWrite(invalidateRuntimeDiagnosticReceipt(currentReceipt));
+            }
+            catch (error) {
+                params.logger.warn(`clawlore: runtime diagnostic invalidation failed: ${diagnosticErrorSummary(error)}`);
+            }
+        },
+    };
 }
 /** Registers the read-only ClawLore shadow runtime; it never enables writes or prompt mutation. */
 export function registerClawLoreShadowRuntime(params) {
@@ -106,4 +152,22 @@ export function registerClawLoreShadowRuntime(params) {
         readiness: rolloutControls.readiness,
     });
     api.logger.info(`clawlore: runtime status=${receipt.status} mode=${receipt.requestedMode} hooks=${receipt.registeredHooks.length} writes=${receipt.writeEnabled} promptMutation=${receipt.promptMutationEnabled} contextEngine=${receipt.contextEngineRegistered} blocks=${receipt.blockingReasons.join(",") || "none"}`);
+    const instance = createRuntimeInstanceIdentity();
+    const diagnosticReceipt = buildRuntimeDiagnosticReceipt({
+        configDigest: canonicalDigest(config),
+        binding: releaseBinding,
+        readiness: rolloutControls.readiness,
+        readinessErrors: rolloutControls.errors,
+        runtime: receipt,
+        instance,
+    });
+    const file = resolveRuntimeDiagnosticFile(resolvedDbPath);
+    return {
+        file,
+        ...createRuntimeDiagnosticLeaseController({
+            file,
+            baseReceipt: diagnosticReceipt,
+            logger: api.logger,
+        }),
+    };
 }

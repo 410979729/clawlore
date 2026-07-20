@@ -81,10 +81,8 @@ export function buildReflectionEventPayload(params: BuildReflectionEventPayloadP
   };
 
   const text = [
-    `reflection-event · ${params.scope}`,
+    "reflection-event",
     `eventId=${eventId}`,
-    `session=${params.sessionId}`,
-    `agent=${params.agentId}`,
     `command=${params.command}`,
     `usedFallback=${params.usedFallback ? "true" : "false"}`,
   ].join("\n");

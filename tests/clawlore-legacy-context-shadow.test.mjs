@@ -98,3 +98,24 @@ test("legacy reflection source caps remain explicit and reproducible", () => {
   assert.equal(adapted.candidates.length, 6);
   assert.equal(adapted.trace.find((item) => item.source === "inherited_rules")?.warnings.length, 1);
 });
+
+test("legacy context adapters filter stored secrets and redact non-memory signals", () => {
+  const secret = "synthetic-legacy-context-secret-987654";
+  const bundle = structuredClone(fixture.bundle);
+  bundle.autoRecall = [{
+    ...bundle.autoRecall[0],
+    id: "legacy-secret",
+    text: `databasePassword: ${secret}`,
+  }];
+  bundle.inheritedRules = [`serviceToken: ${secret}`];
+  bundle.derivedFocus = [];
+  bundle.errorSignals = [{ toolName: "audit", summary: `Authorization: Bearer ${secret}` }];
+
+  const adapted = adaptLegacyContextSources(bundle, fixture.defaults);
+  const rendered = renderLegacyContextSources(bundle);
+  assert.equal(adapted.trace[0].inputCount, 1);
+  assert.equal(adapted.trace[0].outputCount, 0);
+  assert.equal(adapted.trace[0].warnings.some((warning) => warning.includes("egress safety")), true);
+  assert.equal(JSON.stringify({ adapted, rendered }).includes(secret), false);
+  assert.match(JSON.stringify({ adapted, rendered }), /REDACTED/);
+});

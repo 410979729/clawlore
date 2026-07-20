@@ -4,6 +4,17 @@
 
 import { diagnosticErrorSummary } from "../diagnostic-redaction.js";
 import { buildOperatorDashboard } from "../operator-dashboard.js";
+import { canonicalDigest } from "../release-provenance.js";
+import {
+  assessRuntimeDiagnostic,
+  configuredRuntimeMode,
+} from "../runtime-diagnostic-receipt.js";
+import type { PrincipalIsolationConfig } from "../runtime-memory-boundary.js";
+import { assessRuntimeAccessibility } from "../runtime-accessibility-diagnostic.js";
+import {
+  inspectLifecycleProjection,
+  repairLifecycleProjection,
+} from "../sql-lifecycle-projection.js";
 
 import {
   clampInt,
@@ -38,6 +49,8 @@ export function registerDiagnosticCommands(runtime: CliRegistrationContext): voi
     .option("--json", "Output as JSON")
     .option("--clean-json", "Plugin-side clean JSON mode; use with --json under the OpenClaw wrapper")
     .option("--quiet", "Plugin-side quiet JSON mode; use with --json under the OpenClaw wrapper")
+    .option("--principal <platform:account:principal>", "Verify runtime visibility for one exact canonical principal")
+    .option("--agent-id <id>", "Agent scope to evaluate for legacy migration debt", "main")
     .action(async (options) => {
       try {
         const stats = await context.store.stats();
@@ -53,6 +66,19 @@ export function registerDiagnosticCommands(runtime: CliRegistrationContext): voi
         const scopeWarnings = Object.entries(stats.scopeCounts)
           .filter(([scope]) => scope === "global" || scope.trim().length === 0)
           .map(([scope, count]) => ({ scope, count }));
+        const runtimeAccessibility = assessRuntimeAccessibility({
+          scopeCounts: stats.scopeCounts,
+          lifecycleScopeCounts: stats.lifecycleScopeCounts,
+          agentId: options.agentId,
+          principalIsolation: context.pluginConfig?.principalIsolation as PrincipalIsolationConfig | undefined,
+          principalKey: options.principal,
+        });
+        const runtimeDiagnostic = await assessRuntimeDiagnostic({
+          file: context.runtimeDiagnosticFile,
+          configuredMode: configuredRuntimeMode(context.pluginConfig),
+          configDigest: canonicalDigest(context.pluginConfig ?? {}),
+        });
+        const deprecatedAutoBackupEnabled = context.pluginConfig?.autoBackup === true;
 
         const issues: string[] = [];
         if (!diagnostics.sqlTruth.available) {
@@ -60,6 +86,11 @@ export function registerDiagnosticCommands(runtime: CliRegistrationContext): voi
         }
         if (diagnostics.sqlTruth.fts && !diagnostics.sqlTruth.fts.healthy) {
           issues.push(`SQL truth FTS needs repair: ${diagnostics.sqlTruth.fts.reason ?? "unknown"}`);
+        }
+        if (stats.lifecycleProjection && !stats.lifecycleProjection.ok) {
+          issues.push(
+            `Lifecycle projection needs explicit repair: ${stats.lifecycleProjection.reason}; run clawlore repair-lifecycle-projection --apply`,
+          );
         }
         if (diagnostics.vectorCompanion.needsRepair) {
           issues.push(`Vector companion needs repair: ${diagnostics.vectorCompanion.message ?? "unknown"}`);
@@ -76,6 +107,17 @@ export function registerDiagnosticCommands(runtime: CliRegistrationContext): voi
         if (scopeWarnings.length > 0) {
           issues.push(`Scope warning: ${scopeWarnings.map((item) => `${item.scope}:${item.count}`).join(", ")}`);
         }
+        if (runtimeAccessibility.blocking) {
+          issues.push(
+            `Runtime accessibility ${runtimeAccessibility.status}: ${runtimeAccessibility.legacy.migrationDebtRows} legacy rows in ${runtimeAccessibility.legacy.scope}`,
+          );
+        }
+        if (!runtimeDiagnostic.ok) {
+          issues.push(`Runtime diagnostic blocked: ${runtimeDiagnostic.issues.join(", ")}`);
+        }
+        if (deprecatedAutoBackupEnabled) {
+          issues.push("Deprecated autoBackup=true does not create backups; use the encrypted snapshot/export operator flow");
+        }
         if (experience.status !== "ready") {
           issues.push(`Experience Kernel ${experience.status}`);
         }
@@ -88,6 +130,7 @@ export function registerDiagnosticCommands(runtime: CliRegistrationContext): voi
           ok: issues.length === 0,
           issues,
           sqlTruth: diagnostics.sqlTruth,
+          lifecycleProjection: stats.lifecycleProjection,
           fts: diagnostics.fts,
           vectorCompanion: {
             ...diagnostics.vectorCompanion,
@@ -96,10 +139,14 @@ export function registerDiagnosticCommands(runtime: CliRegistrationContext): voi
           scopes: {
             configured: scopeStats,
             sqlTruthCounts: stats.scopeCounts,
+            sqlTruthLifecycleCounts: stats.lifecycleScopeCounts,
             vectorCounts: vectorScopeCounts,
             sqlVectorScopeMatch,
             warnings: scopeWarnings,
           },
+          runtimeAccessibility,
+          runtimeDiagnostic,
+          configuration: { deprecatedAutoBackupEnabled },
           categories: stats.categoryCounts,
           experience,
           nightlyDigest,
@@ -115,12 +162,20 @@ export function registerDiagnosticCommands(runtime: CliRegistrationContext): voi
         console.log(`• Status: ${summary.ok ? "ok" : "issues found"}`);
         console.log(`• SQL truth: ${diagnostics.sqlTruth.available ? `${diagnostics.sqlTruth.count} rows` : "unavailable"}`);
         console.log(`• FTS: ${diagnostics.sqlTruth.fts?.healthy ? "healthy" : "needs repair or unavailable"}`);
+        console.log(`• Lifecycle projection: ${stats.lifecycleProjection?.status ?? "unavailable"}`);
         console.log(`• Vector backend: ${diagnostics.vectorCompanion.backend}`);
         console.log(`• Vector dimension: ${diagnostics.vectorCompanion.configuredDimension}`);
         console.log(`• Vector rows: ${vectorDrift.vectorRows}`);
         console.log(`• Missing vector rows: ${vectorDrift.missingVectorRows}`);
         console.log(`• Stale vector rows: ${vectorDrift.staleVectorRows}`);
         console.log(`• Scope distribution match: ${sqlVectorScopeMatch ? "yes" : "no"}`);
+        console.log(`• Runtime accessibility: ${runtimeAccessibility.status}`);
+        console.log(`• Legacy migration debt: ${runtimeAccessibility.legacy.migrationDebtRows} rows`);
+        if (runtimeAccessibility.principal) {
+          console.log(`• Principal-visible rows: ${runtimeAccessibility.principal.visibleRows}`);
+        }
+        console.log(`• Runtime registration: ${runtimeDiagnostic.status}`);
+        console.log(`• Deprecated autoBackup requested: ${deprecatedAutoBackupEnabled ? "yes (unsupported)" : "no"}`);
         console.log(`• Experience Kernel: ${String(experience.status)}`);
         if (experience.status === "ready") {
           const playbooks = experience.playbooks as { total?: number } | undefined;
@@ -169,6 +224,41 @@ export function registerDiagnosticCommands(runtime: CliRegistrationContext): voi
           console.log(`• Error code: ${code}`);
           console.log(`• Recovery: ${summary.recovery}`);
         }
+        process.exitCode = 1;
+      }
+    });
+
+  memory
+    .command("repair-lifecycle-projection")
+    .description("Inspect or explicitly rebuild the auxiliary lifecycle projection from SQL truth")
+    .option("--apply", "Rebuild auxiliary lifecycle tables. Default is dry-run")
+    .option("--json", "Output as JSON")
+    .action(async (options) => {
+      try {
+        const db = await getSqlDbOrThrow();
+        const before = inspectLifecycleProjection(db);
+        const dryRun = options.apply !== true;
+        const after = dryRun ? before : repairLifecycleProjection(db);
+        const result = {
+          ok: after.ok,
+          dry_run: dryRun,
+          source_of_truth: "memory_truth",
+          before,
+          after,
+        };
+        if (options.json) {
+          writeJson(result);
+        } else {
+          console.log("Lifecycle Projection Repair:");
+          console.log(`• Mode: ${dryRun ? "dry-run" : "apply"}`);
+          console.log(`• Before: ${before.status}`);
+          console.log(`• After: ${after.status}`);
+          console.log(`• SQL truth rows: ${after.truthRows}`);
+          console.log(`• Projected rows: ${after.projectedRows}`);
+        }
+        if (!after.ok) process.exitCode = 1;
+      } catch (error) {
+        console.error(`Lifecycle projection repair failed: ${diagnosticErrorSummary(error)}`);
         process.exitCode = 1;
       }
     });
@@ -225,7 +315,7 @@ export function registerDiagnosticCommands(runtime: CliRegistrationContext): voi
           process.exit(1);
         }
       } catch (error) {
-        console.error("Vector repair failed:", error);
+        console.error(`Vector repair failed: ${diagnosticErrorSummary(error)}`);
         process.exit(1);
       }
     });
@@ -257,7 +347,7 @@ export function registerDiagnosticCommands(runtime: CliRegistrationContext): voi
         console.log(`• Journal recovery: ${summary.journal_recovery_status} (${summary.journal_replay_candidates})`);
         console.log(`• Experience Kernel: ${summary.experience_status}`);
       } catch (error) {
-        console.error("Dashboard failed:", error);
+        console.error(`Dashboard failed: ${diagnosticErrorSummary(error)}`);
         process.exit(1);
       }
     });

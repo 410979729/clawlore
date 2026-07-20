@@ -3,7 +3,6 @@
  * Replaces regex-triggered capture with intelligent 6-category extraction.
  *
  * Pipeline: conversation → LLM extract → candidates → dedup → persist
- *
  */
 
 import type { MemoryStore, MemorySearchResult } from "./store.js";
@@ -34,6 +33,13 @@ import {
 } from "./memory-categories.js";
 import { isNoise } from "./noise-filter.js";
 import { evaluateCaptureSafety, sanitizeCaptureText } from "./capture-safety.js";
+import {
+  filterUnsafeMemoryResults,
+  isMemoryEntrySafeForEgress,
+} from "./memory-egress-policy.js";
+import { evaluateMemoryMergePayload } from "./memory-merge-policy.js";
+import { normalizeProviderAnnotation } from "./provider-output-policy.js";
+import { filterEmbeddingNoiseInputs } from "./embedding-noise-filter.js";
 import type { NoisePrototypeBank } from "./noise-prototypes.js";
 import {
   appendRelation,
@@ -53,7 +59,11 @@ import { inferAtomicBrandItemPreferenceSlot } from "./preference-slots.js";
 import { batchDedup } from "./batch-dedup.js";
 import { recordConflictReviewRelations } from "./conflict-governance.js";
 import type { RuntimeScopeMetadata } from "./runtime-scope-metadata.js";
-import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
+import {
+  diagnosticErrorSummary,
+  diagnosticIdentifier,
+  diagnosticTextSummary,
+} from "./diagnostic-redaction.js";
 
 // ============================================================================
 // Envelope Metadata Stripping
@@ -203,7 +213,8 @@ export class SmartExtractor {
     options: ExtractPersistOptions = {},
   ): Promise<ExtractionStats> {
     const stats: ExtractionStats = { created: 0, merged: 0, skipped: 0, boundarySkipped: 0 };
-    const conversationSafety = evaluateCaptureSafety(conversationText);
+    const sanitizedConversation = sanitizeCaptureText(conversationText);
+    const conversationSafety = evaluateCaptureSafety(sanitizedConversation);
     if (!conversationSafety.allowed) {
       stats.skipped += 1;
       this.debugLog(
@@ -223,12 +234,12 @@ export class SmartExtractor {
     const runtimeMetadata = options.runtimeMetadata ?? {};
 
     // Step 1: LLM extraction
-    const candidates = await this.extractCandidates(conversationText);
+    const candidates = await this.extractCandidates(sanitizedConversation);
 
     if (candidates.length === 0) {
       this.log("clawlore: smart-extractor: no memories extracted");
       // LLM returned zero candidates → strongest noise signal → feedback to noise bank
-      this.learnAsNoise(conversationText);
+      this.learnAsNoise(sanitizedConversation);
       return stats;
     }
 
@@ -274,7 +285,8 @@ export class SmartExtractor {
         stats.skipped += 1;
         stats.boundarySkipped = (stats.boundarySkipped ?? 0) + 1;
         this.log(
-          `clawlore: smart-extractor: skipped USER.md-exclusive [${candidate.category}] ${candidate.abstract.slice(0, 60)}`,
+          `clawlore: smart-extractor: skipped USER.md-exclusive [${candidate.category}] ` +
+          `abstract=${diagnosticTextSummary(candidate.abstract)}`,
         );
         continue;
       }
@@ -282,7 +294,7 @@ export class SmartExtractor {
       try {
         await this.processCandidate(
           candidate,
-          conversationText,
+          sanitizedConversation,
           sessionKey,
           stats,
           targetScope,
@@ -309,36 +321,12 @@ export class SmartExtractor {
    * Only active when noiseBank is configured and initialized.
    */
   async filterNoiseByEmbedding(texts: string[]): Promise<string[]> {
-    const noiseBank = this.config.noiseBank;
-    if (!noiseBank || !noiseBank.initialized) return texts;
-
-    const result: string[] = [];
-    for (const text of texts) {
-      // Very short texts lack semantic signal — skip noise check to avoid false positives
-      if (text.length <= 8) {
-        result.push(text);
-        continue;
-      }
-      // Long texts are unlikely to be pure noise queries
-      if (text.length > 300) {
-        result.push(text);
-        continue;
-      }
-      try {
-        const vec = await this.embedder.embed(text);
-        if (!vec || vec.length === 0 || !noiseBank.isNoise(vec)) {
-          result.push(text);
-        } else {
-          this.debugLog(
-            `clawlore: smart-extractor: embedding noise filtered: ${text.slice(0, 80)}`,
-          );
-        }
-      } catch {
-        // Embedding failed — pass text through
-        result.push(text);
-      }
-    }
-    return result;
+    return filterEmbeddingNoiseInputs({
+      texts,
+      noiseBank: this.config.noiseBank,
+      embed: (text) => this.embedder.embed(text),
+      debugLog: this.debugLog,
+    });
   }
 
   /**
@@ -426,7 +414,8 @@ export class SmartExtractor {
       if (!category) {
         invalidCategoryCount++;
         this.debugLog(
-          `clawlore: smart-extractor: dropping candidate due to invalid category rawCategory=${JSON.stringify(raw.category ?? "")} abstract=${JSON.stringify((raw.abstract ?? "").trim().slice(0, 120))}`,
+          `clawlore: smart-extractor: dropping candidate due to invalid category ` +
+          `category=${diagnosticTextSummary(raw.category)} abstract=${diagnosticTextSummary(raw.abstract)}`,
         );
         continue;
       }
@@ -449,14 +438,16 @@ export class SmartExtractor {
       if (!abstract || abstract.length < 5) {
         shortAbstractCount++;
         this.debugLog(
-          `clawlore: smart-extractor: dropping candidate due to short abstract category=${category} abstract=${JSON.stringify(abstract)}`,
+          `clawlore: smart-extractor: dropping candidate due to short abstract ` +
+          `category=${category} abstract=${diagnosticTextSummary(abstract)}`,
         );
         continue;
       }
       if (isNoise(abstract)) {
         noiseAbstractCount++;
         this.debugLog(
-          `clawlore: smart-extractor: dropping candidate due to noise abstract category=${category} abstract=${JSON.stringify(abstract.slice(0, 120))}`,
+          `clawlore: smart-extractor: dropping candidate due to noise abstract ` +
+          `category=${category} abstract=${diagnosticTextSummary(abstract)}`,
         );
         continue;
       }
@@ -536,7 +527,8 @@ export class SmartExtractor {
     if (admission?.decision === "reject") {
       stats.rejected = (stats.rejected ?? 0) + 1;
       this.log(
-        `clawlore: smart-extractor: admission rejected [${candidate.category}] ${candidate.abstract.slice(0, 60)} — ${admission.audit.reason}`,
+        `clawlore: smart-extractor: admission rejected [${candidate.category}] ` +
+        `abstract=${diagnosticTextSummary(candidate.abstract)} reason=${diagnosticTextSummary(admission.audit.reason)}`,
       );
       await this.recordRejectedAdmission(
         candidate,
@@ -564,16 +556,17 @@ export class SmartExtractor {
           dedupResult.matchId &&
           MERGE_SUPPORTED_CATEGORIES.has(candidate.category)
         ) {
-          await this.handleMerge(
+          const mergeResult = await this.handleMerge(
             candidate,
             dedupResult.matchId,
+            vector,
             targetScope,
             scopeFilter,
             dedupResult.contextLabel,
             admission?.audit,
             runtimeMetadata,
           );
-          stats.merged++;
+          stats[mergeResult]++;
         } else {
           // Category doesn't support merge → create instead
           await this.storeCandidate(candidate, vector, sessionKey, targetScope, admission?.audit, runtimeMetadata);
@@ -583,7 +576,8 @@ export class SmartExtractor {
 
       case "skip":
         this.log(
-          `clawlore: smart-extractor: skipped [${candidate.category}] ${candidate.abstract.slice(0, 60)}`,
+          `clawlore: smart-extractor: skipped [${candidate.category}] ` +
+          `abstract=${diagnosticTextSummary(candidate.abstract)}`,
         );
         stats.skipped++;
         break;
@@ -659,13 +653,13 @@ export class SmartExtractor {
     // Stage 1: Vector pre-filter — find similar active memories.
     // excludeInactive ensures the store over-fetches to fill N active slots,
     // preventing superseded history from crowding out the current fact.
-    const activeSimilar = await this.store.vectorSearch(
+    const activeSimilar = filterUnsafeMemoryResults(await this.store.vectorSearch(
       candidateVector,
       5,
       SIMILARITY_THRESHOLD,
       scopeFilter,
       { excludeInactive: true },
-    );
+    ));
 
     if (activeSimilar.length === 0) {
       return { decision: "create", reason: "No similar memories found" };
@@ -734,12 +728,13 @@ export class SmartExtractor {
         return { decision: "create", reason: "LLM response unparseable" };
       }
 
-      const decision = (data.decision?.toLowerCase() ??
-        "create") as DedupDecision;
+      const decision = (typeof data.decision === "string"
+        ? data.decision.toLowerCase()
+        : "create") as DedupDecision;
       if (!VALID_DECISIONS.has(decision)) {
         return {
           decision: "create",
-          reason: `Unknown decision: ${data.decision}`,
+          reason: "Unknown decision from provider",
         };
       }
 
@@ -765,9 +760,9 @@ export class SmartExtractor {
 
       return {
         decision,
-        reason: data.reason ?? "",
+        reason: normalizeProviderAnnotation(data.reason) ?? "Provider supplied no safe reason",
         matchId: ["merge", "support", "contextualize", "contradict", "supersede"].includes(decision) ? matchEntry?.entry.id : undefined,
-        contextLabel: typeof (data as any).context_label === "string" ? (data as any).context_label : undefined,
+        contextLabel: normalizeProviderAnnotation((data as any).context_label, 80),
       };
     } catch (err) {
       this.log(
@@ -807,7 +802,8 @@ export class SmartExtractor {
       });
       if (profileAdmission.decision === "reject") {
         this.log(
-          `clawlore: smart-extractor: admission rejected profile [${candidate.abstract.slice(0, 60)}] — ${profileAdmission.audit.reason}`,
+          `clawlore: smart-extractor: admission rejected profile ` +
+          `abstract=${diagnosticTextSummary(candidate.abstract)} reason=${diagnosticTextSummary(profileAdmission.audit.reason)}`,
         );
         await this.recordRejectedAdmission(candidate, conversationText, sessionKey, targetScope, scopeFilter ?? [targetScope], profileAdmission.audit as AdmissionAuditRecord & { decision: "reject" }, runtimeMetadata);
         return "rejected";
@@ -816,12 +812,12 @@ export class SmartExtractor {
     }
 
     // Search for existing profile memories
-    const existing = await this.store.vectorSearch(
+    const existing = filterUnsafeMemoryResults(await this.store.vectorSearch(
       vector || [],
       1,
       0.3,
       scopeFilter,
-    );
+    ));
     const profileMatch = existing.find((r) => {
       try {
         const meta = JSON.parse(r.entry.metadata || "{}");
@@ -832,16 +828,16 @@ export class SmartExtractor {
     });
 
     if (profileMatch) {
-      await this.handleMerge(
+      return this.handleMerge(
         candidate,
         profileMatch.entry.id,
+        vector || [],
         targetScope,
         scopeFilter,
         undefined,
         admissionAudit,
         runtimeMetadata,
       );
-      return "merged";
     } else {
       // No existing profile — create new
       await this.storeCandidate(candidate, vector || [], sessionKey, targetScope, admissionAudit, runtimeMetadata);
@@ -855,71 +851,51 @@ export class SmartExtractor {
   private async handleMerge(
     candidate: CandidateMemory,
     matchId: string,
+    candidateVector: number[],
     targetScope: string,
     scopeFilter?: string[],
     contextLabel?: string,
     admissionAudit?: AdmissionAuditRecord,
     runtimeMetadata: RuntimeScopeMetadata = {},
-  ): Promise<void> {
-    let existingAbstract = "";
-    let existingOverview = "";
-    let existingContent = "";
-
+  ): Promise<"merged" | "created"> {
+    const storeFallback = async (reason: string): Promise<"created"> => {
+      this.log(`clawlore: smart-extractor: merge ${reason}, storing safe candidate as new`);
+      await this.storeCandidate(candidate, candidateVector, "merge-fallback", targetScope, admissionAudit, runtimeMetadata);
+      return "created";
+    };
+    let existing;
     try {
-      const existing = await this.store.getById(matchId, scopeFilter);
-      if (existing) {
-        const meta = parseSmartMetadata(existing.metadata, existing);
-        existingAbstract = meta.l0_abstract || existing.text;
-        existingOverview = meta.l1_overview || "";
-        existingContent = meta.l2_content || existing.text;
-      }
+      existing = await this.store.getById(matchId, scopeFilter);
     } catch {
-      // Fallback: store as new
-      this.log(
-        `clawlore: smart-extractor: could not read existing memory ${matchId}, storing as new`,
-      );
-      const vector = await this.embedder.embed(
-        `${candidate.abstract} ${candidate.content}`,
-      );
-      await this.storeCandidate(
-        candidate,
-        vector || [],
-        "merge-fallback",
-        targetScope,
-        undefined,
-        runtimeMetadata,
-      );
-      return;
+      return storeFallback("source read failed");
     }
+    if (!existing || !isMemoryEntrySafeForEgress(existing)) {
+      return storeFallback("source missing or unsafe");
+    }
+    const existingMeta = parseSmartMetadata(existing.metadata, existing);
 
-    // Call LLM to merge
     const prompt = buildMergePrompt(
-      existingAbstract,
-      existingOverview,
-      existingContent,
+      existingMeta.l0_abstract || existing.text,
+      existingMeta.l1_overview || "",
+      existingMeta.l2_content || existing.text,
       candidate.abstract,
       candidate.overview,
       candidate.content,
       candidate.category,
     );
 
-    const merged = await this.llm.completeJson<{
-      abstract: string;
-      overview: string;
-      content: string;
-    }>(prompt, "merge-memory");
-
-    if (!merged) {
-      this.log("clawlore: smart-extractor: merge LLM failed, skipping merge");
-      return;
+    let untrustedMerged: unknown;
+    try {
+      untrustedMerged = await this.llm.completeJson<unknown>(prompt, "merge-memory");
+    } catch {
+      return storeFallback("provider failed");
     }
-
-    // Re-embed the merged content
+    const mergeDecision = evaluateMemoryMergePayload(untrustedMerged);
+    if (!mergeDecision.allowed) return storeFallback(`output rejected (${mergeDecision.reason})`);
+    const merged = mergeDecision.value;
     const mergedText = `${merged.abstract} ${merged.content}`;
     const newVector = await this.embedder.embed(mergedText);
 
-    // Update existing memory via store.update()
-    const existing = await this.store.getById(matchId, scopeFilter);
     const metadata = stringifySmartMetadata(
       this.withAdmissionAudit(
         buildSmartMetadata(existing ?? { text: merged.abstract }, {
@@ -960,8 +936,10 @@ export class SmartExtractor {
     }
 
     this.log(
-      `clawlore: smart-extractor: merged [${candidate.category}]${contextLabel ? ` [${contextLabel}]` : ""} into ${matchId.slice(0, 8)}`,
+      `clawlore: smart-extractor: merged [${candidate.category}] ` +
+      `context=${diagnosticTextSummary(contextLabel)} into=${diagnosticIdentifier(matchId)}`,
     );
+    return "merged";
   }
 
   /**
@@ -1047,7 +1025,8 @@ export class SmartExtractor {
     );
 
     this.log(
-      `clawlore: smart-extractor: superseded [${candidate.category}] ${matchId.slice(0, 8)} -> ${created.id.slice(0, 8)}`,
+      `clawlore: smart-extractor: superseded [${candidate.category}] ` +
+      `${diagnosticIdentifier(matchId)} -> ${diagnosticIdentifier(created.id)}`,
     );
   }
 
@@ -1082,7 +1061,8 @@ export class SmartExtractor {
     );
 
     this.log(
-      `clawlore: smart-extractor: support [${contextLabel || "general"}] on ${matchId.slice(0, 8)} — ${reason}`,
+      `clawlore: smart-extractor: support context=${diagnosticTextSummary(contextLabel || "general")} ` +
+      `on=${diagnosticIdentifier(matchId)} reason=${diagnosticTextSummary(reason)}`,
     );
   }
 
@@ -1133,7 +1113,8 @@ export class SmartExtractor {
     });
 
     this.log(
-      `clawlore: smart-extractor: contextualize [${contextLabel || "general"}] new entry linked to ${matchId.slice(0, 8)}`,
+      `clawlore: smart-extractor: contextualize context=${diagnosticTextSummary(contextLabel || "general")} ` +
+      `linked=${diagnosticIdentifier(matchId)}`,
     );
   }
 
@@ -1202,7 +1183,8 @@ export class SmartExtractor {
     });
 
     this.log(
-      `clawlore: smart-extractor: contradict [${contextLabel || "general"}] on ${matchId.slice(0, 8)}, new entry created`,
+      `clawlore: smart-extractor: contradict context=${diagnosticTextSummary(contextLabel || "general")} ` +
+      `on=${diagnosticIdentifier(matchId)}, new entry created`,
     );
   }
 
@@ -1260,7 +1242,8 @@ export class SmartExtractor {
     });
 
     this.log(
-      `clawlore: smart-extractor: created [${candidate.category}] ${candidate.abstract.slice(0, 60)}`,
+      `clawlore: smart-extractor: created [${candidate.category}] ` +
+      `abstract=${diagnosticTextSummary(candidate.abstract)}`,
     );
   }
 

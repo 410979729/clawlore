@@ -127,3 +127,25 @@ test("live rollout rejects incomplete V1 vector fallback before creating V2 tabl
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("post-commit failure emits an explicit snapshot recovery contract", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clawlore-live-v2-post-commit-"));
+  try {
+    const input = await fixture(root);
+    await assert.rejects(() => executeLiveV2WriteRolloutV1({
+      sourcePath: input.sourcePath,
+      readinessPath: input.readinessPath,
+      rolloutId: "fixture-rollout-r1",
+      defaults: input.defaults,
+      expectedV1VectorRows: 3,
+      faultInjector(point) {
+        if (point === "after_commit") throw new Error("synthetic post-commit failure");
+      },
+    }), /CLAWLORE_V2_POST_COMMIT_RECOVERY_REQUIRED/);
+    const db = new DatabaseSync(input.sourcePath, { readOnly: true });
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM memory_items").get().count, 3);
+    db.close();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

@@ -168,6 +168,32 @@ function scalar(db: DatabaseSync, sql: string, ...args: unknown[]): number {
   return Number(Object.values(row)[0] ?? 0);
 }
 
+function assertAppendDeltaPrerequisites(sourcePath: string): void {
+  const { DatabaseSync } = require("node:sqlite") as {
+    DatabaseSync: new (path: string, options?: Record<string, unknown>) => DatabaseSync;
+  };
+  const db = new DatabaseSync(sourcePath, { readOnly: true });
+  try {
+    const required = [
+      "memory_items", "memory_revisions", "memory_sources", "memory_acl", "memory_events",
+      "projection_outbox", "memory_fts_compat_v2", "memory_fts_v2",
+      "memory_vector_projection_v2", "memory_relation_projection_v2", "clawlore_rollouts_v2",
+    ];
+    const placeholders = required.map(() => "?").join(",");
+    const present = new Set((db.prepare(
+      `SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name IN (${placeholders})`,
+    ).all(...required) as Array<{ name: string }>).map((row) => row.name));
+    const missing = required.filter((name) => !present.has(name));
+    if (missing.length > 0) {
+      throw new Error(
+        `append-delta prerequisite missing: ${missing.join(",")}; complete the baseline V2 rollout and compatibility backfill first`,
+      );
+    }
+  } finally {
+    db.close();
+  }
+}
+
 function ensureRolloutControlColumn(db: DatabaseSync): void {
   const columns = new Set((db.prepare("PRAGMA table_info(clawlore_rollouts_v2)").all() as Array<{ name: string }>)
     .map((row) => row.name));
@@ -246,6 +272,7 @@ export async function executeLiveV1AppendDeltaV1(input: {
     now: appliedAtDate,
     maximumAgeSeconds,
   });
+  assertAppendDeltaPrerequisites(input.sourcePath);
   const currentPlan = await createLiveV1AppendDeltaPlanV1({
     sourcePath: input.sourcePath,
     baselineReceiptPath: input.baselineReceiptPath,

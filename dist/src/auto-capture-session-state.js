@@ -13,10 +13,17 @@ function pruneOldest(map, maximum) {
         map.delete(oldest);
     }
 }
-export function buildAutoCaptureConversationKeyFromIngress(channelId, conversationId) {
+export function buildAutoCaptureConversationKeyFromIngress(channelId, conversationId, accountId, chatType) {
     const channel = typeof channelId === "string" ? channelId.trim() : "";
     const conversation = typeof conversationId === "string" ? conversationId.trim() : "";
-    return channel && conversation ? `${channel}:${conversation}` : null;
+    if (!channel || !conversation)
+        return null;
+    const account = typeof accountId === "string" ? accountId.trim() : "";
+    const kindValue = typeof chatType === "string" ? chatType.trim().toLowerCase() : "";
+    const kind = kindValue === "dm" || kindValue === "private" ? "direct" : kindValue;
+    return account && ["direct", "group", "channel"].includes(kind)
+        ? `${channel}:${account}:${kind}:${conversation}`
+        : `${channel}:${conversation}`;
 }
 /**
  * OpenClaw session keys use `agent:<agentId>:<channel>:<conversation...>`.
@@ -27,6 +34,10 @@ export function buildAutoCaptureConversationKeyFromSessionKey(sessionKey) {
     const match = /^agent:[^:]+:(.+)$/.exec(sessionKey.trim());
     const suffix = match?.[1]?.trim();
     return suffix || null;
+}
+function buildExactAutoCaptureSessionKey(sessionKey) {
+    const normalized = typeof sessionKey === "string" ? sessionKey.trim() : "";
+    return normalized ? `session:${normalized}` : null;
 }
 export function extractAutoCaptureEligibleTexts(params) {
     const eligibleTexts = [];
@@ -61,6 +72,33 @@ export function extractAutoCaptureEligibleTexts(params) {
     }
     return { eligibleTexts, skippedTextCount };
 }
+function consumePendingPrefix(pending, eligibleTexts) {
+    if (pending.length === 0)
+        return { consumed: [], remaining: [] };
+    const available = new Map();
+    for (const text of eligibleTexts)
+        available.set(text, (available.get(text) ?? 0) + 1);
+    let consumedCount = 0;
+    for (const text of pending) {
+        const count = available.get(text) ?? 0;
+        if (count <= 0)
+            break;
+        consumedCount += 1;
+        if (count === 1)
+            available.delete(text);
+        else
+            available.set(text, count - 1);
+    }
+    // Some OpenClaw builds expose an agent_end snapshot that trails the ingress
+    // hook. Preserve that compatibility by consuming the oldest pending message,
+    // but never drain later turns that the snapshot cannot prove belong here.
+    if (consumedCount === 0)
+        consumedCount = 1;
+    return {
+        consumed: pending.slice(0, consumedCount),
+        remaining: pending.slice(consumedCount),
+    };
+}
 /**
  * Owns the bounded, cross-hook conversation cursor used by auto-capture.
  * It never resolves access, chooses scope, calls a model, or writes memory.
@@ -78,7 +116,8 @@ export class AutoCaptureSessionState {
     recordIngress(params) {
         if (typeof params.content !== "string")
             return false;
-        const key = buildAutoCaptureConversationKeyFromIngress(params.channelId, params.conversationId);
+        const key = buildExactAutoCaptureSessionKey(params.sessionKey)
+            ?? buildAutoCaptureConversationKeyFromIngress(params.channelId, params.conversationId, params.accountId, params.chatType);
         if (!key)
             return false;
         const normalized = normalizeAutoCaptureText("user", params.content, params.shouldSkipMessage);
@@ -91,12 +130,24 @@ export class AutoCaptureSessionState {
     }
     consumeAgentEnd(params) {
         const { eligibleTexts, skippedTextCount } = extractAutoCaptureEligibleTexts(params);
+        const exactSessionKey = buildExactAutoCaptureSessionKey(params.sessionKey);
         const conversationKey = buildAutoCaptureConversationKeyFromSessionKey(params.sessionKey);
-        const pendingIngressTexts = conversationKey
-            ? [...(this.pendingIngressTexts.get(conversationKey) || [])]
+        const pendingKey = exactSessionKey && this.pendingIngressTexts.has(exactSessionKey)
+            ? exactSessionKey
+            : conversationKey;
+        const pendingQueue = pendingKey
+            ? [...(this.pendingIngressTexts.get(pendingKey) || [])]
             : [];
-        if (conversationKey)
-            this.pendingIngressTexts.delete(conversationKey);
+        const pendingSelection = consumePendingPrefix(pendingQueue, eligibleTexts);
+        const pendingIngressTexts = pendingSelection.consumed;
+        if (pendingKey) {
+            if (pendingSelection.remaining.length > 0) {
+                this.pendingIngressTexts.set(pendingKey, pendingSelection.remaining);
+            }
+            else {
+                this.pendingIngressTexts.delete(pendingKey);
+            }
+        }
         const previousSeenCount = this.seenTextCount.get(params.sessionKey) ?? 0;
         let newTexts = eligibleTexts;
         if (pendingIngressTexts.length > 0)

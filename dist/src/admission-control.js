@@ -1,5 +1,7 @@
 import { join } from "node:path";
+import { normalizeProviderAnnotation } from "./provider-output-policy.js";
 import { parseSmartMetadata } from "./smart-metadata.js";
+import { diagnosticTextSummary } from "./diagnostic-redaction.js";
 const DEFAULT_WEIGHTS = {
     utility: 0.1,
     confidence: 0.1,
@@ -423,7 +425,7 @@ async function scoreUtility(llm, mode, candidate, conversationText) {
     }
     return {
         score: clamp01(response.utility, 0.5),
-        reason: typeof response.reason === "string" ? response.reason.trim() : undefined,
+        reason: normalizeProviderAnnotation(response.reason),
     };
 }
 export class AdmissionController {
@@ -503,7 +505,8 @@ export class AdmissionController {
             max_similarity: novelty.maxSimilarity,
             evaluated_at: now,
         };
-        this.debugLog(`clawlore: admission-control: decision=${audit.decision} hint=${audit.hint ?? "n/a"} score=${audit.score.toFixed(3)} candidate=${JSON.stringify(params.candidate.abstract.slice(0, 80))}`);
+        this.debugLog(`clawlore: admission-control: decision=${audit.decision} hint=${audit.hint ?? "n/a"} ` +
+            `score=${audit.score.toFixed(3)} candidate=${diagnosticTextSummary(params.candidate.abstract)}`);
         return { decision, hint, audit };
     }
 }

@@ -34,6 +34,32 @@ test("reflection retry classifies transient upstream failures but not auth failu
   assert.equal(auth.reason, "non_retry_error");
 });
 
+test("reflection retry diagnostics never expose the classified provider message", async () => {
+  const secret = `npm_${"A".repeat(36)}`;
+  const decision = classifyReflectionRetry({
+    inReflectionScope: true,
+    retryCount: 0,
+    usefulOutputChars: 0,
+    error: new Error(`socket hang up token=${secret}`),
+  });
+  assert.equal(decision.retryable, true);
+  assert.equal(decision.normalizedError.includes(secret), false);
+
+  const logs = [];
+  await assert.rejects(runWithReflectionTransientRetryOnce({
+    scope: "reflection",
+    runner: "embedded",
+    retryState: { count: 0 },
+    random: () => 0,
+    sleep: async () => {},
+    onLog: (_level, message) => logs.push(message),
+    async execute() {
+      throw new Error(`socket hang up token=${secret}`);
+    },
+  }));
+  assert.equal(logs.join("\n").includes(secret), false);
+});
+
 test("reflection retry retries transient failure once before returning recovered output", async () => {
   let attempts = 0;
   const result = await runWithReflectionTransientRetryOnce({

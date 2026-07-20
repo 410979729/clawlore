@@ -25,12 +25,14 @@ export interface MemoryAddressValidation {
   valid: boolean;
   errors: Array<{
     field: MemoryAddressField;
-    code: "required" | "too_long" | "invalid_visibility_boundary";
+    code: "required" | "too_long" | "invalid_format" | "invalid_enum" | "invalid_visibility_boundary";
     message: string;
   }>;
 }
 
 const MAX_ID_CHARS = 512;
+const VISIBILITIES = new Set<MemoryVisibility>(["private", "conversation", "project", "team", "global"]);
+const RETENTIONS = new Set<MemoryRetention>(["ephemeral", "working", "durable"]);
 
 function hasText(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
@@ -50,13 +52,32 @@ function validateIdentifier(
   if (hasText(value) && value.length > MAX_ID_CHARS) {
     errors.push({ field, code: "too_long", message: `${field} exceeds ${MAX_ID_CHARS} characters` });
   }
+  if (hasText(value) && (value !== value.trim() || /[\u0000-\u001f\u007f]/u.test(value))) {
+    errors.push({ field, code: "invalid_format", message: `${field} must be trimmed and contain no control characters` });
+  }
 }
 
 export function validateMemoryAddress(address: MemoryAddressV2): MemoryAddressValidation {
   const errors: MemoryAddressValidation["errors"] = [];
+  if (!address || typeof address !== "object") {
+    return {
+      valid: false,
+      errors: [{ field: "schemaVersion", code: "required", message: "memory address object is required" }],
+    };
+  }
+  if (address.schemaVersion !== 2) {
+    errors.push({ field: "schemaVersion", code: "invalid_enum", message: "schemaVersion must equal 2" });
+  }
   validateIdentifier(address, "tenantId", true, errors);
   validateIdentifier(address, "principalId", true, errors);
   validateIdentifier(address, "agentId", true, errors);
+
+  if (!VISIBILITIES.has(address.visibility)) {
+    errors.push({ field: "visibility", code: "invalid_enum", message: "visibility is unsupported" });
+  }
+  if (!RETENTIONS.has(address.retention)) {
+    errors.push({ field: "retention", code: "invalid_enum", message: "retention is unsupported" });
+  }
 
   for (const field of [
     "workspaceId",

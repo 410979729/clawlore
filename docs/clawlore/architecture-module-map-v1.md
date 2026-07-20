@@ -24,7 +24,7 @@ index.ts only constructs dependencies and registers capabilities
 `tests/clawlore-source-governance.test.mjs` classifies every production
 TypeScript module, rejects forbidden direction changes, prevents new files over
 800 lines, and holds inherited hotspots to shrink-only budgets. The exact
-reverse-dependency exception ledger fell from 45 to 44 edges in the closure
+reverse-dependency exception ledger fell from 45 to 29 edges in the closure
 bundle.
 
 ## Composition and host lifecycle
@@ -34,6 +34,7 @@ bundle.
 | `index.ts` | composition root | Parse config, construct dependencies, and register capabilities; no SQL, retrieval, transcript, capture, or reflection algorithm. |
 | `src/core-memory-runtime.ts` | runtime construction | Core stores, retriever, embedder, policies, and lifecycle cleanup. |
 | `src/runtime-shadow-registration.ts` | rollout composition | Canonical shadow/runtime wiring through the OpenClaw adapter layer. |
+| `src/runtime-diagnostic-receipt.ts` | rollout diagnostics | Private runtime registration receipt consumed by doctor and release gates. |
 | `src/auto-recall-hooks.ts` | recall host adapter | Prompt-time recall lifecycle and bounded query/cache behavior. |
 | `src/auto-capture-hooks.ts` | capture host adapter | Capture event orchestration; policy and session state remain separate. |
 | `src/reflection-hooks.ts` | reflection host adapter | Reflection command and prompt lifecycle registration. |
@@ -62,6 +63,24 @@ The corresponding former `src/v2/application`, `src/v2/adapters/openclaw`, and
 Current code may import `src/v2` only for actual versioned contracts such as
 `MemoryAddressV2`, `ContextPackV1`, and release/migration receipts.
 
+Secret safety has one domain policy owner in `src/secret-redaction.ts`.
+`src/secret-structured-text.ts` parses YAML/JSON credential fields and embedded
+config fragments into exact value spans after normalizing snake_case,
+kebab-case, dotted, namespaced, and camelCase keys. Capture, Task Experience,
+and support bundles all consume the same redaction policy.
+`src/memory-metadata-policy.ts` applies the same fail-closed content boundary
+recursively to persisted metadata while preserving bounded identity and state
+fields; absolute workspace paths are never part of durable runtime metadata.
+`src/self-improvement-content-policy.ts` owns the redaction and structural
+escaping applied before `.learnings` entries or extracted skill summaries are
+written; filesystem modules only implement private persistence.
+
+Task completion evidence is separated from capsule orchestration:
+`src/task-outcome-evidence.ts` owns typed `agent_end` success, structured tool
+result outcomes, terminal failure handling, and clause/subject-level
+fail-closed language checks. `src/task-experience.ts` only assembles the
+transcript, applies that gate, and orchestrates review/persistence.
+
 ## CLI and Agent capability adapters
 
 `cli.ts`, `src/tools.ts`, and `src/experience-tools.ts` are stable facades.
@@ -87,9 +106,23 @@ facade and `src/store.ts` retains the existing runtime implementation. The
 split changes construction and ownership boundaries, not atomicity, rollback,
 privacy, vector-debt, or SQL-authority behavior.
 
+`src/lifecycle-metadata.ts` owns lifecycle normalization and the static
+lifecycle policy used by both smart metadata and SQL projection writes.
+`src/sql-lifecycle-projection.ts` owns the rebuildable lifecycle diagnostic
+projection. Standard truth writes and the bounded governance/migration
+mutation allowlist synchronize it inside the same SQLite transaction. A
+source-governance test rejects new direct `memory_truth` DML outside that
+allowlist. Doctor inspects schema, row count, per-row truth revision, and
+truth-derived lifecycle/validity without repairing; explicit dry-run-first
+operator repair is the only diagnostic path that rebuilds the auxiliary
+objects.
+
 SQL remains authoritative. FTS, vectors, relations, and Markdown are
 rebuildable or compatibility projections. Retrieval planning/ranking remains
 outside SQL mutation code.
+Private filesystem primitives live in `src/file-privacy.ts`; the interprocess
+lock adapter is isolated in `src/private-lock-file.ts` so the storage hotspot
+does not own symlink, permission, or exclusive-create policy.
 
 ## Remaining controlled hotspots
 
@@ -116,6 +149,6 @@ backup, receipt, idempotency, and rollback tests.
 
 Independent review should concentrate on public export parity, hook lifecycle
 ordering, management-tool discoverability, store-port fidelity, deprecated
-shim purity, path containment in Markdown compatibility reads, and the 44-edge
+shim purity, path containment in Markdown compatibility reads, and the 30-edge
 reverse-dependency ledger. Release acceptance additionally requires the exact
 Windows Node 24 gate and a separately authorized live rollout.

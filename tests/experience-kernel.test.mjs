@@ -20,6 +20,7 @@ const {
   getEpisode,
   getExperienceStats,
   getPlaybook,
+  listEpisodes,
   recordTaskExperienceCaptureEvent,
   searchPlaybooks,
 } = jiti("../src/experience-store.ts");
@@ -269,6 +270,37 @@ test("playbook FTS search sanitizes special-character queries", () => {
   assert.equal(results[0].id, playbook.id);
   assert.doesNotThrow(() => searchPlaybooks(db, { query: ':"()-', scope_ids: ["agent:main"] }));
   assert.deepEqual(searchPlaybooks(db, { query: ':"()-', scope_ids: ["agent:main"] }), []);
+});
+
+test("episode and FTS queries fail closed before ranking outside their accessible scopes", () => {
+  const db = new DatabaseSync(":memory:");
+  ensureExperienceSchema(db);
+  const shared = createTaskEpisode(db, {
+    scope_id: "agent:owner",
+    shared_scope_id: "project:release",
+    session_id: "session-shared",
+    task_goal: "Verify shared-scope episode filtering.",
+  });
+  assert.deepEqual(listEpisodes(db, { scope_id: "" }), []);
+  assert.deepEqual(listEpisodes(db, { scope_id: "project:release" }).map((item) => item.id), [shared.id]);
+
+  createPlaybook(db, {
+    scope_id: "agent:other",
+    payload: createPlaybookPayload({
+      title: "scopefilteredneedle scopefilteredneedle scopefilteredneedle",
+      trigger: "scopefilteredneedle scopefilteredneedle scopefilteredneedle",
+      goal: "scopefilteredneedle scopefilteredneedle scopefilteredneedle",
+    }),
+  });
+  const mine = createPlaybook(db, {
+    scope_id: "agent:main",
+    payload: createPlaybookPayload({ title: "scopefilteredneedle accessible checklist" }),
+  });
+  assert.deepEqual(searchPlaybooks(db, {
+    query: "scopefilteredneedle",
+    scope_ids: ["agent:main"],
+    limit: 1,
+  }).map((item) => item.id), [mine.id]);
 });
 
 test("preflight isolates playbooks by runtime scope and feedback records a run", async () => {
@@ -648,6 +680,28 @@ test("Experience governance debt redacts secret-like task previews", () => {
   assert.equal(report.debt.blocked_success_episodes.count, 1);
   assert.match(report.debt.blocked_success_episodes.items[0].reasons.join(","), /secret_like_content/);
   assert.doesNotMatch(JSON.stringify(report), /sk-test-not-real/);
+});
+
+test("Experience governance reuses the canonical structured-secret policy", () => {
+  const db = new DatabaseSync(":memory:");
+  ensureExperienceSchema(db);
+  const synthetic = "SyntheticGovernanceAliasSecret123";
+  createTaskEpisode(db, {
+    scope_id: "agent:main",
+    session_id: "session-structured-secret",
+    task_class: "credential_adjacent",
+    task_goal: `shared: &credential ${synthetic}\npassword: *credential`,
+    status: "completed",
+    outcome: "success",
+    tool_names: ["read"],
+    evidence: ["configuration inspection completed"],
+    verification: ["review completed"],
+  });
+
+  const report = buildExperienceDebtReport(db, { scope_id: "agent:main" });
+  assert.equal(report.debt.blocked_success_episodes.count, 1);
+  assert.match(report.debt.blocked_success_episodes.items[0].reasons.join(","), /secret_like_content/);
+  assert.doesNotMatch(JSON.stringify(report), new RegExp(synthetic));
 });
 
 test("Experience replay benchmark covers common OpenClaw workflows", () => {

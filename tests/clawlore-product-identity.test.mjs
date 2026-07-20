@@ -10,7 +10,7 @@ test("ClawLore is the canonical package, manifest, config, and command identity"
   const commands = manifest.commandAliases.map((entry) => entry.name);
 
   assert.equal(packageJson.name, "clawlore");
-  assert.equal(packageJson.version, "1.2.0");
+  assert.equal(packageJson.version, "1.2.1");
   assert.equal(packageJson.repository.url, "git+https://github.com/410979729/clawlore.git");
   assert.equal(manifest.id, "clawlore");
   assert.equal(manifest.name, "ClawLore");
@@ -46,6 +46,8 @@ test("identity compatibility is explicit and live release checks stay canonical"
   assert.match(coreRuntimeSource, /resolveDefaultOauthPathWithCompatibility/);
   assert.match(authConfigSource, /CLAWLORE_LEGACY_DEFAULTS\.oauthDirectoryName/);
   assert.match(releaseGate, /extensions\/clawlore/);
+  assert.match(releaseGate, /assertRepositoryIdentity/);
+  assert.match(releaseGate, /ls-remote/);
   assert.match(releaseGate, /\["plugins", "inspect", "clawlore", "--json"\]/);
   assert.match(releaseGate, /\["clawlore", "doctor", "--json", "--quiet"\]/);
   assert.match(transition, /Never load legacy and canonical plugin copies simultaneously/);

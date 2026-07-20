@@ -71,6 +71,39 @@ function scalar(db, sql, ...args) {
     const row = db.prepare(sql).get(...args);
     return Number(Object.values(row)[0] ?? 0);
 }
+function rolloutCounts(db) {
+    return {
+        items: scalar(db, "SELECT COUNT(*) FROM memory_items"),
+        active: scalar(db, "SELECT COUNT(*) FROM memory_items WHERE lifecycle='active'"),
+        candidate: scalar(db, "SELECT COUNT(*) FROM memory_items WHERE lifecycle='candidate'"),
+        archived: scalar(db, "SELECT COUNT(*) FROM memory_items WHERE lifecycle='archived'"),
+        ftsRows: scalar(db, "SELECT COUNT(*) FROM memory_fts_v2"),
+        vectorFallbackRows: scalar(db, "SELECT COUNT(*) FROM memory_vector_projection_v2 WHERE state='fallback_verified'"),
+        relationProjectionRows: scalar(db, "SELECT COUNT(*) FROM memory_relation_projection_v2"),
+        relationRows: scalar(db, "SELECT COUNT(*) FROM memory_relations"),
+        outboxProcessed: scalar(db, "SELECT COUNT(*) FROM projection_outbox WHERE processed_at IS NOT NULL"),
+        outboxPending: scalar(db, "SELECT COUNT(*) FROM projection_outbox WHERE processed_at IS NULL"),
+        experienceTables: scalar(db, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN
+      ('subagent_snapshots_v2','subagent_scratch_v2','experience_episodes_v2','procedural_playbooks_v2','experience_events_v2')`),
+        experienceRows: scalar(db, `SELECT
+      (SELECT COUNT(*) FROM subagent_snapshots_v2)+(SELECT COUNT(*) FROM subagent_scratch_v2)
+      +(SELECT COUNT(*) FROM experience_episodes_v2)+(SELECT COUNT(*) FROM procedural_playbooks_v2)
+      +(SELECT COUNT(*) FROM experience_events_v2)`),
+    };
+}
+function assertRolloutConvergence(counts, expectedRows) {
+    if (counts.items !== expectedRows
+        || counts.active + counts.candidate + counts.archived !== expectedRows
+        || counts.ftsRows !== expectedRows
+        || counts.vectorFallbackRows !== expectedRows
+        || counts.relationProjectionRows !== expectedRows
+        || counts.relationRows !== 0
+        || counts.outboxProcessed !== expectedRows * 3
+        || counts.outboxPending !== 0
+        || counts.experienceTables !== 5
+        || counts.experienceRows !== 0)
+        throw new Error("V2 rollout convergence verification failed");
+}
 function existingRolloutTables(db) {
     const placeholders = ROLLOUT_TABLES.map(() => "?").join(",");
     return db.prepare(`SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name IN (${placeholders}) ORDER BY name`)
@@ -109,6 +142,7 @@ export async function executeLiveV2WriteRolloutV1(input) {
         throw new Error(`V2 rollout schema already exists: ${preexisting.join(",")}`);
     }
     const appliedAt = (input.now?.() ?? new Date()).toISOString();
+    let committed = false;
     try {
         db.exec("BEGIN IMMEDIATE");
         db.exec(TRUTH_V2_SCHEMA_SQL);
@@ -169,46 +203,48 @@ export async function executeLiveV2WriteRolloutV1(input) {
       (rollout_id,plan_digest,control_sha256,readiness_sha256,legacy_logical_digest,rows_applied,
        applied_at,v1_fallback_reads,context_engine_enabled,final_recall_cutover_enabled)
       VALUES (?,?,?,?,?,?,?,1,0,0)`).run(input.rolloutId, migration.plan.planDigest, ready.sha256, ready.sha256, before.memoryTruth.logicalDigest, migration.rows.length, appliedAt);
+        const preCommitCounts = rolloutCounts(db);
+        assertRolloutConvergence(preCommitCounts, migration.rows.length);
+        const integrity = String(Object.values(db.prepare("PRAGMA integrity_check").get())[0]);
+        const foreignKeyViolations = db.prepare("PRAGMA foreign_key_check").all().length;
+        if (integrity !== "ok" || foreignKeyViolations !== 0) {
+            throw new Error("V2 rollout database verification failed before commit");
+        }
         db.exec("COMMIT");
+        committed = true;
+        input.faultInjector?.("after_commit");
     }
     catch (error) {
-        try {
-            db.exec("ROLLBACK");
+        if (!committed) {
+            try {
+                db.exec("ROLLBACK");
+            }
+            catch { /* preserve original failure */ }
         }
-        catch { /* preserve original failure */ }
         db.close();
+        if (committed) {
+            throw new Error("CLAWLORE_V2_POST_COMMIT_RECOVERY_REQUIRED: restore the verified encrypted snapshot to a new location before retrying");
+        }
         throw error;
     }
-    const counts = {
-        items: scalar(db, "SELECT COUNT(*) FROM memory_items"),
-        active: scalar(db, "SELECT COUNT(*) FROM memory_items WHERE lifecycle='active'"),
-        candidate: scalar(db, "SELECT COUNT(*) FROM memory_items WHERE lifecycle='candidate'"),
-        archived: scalar(db, "SELECT COUNT(*) FROM memory_items WHERE lifecycle='archived'"),
-        ftsRows: scalar(db, "SELECT COUNT(*) FROM memory_fts_v2"),
-        vectorFallbackRows: scalar(db, "SELECT COUNT(*) FROM memory_vector_projection_v2 WHERE state='fallback_verified'"),
-        relationProjectionRows: scalar(db, "SELECT COUNT(*) FROM memory_relation_projection_v2"),
-        relationRows: scalar(db, "SELECT COUNT(*) FROM memory_relations"),
-        outboxProcessed: scalar(db, "SELECT COUNT(*) FROM projection_outbox WHERE processed_at IS NOT NULL"),
-        outboxPending: scalar(db, "SELECT COUNT(*) FROM projection_outbox WHERE processed_at IS NULL"),
-        experienceTables: scalar(db, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN
-      ('subagent_snapshots_v2','subagent_scratch_v2','experience_episodes_v2','procedural_playbooks_v2','experience_events_v2')`),
-        experienceRows: scalar(db, `SELECT
-      (SELECT COUNT(*) FROM subagent_snapshots_v2)+(SELECT COUNT(*) FROM subagent_scratch_v2)
-      +(SELECT COUNT(*) FROM experience_episodes_v2)+(SELECT COUNT(*) FROM procedural_playbooks_v2)
-      +(SELECT COUNT(*) FROM experience_events_v2)`),
-    };
-    db.close();
-    const after = await inspectLegacySqliteSnapshotV2(input.sourcePath);
-    if (after.memoryTruth.rowCount !== before.memoryTruth.rowCount
-        || after.memoryTruth.logicalDigest !== before.memoryTruth.logicalDigest
-        || counts.items !== migration.rows.length
-        || counts.ftsRows !== migration.rows.length
-        || counts.vectorFallbackRows !== migration.rows.length
-        || counts.relationProjectionRows !== migration.rows.length
-        || counts.outboxProcessed !== migration.rows.length * 3
-        || counts.outboxPending !== 0
-        || counts.experienceTables !== 5)
-        throw new Error("post-apply V2 convergence verification failed");
+    let counts;
+    let after;
+    try {
+        counts = rolloutCounts(db);
+        assertRolloutConvergence(counts, migration.rows.length);
+        db.close();
+        after = await inspectLegacySqliteSnapshotV2(input.sourcePath);
+        if (after.memoryTruth.rowCount !== before.memoryTruth.rowCount
+            || after.memoryTruth.logicalDigest !== before.memoryTruth.logicalDigest)
+            throw new Error("legacy truth changed during V2 rollout");
+    }
+    catch {
+        try {
+            db.close();
+        }
+        catch { }
+        throw new Error("CLAWLORE_V2_POST_COMMIT_RECOVERY_REQUIRED: restore the verified encrypted snapshot to a new location before retrying");
+    }
     return {
         schemaVersion: 1,
         phase: "clawlore-v2-live-write-rollout",

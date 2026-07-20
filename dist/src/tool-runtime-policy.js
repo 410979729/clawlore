@@ -6,6 +6,7 @@ import { Type } from "@sinclair/typebox";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
+import { redactMemoryTextForOutput } from "./memory-egress-policy.js";
 import { getDisplayCategoryTag } from "./reflection-metadata.js";
 import { resolveRuntimeMemoryAccess } from "./runtime-memory-boundary.js";
 import { parseAgentIdFromSessionKey } from "./scopes.js";
@@ -49,7 +50,7 @@ export function safeToolFailure(code, label, error) {
     };
 }
 export function normalizeInlineText(text) {
-    return text.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
+    return redactMemoryTextForOutput(text).replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
 }
 export function truncateText(text, maxChars) {
     if (text.length <= maxChars)
@@ -66,10 +67,10 @@ export function deriveManualMemoryLayer(category) {
 export function sanitizeMemoryForSerialization(results) {
     return results.map((r) => ({
         id: r.entry.id,
-        text: r.entry.text,
+        text: redactMemoryTextForOutput(r.entry.text),
         category: getDisplayCategoryTag(r.entry),
         rawCategory: r.entry.category,
-        scope: r.entry.scope,
+        scope: redactMemoryTextForOutput(r.entry.scope),
         importance: r.entry.importance,
         score: r.score,
         sources: r.sources,
@@ -80,11 +81,11 @@ export function serializeMemoryEntry(entry, includeFullText = false) {
     const base = {
         id: entry.id,
         text: includeFullText
-            ? metadata.l2_content || metadata.l1_overview || entry.text
+            ? redactMemoryTextForOutput(metadata.l2_content || metadata.l1_overview || entry.text)
             : truncateText(normalizeInlineText(metadata.l0_abstract || entry.text), 220),
         category: getDisplayCategoryTag(entry),
         rawCategory: entry.category,
-        scope: entry.scope,
+        scope: redactMemoryTextForOutput(entry.scope),
         importance: entry.importance,
         timestamp: entry.timestamp,
         state: metadata.state,
@@ -92,20 +93,23 @@ export function serializeMemoryEntry(entry, includeFullText = false) {
         source: metadata.source,
         tier: metadata.tier,
         confidence: metadata.confidence,
-        factKey: metadata.fact_key,
+        factKey: metadata.fact_key ? redactMemoryTextForOutput(metadata.fact_key) : undefined,
         validFrom: metadata.valid_from,
         invalidatedAt: metadata.invalidated_at,
-        supersedes: metadata.supersedes,
-        supersededBy: metadata.superseded_by,
-        canonicalId: metadata.canonical_id,
-        relations: metadata.relations ?? [],
+        supersedes: metadata.supersedes ? redactMemoryTextForOutput(metadata.supersedes) : undefined,
+        supersededBy: metadata.superseded_by ? redactMemoryTextForOutput(metadata.superseded_by) : undefined,
+        canonicalId: metadata.canonical_id ? redactMemoryTextForOutput(metadata.canonical_id) : undefined,
+        relations: (metadata.relations ?? []).map((relation) => ({
+            type: redactMemoryTextForOutput(relation.type),
+            targetId: redactMemoryTextForOutput(relation.targetId),
+        })),
     };
     return includeFullText
         ? {
             ...base,
-            l0Abstract: metadata.l0_abstract,
-            l1Overview: metadata.l1_overview,
-            l2Content: metadata.l2_content,
+            l0Abstract: redactMemoryTextForOutput(metadata.l0_abstract),
+            l1Overview: redactMemoryTextForOutput(metadata.l1_overview),
+            l2Content: redactMemoryTextForOutput(metadata.l2_content),
         }
         : base;
 }
@@ -123,7 +127,7 @@ export function renderMemoryEntry(entry, index, includeFullText = false) {
     const text = includeFullText
         ? normalizeInlineText(metadata.l2_content || metadata.l1_overview || entry.text)
         : truncateText(normalizeInlineText(metadata.l0_abstract || entry.text), 180);
-    return `${prefix}[${entry.id}] [${categoryTag}:${entry.scope}] ${text} (${date}; ${sourceBits})`;
+    return `${prefix}[${entry.id}] [${categoryTag}:${normalizeInlineText(entry.scope)}] ${text} (${date}; ${sourceBits})`;
 }
 export function memoryMetadataMatches(entry, filters) {
     const metadata = parseSmartMetadata(entry.metadata, entry);
@@ -247,15 +251,15 @@ export async function resolveMemoryId(context, memoryRef, scopeFilter) {
     if (results.length === 0) {
         return {
             ok: false,
-            message: `No memory found matching "${trimmed}".`,
-            details: { error: "not_found", query: trimmed },
+            message: `No memory found matching "${normalizeInlineText(trimmed)}".`,
+            details: { error: "not_found", query: normalizeInlineText(trimmed) },
         };
     }
     if (results.length === 1 || results[0].score > 0.85) {
         return { ok: true, id: results[0].entry.id };
     }
     const list = results
-        .map((r) => `- [${r.entry.id.slice(0, 8)}] ${r.entry.text.slice(0, 60)}${r.entry.text.length > 60 ? "..." : ""}`)
+        .map((r) => `- [${r.entry.id.slice(0, 8)}] ${truncateText(normalizeInlineText(r.entry.text), 60)}`)
         .join("\n");
     return {
         ok: false,

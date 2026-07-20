@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
-import { appendFile, mkdir, rename, stat } from "node:fs/promises";
+import { lstat, rename, rm } from "node:fs/promises";
 import { dirname } from "node:path";
-import { enforcePrivatePath } from "../../file-privacy.js";
+import {
+  appendPrivateFile,
+  enforcePrivatePath,
+  ensurePrivateDirectory,
+} from "../../file-privacy.js";
 import {
   runCompatibilityContextShadow,
   type CompatibilityContextShadowInput,
@@ -76,13 +80,26 @@ export class JsonlRuntimeShadowTraceSink implements RuntimeShadowTraceSink {
   ) {}
 
   async append(receipt: RuntimeShadowReceiptV1): Promise<void> {
-    await mkdir(dirname(this.filePath), { recursive: true, mode: 0o700 });
-    const currentSize = await stat(this.filePath).then((value) => value.size).catch(() => 0);
-    if (currentSize >= this.maxBytes) {
-      await rename(this.filePath, `${this.filePath}.1`).catch(() => undefined);
+    ensurePrivateDirectory(dirname(this.filePath));
+    let currentSize = 0;
+    try {
+      enforcePrivatePath(this.filePath, { kind: "file" });
+      currentSize = (await lstat(this.filePath)).size;
+    } catch (error: any) {
+      if (error?.code !== "ENOENT") throw error;
     }
-    await appendFile(this.filePath, `${JSON.stringify(receipt)}\n`, { encoding: "utf8", mode: 0o600 });
-    enforcePrivatePath(this.filePath, { kind: "file" });
+    if (currentSize >= this.maxBytes) {
+      const rotated = `${this.filePath}.1`;
+      try {
+        enforcePrivatePath(rotated, { kind: "file" });
+        await rm(rotated, { force: true });
+      } catch (error: any) {
+        if (error?.code !== "ENOENT") throw error;
+      }
+      await rename(this.filePath, rotated);
+      enforcePrivatePath(rotated, { kind: "file" });
+    }
+    await appendPrivateFile(this.filePath, `${JSON.stringify(receipt)}\n`);
   }
 }
 

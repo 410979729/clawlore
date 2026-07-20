@@ -1,4 +1,6 @@
 const MAX_ID_CHARS = 512;
+const VISIBILITIES = new Set(["private", "conversation", "project", "team", "global"]);
+const RETENTIONS = new Set(["ephemeral", "working", "durable"]);
 function hasText(value) {
     return typeof value === "string" && value.trim().length > 0;
 }
@@ -11,12 +13,30 @@ function validateIdentifier(address, field, required, errors) {
     if (hasText(value) && value.length > MAX_ID_CHARS) {
         errors.push({ field, code: "too_long", message: `${field} exceeds ${MAX_ID_CHARS} characters` });
     }
+    if (hasText(value) && (value !== value.trim() || /[\u0000-\u001f\u007f]/u.test(value))) {
+        errors.push({ field, code: "invalid_format", message: `${field} must be trimmed and contain no control characters` });
+    }
 }
 export function validateMemoryAddress(address) {
     const errors = [];
+    if (!address || typeof address !== "object") {
+        return {
+            valid: false,
+            errors: [{ field: "schemaVersion", code: "required", message: "memory address object is required" }],
+        };
+    }
+    if (address.schemaVersion !== 2) {
+        errors.push({ field: "schemaVersion", code: "invalid_enum", message: "schemaVersion must equal 2" });
+    }
     validateIdentifier(address, "tenantId", true, errors);
     validateIdentifier(address, "principalId", true, errors);
     validateIdentifier(address, "agentId", true, errors);
+    if (!VISIBILITIES.has(address.visibility)) {
+        errors.push({ field: "visibility", code: "invalid_enum", message: "visibility is unsupported" });
+    }
+    if (!RETENTIONS.has(address.retention)) {
+        errors.push({ field: "retention", code: "invalid_enum", message: "retention is unsupported" });
+    }
     for (const field of [
         "workspaceId",
         "projectId",

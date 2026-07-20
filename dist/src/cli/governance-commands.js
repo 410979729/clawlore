@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { listAutoRecallTraces } from "../auto-recall-ledger.js";
 import { candidateDebtReport, promoteMemoryCandidates } from "../candidate-promotion.js";
+import { diagnosticErrorSummary } from "../diagnostic-redaction.js";
 import { digestRecoveryReport, digestReport, recoverDigestChunks, runDigestPipeline, } from "../digest-pipeline.js";
 import { buildForgettingReport, runForgettingWithVectorSync } from "../forgetting.js";
 import { applyCleanup, rollbackCleanupBatch } from "../governance-cleanup.js";
@@ -43,7 +44,7 @@ export function registerGovernanceCommands(runtime) {
             console.log(`• Keep candidate: ${byAction.keep_candidate ?? 0}`);
         }
         catch (error) {
-            console.error("Candidate report failed:", error);
+            console.error(`Candidate report failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });
@@ -77,7 +78,7 @@ export function registerGovernanceCommands(runtime) {
             console.log(`• Batch: ${result.batch_id ?? ""}`);
         }
         catch (error) {
-            console.error("Candidate promotion failed:", error);
+            console.error(`Candidate promotion failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });
@@ -105,7 +106,7 @@ export function registerGovernanceCommands(runtime) {
             console.log(`• Failed runs: ${result.failed_runs ?? 0}`);
         }
         catch (error) {
-            console.error("Digest report failed:", error);
+            console.error(`Digest report failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });
@@ -134,7 +135,7 @@ export function registerGovernanceCommands(runtime) {
                 scope: typeof options.scope === "string" && options.scope.trim() ? options.scope.trim() : "agent:main",
                 inputText,
                 sourceId: typeof options.inputFile === "string" && options.inputFile.trim()
-                    ? path.resolve(options.inputFile.trim())
+                    ? "cli-file"
                     : inputText
                         ? "cli-text"
                         : undefined,
@@ -167,7 +168,7 @@ export function registerGovernanceCommands(runtime) {
             }
         }
         catch (error) {
-            console.error("Digest run failed:", error);
+            console.error(`Digest run failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });
@@ -200,7 +201,7 @@ export function registerGovernanceCommands(runtime) {
                 console.log(`• Recovered: ${result.recovered}`);
         }
         catch (error) {
-            console.error("Digest recovery failed:", error);
+            console.error(`Digest recovery failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });
@@ -236,7 +237,7 @@ export function registerGovernanceCommands(runtime) {
             console.log(`• Batch: ${result.batch_id}`);
         }
         catch (error) {
-            console.error("Governance cleanup failed:", error);
+            console.error(`Governance cleanup failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });
@@ -265,7 +266,7 @@ export function registerGovernanceCommands(runtime) {
             console.log(`• Batch: ${result.batch_id}`);
         }
         catch (error) {
-            console.error("Governance rollback failed:", error);
+            console.error(`Governance rollback failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });
@@ -310,7 +311,7 @@ export function registerGovernanceCommands(runtime) {
             console.log(`• Archived rows with batch: ${payload.archived_rows_with_batch}`);
         }
         catch (error) {
-            console.error("Governance audit coverage failed:", error);
+            console.error(`Governance audit coverage failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });
@@ -353,7 +354,7 @@ export function registerGovernanceCommands(runtime) {
                 console.log(`• Scheduled: ${result.scheduled}`);
         }
         catch (error) {
-            console.error("Journal recovery failed:", error);
+            console.error(`Journal recovery failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });
@@ -384,7 +385,7 @@ export function registerGovernanceCommands(runtime) {
             console.log(`• Orphan relations: ${counts.orphan_relations ?? 0}`);
         }
         catch (error) {
-            console.error("Graph hygiene failed:", error);
+            console.error(`Graph hygiene failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });
@@ -415,7 +416,7 @@ export function registerGovernanceCommands(runtime) {
             console.log(`• Duplicate groups: ${result.duplicate_groups.count}`);
         }
         catch (error) {
-            console.error("Forgetting report failed:", error);
+            console.error(`Forgetting report failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });
@@ -448,7 +449,7 @@ export function registerGovernanceCommands(runtime) {
                 console.log(`• Hard delete blocked: ${result.blocked_reason}`);
         }
         catch (error) {
-            console.error("Forgetting run failed:", error);
+            console.error(`Forgetting run failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });
@@ -477,7 +478,7 @@ export function registerGovernanceCommands(runtime) {
             }
         }
         catch (error) {
-            console.error("Auto recall trace listing failed:", error);
+            console.error(`Auto recall trace listing failed: ${diagnosticErrorSummary(error)}`);
             process.exit(1);
         }
     });

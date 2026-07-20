@@ -1,6 +1,8 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { stripResetSuffix } from "./session-recovery.js";
+import { sanitizeCaptureText } from "./capture-safety.js";
+import { redactKnownSecrets } from "./secret-redaction.js";
 function extractTextContent(content) {
     if (!content)
         return null;
@@ -31,32 +33,16 @@ export function shouldSkipReflectionMessage(role, text) {
 /** Redacts common credentials, private paths, and direct identifiers before model input. */
 export function redactReflectionText(text) {
     const patterns = [
-        /Bearer\s+[A-Za-z0-9\-._~+/]+=*/g,
-        /\bsk-[A-Za-z0-9]{20,}\b/g,
-        /\bsk-proj-[A-Za-z0-9\-_]{20,}\b/g,
-        /\bsk-ant-[A-Za-z0-9\-_]{20,}\b/g,
-        /\bghp_[A-Za-z0-9]{36,}\b/g,
-        /\bgho_[A-Za-z0-9]{36,}\b/g,
-        /\bghu_[A-Za-z0-9]{36,}\b/g,
-        /\bghs_[A-Za-z0-9]{36,}\b/g,
-        /\bgithub_pat_[A-Za-z0-9_]{22,}\b/g,
-        /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g,
-        /\bAIza[0-9A-Za-z_-]{20,}\b/g,
-        /\bAKIA[0-9A-Z]{16}\b/g,
-        /\bnpm_[A-Za-z0-9]{36,}\b/g,
-        /\b(?:token|api[_-]?key|secret|password)\s*[:=]\s*["']?[^\s"',;)}\]]{6,}["']?\b/gi,
-        /-----BEGIN\s+(?:RSA\s+|EC\s+|DSA\s+|OPENSSH\s+)?PRIVATE\s+KEY-----[\s\S]*?-----END\s+(?:RSA\s+|EC\s+|DSA\s+|OPENSSH\s+)?PRIVATE\s+KEY-----/g,
-        /(?<=:\/\/)[^@\s]+:[^@\s]+(?=@)/g,
         /\/home\/[^\s"',;)}\]]+/g,
         /\/Users\/[^\s"',;)}\]]+/g,
         /[A-Z]:\\[^\s"',;)}\]]+/g,
         /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
     ];
-    let redacted = text;
+    let redacted = redactKnownSecrets(text);
     for (const pattern of patterns) {
-        redacted = redacted.replace(pattern, (match) => match.toLowerCase().startsWith("bearer") ? "Bearer [REDACTED]" : "[REDACTED]");
+        redacted = redacted.replace(pattern, "[REDACTED]");
     }
-    return redacted;
+    return sanitizeCaptureText(redacted);
 }
 export function summarizeRecentConversationMessages(messages, messageCount) {
     if (!Array.isArray(messages) || messages.length === 0)

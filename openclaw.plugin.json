@@ -5,7 +5,7 @@
   ],
   "name": "ClawLore",
   "description": "ClawLore memory for OpenClaw: SQLite truth, scoped hybrid recall, conservative capture, and rebuildable vectors",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "kind": "memory",
   "contracts": {
     "tools": [
@@ -758,7 +758,7 @@
       "autoBackup": {
         "type": "boolean",
         "default": false,
-        "description": "Opt in to daily plaintext JSONL backups of stored memories. Default is off."
+        "description": "Deprecated compatibility no-op. true creates no backup and makes doctor report an issue; use encrypted snapshot/export instead."
       },
       "autoRecall": {
         "type": "boolean",
@@ -2043,8 +2043,8 @@
       "help": "Opt in to capturing durable, high-signal facts from conversations. Default: off."
     },
     "autoBackup": {
-      "label": "Plaintext Backups",
-      "help": "Opt in to daily JSONL exports of stored memories. These backups are plaintext; keep disabled for sensitive deployments.",
+      "label": "Deprecated Auto Backup",
+      "help": "Deprecated no-op. Keep false and use the encrypted snapshot/export operator flow.",
       "advanced": true
     },
     "autoRecall": {

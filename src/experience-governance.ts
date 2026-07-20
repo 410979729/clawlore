@@ -6,6 +6,8 @@
  * promotion, review, quarantine, or cleanup command mutates storage.
  */
 
+import { containsSecret, redactKnownSecrets } from "./secret-redaction.js";
+
 type DatabaseSync = any;
 
 export interface ExperienceDebtOptions {
@@ -84,13 +86,6 @@ const DEFAULT_STALE_CANDIDATE_DAYS = 14;
 const FAILING_MIN_RUNS = 3;
 const FAILING_FAILURE_MULTIPLIER = 2;
 
-const SECRET_LIKE_PATTERNS = [
-  /\bsk-[A-Za-z0-9_-]{8,}\b/g,
-  /\bAIza[A-Za-z0-9_-]{8,}\b/g,
-  /\b(?:api[_-]?key|token|password|passwd|secret|private[_-]?key)\b\s*[:=]\s*["']?[^"'\s,;]{4,}/gi,
-  /\bBearer\s+[A-Za-z0-9._-]{8,}\b/gi,
-];
-
 function tableNames(db: DatabaseSync): Set<string> {
   const rows = db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual')").all() as Array<{ name: string }>;
   return new Set(rows.map((row) => String(row.name)));
@@ -126,23 +121,11 @@ function arrayCount(value: unknown): number {
 }
 
 function containsSecretLikeText(text: string): boolean {
-  return SECRET_LIKE_PATTERNS.some((pattern) => {
-    pattern.lastIndex = 0;
-    return pattern.test(text);
-  });
-}
-
-function redactSecretLikeText(text: string): string {
-  let redacted = text;
-  for (const pattern of SECRET_LIKE_PATTERNS) {
-    pattern.lastIndex = 0;
-    redacted = redacted.replace(pattern, "[redacted: secret-like content]");
-  }
-  return redacted;
+  return containsSecret(text);
 }
 
 function preview(value: unknown, maxChars = 140): string {
-  const text = redactSecretLikeText(String(value ?? "").replace(/\s+/g, " ").trim());
+  const text = redactKnownSecrets(String(value ?? "")).replace(/\s+/g, " ").trim();
   if (text.length <= maxChars) return text;
   return `${text.slice(0, Math.max(0, maxChars - 3))}...`;
 }

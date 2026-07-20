@@ -1,11 +1,11 @@
 {
   "name": "clawlore",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "ClawLore memory for OpenClaw: SQLite truth, scoped hybrid recall, conservative capture, and rebuildable vectors",
   "type": "module",
   "main": "dist/index.js",
   "engines": {
-    "node": ">=24.0.0 <25"
+    "node": ">=24.15.0 <25"
   },
   "os": [
     "linux",
@@ -122,6 +122,7 @@
     "audit:release": "node scripts/supply-chain-audit.mjs",
     "release:gate": "node scripts/run-release-gate.mjs",
     "release:gate:source": "node scripts/run-release-gate.mjs --source-only",
+    "release:prepush": "node scripts/run-release-gate.mjs --pre-push",
     "release:reproducibility": "node scripts/reproducible-install-gate.mjs"
   },
   "keywords": [
@@ -164,7 +165,8 @@
     "apache-arrow": "18.1.0",
     "json5": "^2.2.3",
     "openai": "^6.21.0",
-    "proper-lockfile": "^4.1.2"
+    "proper-lockfile": "^4.1.2",
+    "yaml": "2.9.0"
   },
   "openclaw": {
     "extensions": [

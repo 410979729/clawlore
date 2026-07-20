@@ -13,6 +13,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { containsSecret } from "./secret-redaction.js";
 
 // Use any to avoid TypeScript issues with experimental node:sqlite
 type DatabaseSync = any;
@@ -21,6 +22,7 @@ import {
   PLAYBOOK_SCHEMA_VERSION,
   type PlaybookStep,
   type ProceduralPlaybook,
+  type TaskEpisode,
 } from "./experience-models.js";
 import {
   createPlaybook,
@@ -48,12 +50,6 @@ const HIGH_RISK_TOKENS = [
   "push", "commit", "tag", "restart", "delete", "rm -",
   "token", "password", "secret", "api key",
   "密钥", "密码", "凭据", "重启", "删除", "推送", "提交仓库",
-];
-
-const SECRET_LIKE_TOKENS = [
-  "api_key", "apikey", "api-key", "secret_key", "secret-key",
-  "password", "passwd", "token", "bearer", "private_key",
-  "cookie", "session_id", "auth_token",
 ];
 
 const TOOL_HINTS = [
@@ -96,7 +92,7 @@ function containsAny(text: string, tokens: string[]): boolean {
 }
 
 function containsSecretLikeText(text: string): boolean {
-  return containsAny(text, SECRET_LIKE_TOKENS);
+  return containsSecret(text);
 }
 
 function hashId(prefix: string, ...parts: unknown[]): string {
@@ -323,6 +319,7 @@ export interface PromotionResult {
   playbooks_promoted: number;
   playbooks_needing_review: number;
   duplicates_skipped: number;
+  historical_episodes_frozen: number;
   skipped: number;
   items: PromotionItem[];
 }
@@ -334,6 +331,24 @@ export interface PromotionItem {
   risk_level?: string;
   status?: string;
   reason?: string;
+}
+
+function promotionReviewIssue(episode: TaskEpisode): string | undefined {
+  const metadata = episode?.metadata && typeof episode.metadata === "object"
+    ? episode.metadata as Record<string, unknown>
+    : {};
+  const review = metadata.promotion_review && typeof metadata.promotion_review === "object"
+    ? metadata.promotion_review as Record<string, unknown>
+    : undefined;
+  if (!review && metadata.promotion_eligible === undefined && metadata.reviewer_passed === undefined) {
+    return "legacy_episode_historical";
+  }
+  if (metadata.promotion_eligible !== true) return "promotion_not_eligible";
+  if (metadata.reviewer_passed !== true) return "promotion_reviewer_not_passed";
+  if (!review || review.decision !== "approved" || typeof review.source !== "string" || !review.source.trim()) {
+    return "promotion_review_provenance_missing";
+  }
+  return undefined;
 }
 
 export function promoteExperiences(
@@ -355,6 +370,7 @@ export function promoteExperiences(
     playbooks_promoted: 0,
     playbooks_needing_review: 0,
     duplicates_skipped: 0,
+    historical_episodes_frozen: 0,
     skipped: 0,
     items: [],
   };
@@ -372,6 +388,19 @@ export function promoteExperiences(
     // Skip if outcome is not success
     if (episode.outcome !== "success") {
       result.skipped++;
+      continue;
+    }
+
+    // Task completion and experience governance are separate truths. A
+    // successful episode is never promotion authority by itself: automatic
+    // extraction requires an explicit positive reviewer decision and its
+    // provenance. Pre-gate episodes remain explicit historical records; this
+    // release does not silently approve or mutate them into promotion inputs.
+    const reviewIssue = promotionReviewIssue(episode);
+    if (reviewIssue) {
+      result.skipped++;
+      if (reviewIssue === "legacy_episode_historical") result.historical_episodes_frozen++;
+      result.items.push({ action: "skip", reason: reviewIssue, episode_id: episode.id });
       continue;
     }
 

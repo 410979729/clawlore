@@ -1,27 +1,64 @@
 import { memoryAddressKey, validateMemoryAddress } from "../domain/memory-address.js";
-const SECRET_PATTERNS = [
-    /\b(?:api[_-]?key|token|password|secret)\s*[:=]\s*[^\s]{8,}/i,
-    /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
-];
-function requiredText(value, label) {
+import { containsSecret } from "../../secret-redaction.js";
+import { evaluateCaptureSafety, sanitizeCaptureText } from "../../capture-safety.js";
+import { assertMemoryAddressIdentifiersSafe } from "../domain/truth-write-policy.js";
+function requiredText(value, label, maxLength = 4_000) {
+    if (typeof value !== "string")
+        throw new Error(`${label} is required`);
     const normalized = value.replace(/\s+/g, " ").trim();
     if (!normalized)
         throw new Error(`${label} is required`);
+    if (normalized.length > maxLength)
+        throw new Error(`${label} exceeds the size limit`);
     return normalized;
 }
-function unique(values) {
-    return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort();
+function requiredIdentifierText(value, label, maxLength = 512) {
+    const normalized = requiredText(value, label, maxLength);
+    if (containsSecret(value) || containsSecret(normalized)
+        || sanitizeCaptureText(normalized) !== normalized) {
+        throw new Error(`${label} rejected by safety policy`);
+    }
+    const safety = evaluateCaptureSafety(normalized);
+    if (!safety.allowed && safety.reason !== "trivial" && safety.reason !== "progress-noise") {
+        throw new Error(`${label} rejected by safety policy`);
+    }
+    return normalized;
+}
+function requiredSemanticText(value, label, maxLength = 4_000) {
+    const normalized = requiredText(value, label, maxLength);
+    const sanitized = sanitizeCaptureText(normalized);
+    if (containsSecret(value) || containsSecret(normalized)
+        || sanitized !== normalized || !evaluateCaptureSafety(sanitized).allowed) {
+        throw new Error(`${label} rejected by safety policy`);
+    }
+    return normalized;
+}
+function identifierUnique(values, label = "value", maxItems = 256, maxLength = 512) {
+    if (!Array.isArray(values))
+        throw new Error(`${label} list is required`);
+    if (values.length > maxItems)
+        throw new Error(`${label} list exceeds the size limit`);
+    return [...new Set(values.map((value) => requiredIdentifierText(value, label, maxLength)))].sort();
+}
+function semanticUnique(values, label, maxItems = 128, maxLength = 4_000) {
+    if (!Array.isArray(values))
+        throw new Error(`${label} list is required`);
+    if (values.length > maxItems)
+        throw new Error(`${label} list exceeds the size limit`);
+    return [...new Set(values.map((value) => requiredSemanticText(value, label, maxLength)))].sort();
 }
 function packItems(pack) {
     return [pack.profile, pack.projectFacts, pack.activeDecisions, pack.taskContext, pack.playbooks].flat();
 }
 function normalizeSteps(steps) {
+    if (!Array.isArray(steps) || steps.length > 128)
+        throw new Error("playbook steps exceed the size limit");
     if (steps.length === 0)
         throw new Error("playbook requires ordered steps");
     const normalized = steps.map((step) => ({
-        stepId: requiredText(step.stepId, "step id"),
-        instruction: requiredText(step.instruction, "step instruction"),
-        requiredTools: unique(step.requiredTools),
+        stepId: requiredIdentifierText(step.stepId, "step id", 256),
+        instruction: requiredSemanticText(step.instruction, "step instruction"),
+        requiredTools: identifierUnique(step.requiredTools, "required tool", 64, 256),
     }));
     if (new Set(normalized.map((step) => step.stepId)).size !== normalized.length) {
         throw new Error("playbook step ids must be unique");
@@ -29,11 +66,13 @@ function normalizeSteps(steps) {
     return normalized;
 }
 function normalizeGates(gates) {
+    if (!Array.isArray(gates) || gates.length > 128)
+        throw new Error("playbook gates exceed the size limit");
     if (gates.length === 0)
         throw new Error("playbook requires verification gates");
     const normalized = gates.map((gate) => ({
-        gateId: requiredText(gate.gateId, "gate id"),
-        description: requiredText(gate.description, "gate description"),
+        gateId: requiredIdentifierText(gate.gateId, "gate id", 256),
+        description: requiredSemanticText(gate.description, "gate description"),
     }));
     if (new Set(normalized.map((gate) => gate.gateId)).size !== normalized.length) {
         throw new Error("playbook gate ids must be unique");
@@ -50,14 +89,15 @@ export class SubagentExperienceServiceV2 {
     prepareSpawn(input) {
         if (!validateMemoryAddress(input.actor).valid)
             throw new Error("invalid subagent actor address");
+        assertMemoryAddressIdentifiersSafe(input.actor);
         if (memoryAddressKey(input.actor) !== memoryAddressKey(input.contextPack.actorAddress)) {
             throw new Error("ContextPack actor does not match subagent actor");
         }
-        const parentSessionId = requiredText(input.parentSessionId, "parent session id");
-        const childSessionId = requiredText(input.childSessionId, "child session id");
+        const parentSessionId = requiredIdentifierText(input.parentSessionId, "parent session id", 512);
+        const childSessionId = requiredIdentifierText(input.childSessionId, "child session id", 512);
         if (parentSessionId === childSessionId)
             throw new Error("child session must differ from parent session");
-        const authorized = new Set(unique(input.explicitlyAuthorizedMemoryIds ?? []));
+        const authorized = new Set(identifierUnique(input.explicitlyAuthorizedMemoryIds ?? [], "authorized memory id", 256, 512));
         const selected = packItems(input.contextPack).filter((memory) => input.mode === "fork"
             || (authorized.has(memory.id) && memory.address.visibility !== "private"));
         const snapshot = {
@@ -66,17 +106,22 @@ export class SubagentExperienceServiceV2 {
             mode: input.mode,
             parentSessionId,
             childSessionId,
-            runId: requiredText(input.runId, "run id"),
-            taskGoal: requiredText(input.taskGoal, "task goal"),
+            runId: requiredIdentifierText(input.runId, "run id", 512),
+            taskGoal: requiredSemanticText(input.taskGoal, "task goal"),
             actorAddress: input.actor,
-            items: selected.map((memory) => ({
-                memoryId: memory.id,
-                section: memory.section,
-                text: memory.text,
-                address: memory.address,
-                verification: memory.verification,
-                readOnly: true,
-            })),
+            items: selected.map((memory) => {
+                if (!validateMemoryAddress(memory.address).valid)
+                    throw new Error("invalid context memory address");
+                assertMemoryAddressIdentifiersSafe(memory.address);
+                return {
+                    memoryId: requiredIdentifierText(memory.id, "context memory id", 512),
+                    section: memory.section,
+                    text: requiredSemanticText(memory.text, "context memory text", 16_000),
+                    address: memory.address,
+                    verification: memory.verification,
+                    readOnly: true,
+                };
+            }),
             status: "active",
             createdAt: this.clock.now().toISOString(),
         };
@@ -88,10 +133,7 @@ export class SubagentExperienceServiceV2 {
         const snapshot = this.requireSnapshot(input.snapshotId, input.childSessionId);
         if (input.retention === "durable")
             throw new Error("child durable memory writes are denied");
-        const content = requiredText(input.content, "child scratch content");
-        if (content.length > 4_000 || SECRET_PATTERNS.some((pattern) => pattern.test(content))) {
-            throw new Error("child scratch content rejected by safety policy");
-        }
+        const content = requiredSemanticText(input.content, "child scratch content");
         const scratch = {
             scratchId: this.clock.id("scratch"), snapshotId: snapshot.snapshotId,
             childSessionId: snapshot.childSessionId, content, retention: input.retention,
@@ -111,12 +153,12 @@ export class SubagentExperienceServiceV2 {
             parentSessionId: snapshot.parentSessionId,
             childSessionId: snapshot.childSessionId,
             runId: snapshot.runId,
-            taskClass: requiredText(input.taskClass, "task class"),
+            taskClass: requiredIdentifierText(input.taskClass, "task class", 256),
             taskGoal: snapshot.taskGoal,
             actorAddress: snapshot.actorAddress,
             outcome: input.outcome,
-            toolReceiptIds: unique(input.toolReceiptIds ?? []),
-            evidence: unique(input.evidence ?? []),
+            toolReceiptIds: identifierUnique(input.toolReceiptIds ?? [], "tool receipt id", 256, 512),
+            evidence: semanticUnique(input.evidence ?? [], "episode evidence"),
             parentVerification: "pending",
             lifecycle: "candidate",
             createdAt: now,
@@ -130,7 +172,7 @@ export class SubagentExperienceServiceV2 {
         const episode = this.requireEpisode(input.episodeId);
         if (episode.parentSessionId !== input.parentSessionId)
             throw new Error("parent session does not own episode");
-        const reason = requiredText(input.reason, "verification reason");
+        const reason = requiredSemanticText(input.reason, "verification reason");
         const hasReceipts = episode.toolReceiptIds.length > 0 && episode.evidence.length > 0;
         const accepted = input.accepted && episode.outcome === "success" && hasReceipts;
         const updated = {
@@ -145,7 +187,10 @@ export class SubagentExperienceServiceV2 {
         return updated;
     }
     createPlaybookCandidate(input) {
-        const episodeIds = unique(input.episodeIds);
+        if (!validateMemoryAddress(input.actor).valid)
+            throw new Error("invalid playbook actor address");
+        assertMemoryAddressIdentifiersSafe(input.actor);
+        const episodeIds = identifierUnique(input.episodeIds, "episode id", 256, 512);
         const episodes = this.store.listEpisodes(episodeIds);
         if (episodes.length !== episodeIds.length)
             throw new Error("playbook evidence episode is missing");
@@ -168,14 +213,14 @@ export class SubagentExperienceServiceV2 {
             playbookId: this.clock.id("playbook"),
             version: 1,
             taskClass: episodes[0].taskClass,
-            title: requiredText(input.title, "playbook title"),
-            trigger: requiredText(input.trigger, "playbook trigger"),
+            title: requiredSemanticText(input.title, "playbook title", 512),
+            trigger: requiredSemanticText(input.trigger, "playbook trigger"),
             scopeAddress: episodes[0].actorAddress,
-            prerequisites: unique(input.prerequisites),
+            prerequisites: semanticUnique(input.prerequisites, "playbook prerequisite"),
             steps,
             verificationGates,
-            risks: unique(input.risks),
-            cleanup: unique(input.cleanup),
+            risks: semanticUnique(input.risks, "playbook risk"),
+            cleanup: semanticUnique(input.cleanup, "playbook cleanup"),
             evidenceEpisodeIds: episodeIds,
             lifecycle: "candidate",
             operatorReviewed: false,
@@ -188,6 +233,8 @@ export class SubagentExperienceServiceV2 {
     }
     promotePlaybook(input) {
         const playbook = this.requirePlaybook(input.playbookId);
+        const actor = requiredIdentifierText(input.actor, "promotion actor", 512);
+        const reason = requiredSemanticText(input.reason, "promotion reason");
         if (playbook.lifecycle !== "candidate")
             throw new Error("only candidate playbooks can be promoted");
         const episodes = this.store.listEpisodes(playbook.evidenceEpisodeIds);
@@ -204,18 +251,22 @@ export class SubagentExperienceServiceV2 {
             updatedAt: this.clock.now().toISOString(),
         };
         this.store.updatePlaybook(updated);
-        this.event("playbook", updated.playbookId, "playbook_promoted", input.actor, requiredText(input.reason, "promotion reason"));
+        this.event("playbook", updated.playbookId, "playbook_promoted", actor, reason);
         return updated;
     }
     quarantinePlaybook(input) {
         const playbook = this.requirePlaybook(input.playbookId);
+        const actor = requiredIdentifierText(input.actor, "quarantine actor", 512);
+        const reason = requiredSemanticText(input.reason, "quarantine reason");
         const updated = { ...playbook, lifecycle: "quarantined", updatedAt: this.clock.now().toISOString() };
         this.store.updatePlaybook(updated);
-        this.event("playbook", updated.playbookId, "playbook_quarantined", input.actor, requiredText(input.reason, "quarantine reason"));
+        this.event("playbook", updated.playbookId, "playbook_quarantined", actor, reason);
         return updated;
     }
     supersedePlaybook(input) {
         const previous = this.requirePlaybook(input.playbookId);
+        const actor = requiredIdentifierText(input.actor, "supersede actor", 512);
+        const reason = requiredSemanticText(input.reason, "supersede reason");
         if (previous.lifecycle !== "promoted")
             throw new Error("only promoted playbooks can be superseded");
         const steps = normalizeSteps(input.steps);
@@ -236,18 +287,21 @@ export class SubagentExperienceServiceV2 {
         };
         this.store.savePlaybook(next);
         this.store.updatePlaybook({ ...previous, lifecycle: "superseded", supersededBy: next.playbookId, updatedAt: now });
-        this.event("playbook", previous.playbookId, "playbook_superseded", input.actor, requiredText(input.reason, "supersede reason"));
+        this.event("playbook", previous.playbookId, "playbook_superseded", actor, reason);
         return next;
     }
     evaluateReplay(input) {
+        if (!validateMemoryAddress(input.actor).valid)
+            throw new Error("invalid replay actor address");
+        assertMemoryAddressIdentifiersSafe(input.actor);
         const playbook = this.requirePlaybook(input.playbookId);
         const scopeMatches = memoryAddressKey(playbook.scopeAddress) === memoryAddressKey(input.actor);
-        const availableTools = new Set(unique(input.availableTools));
-        const satisfiedPrerequisites = new Set(unique(input.satisfiedPrerequisites));
-        const completedSteps = new Set(unique(input.completedStepIds));
-        const passedGates = new Set(unique(input.passedGateIds));
-        const disabledSteps = unique(input.disabledStepIds ?? []);
-        const missingTools = unique(playbook.steps.flatMap((step) => step.requiredTools).filter((tool) => !availableTools.has(tool)));
+        const availableTools = new Set(identifierUnique(input.availableTools));
+        const satisfiedPrerequisites = new Set(semanticUnique(input.satisfiedPrerequisites, "satisfied prerequisite"));
+        const completedSteps = new Set(identifierUnique(input.completedStepIds));
+        const passedGates = new Set(identifierUnique(input.passedGateIds));
+        const disabledSteps = identifierUnique(input.disabledStepIds ?? []);
+        const missingTools = identifierUnique(playbook.steps.flatMap((step) => step.requiredTools).filter((tool) => !availableTools.has(tool)));
         const missingPrerequisites = playbook.prerequisites.filter((item) => !satisfiedPrerequisites.has(item));
         const missingSteps = playbook.steps.map((step) => step.stepId).filter((id) => !completedSteps.has(id));
         const missingVerificationGates = playbook.verificationGates.map((gate) => gate.gateId).filter((id) => !passedGates.has(id));
@@ -268,7 +322,9 @@ export class SubagentExperienceServiceV2 {
         if (input.outcome === "failure")
             return this.quarantinePlaybook(input);
         const playbook = this.requirePlaybook(input.playbookId);
-        this.event("playbook", playbook.playbookId, `playbook_feedback_${input.outcome}`, input.actor, requiredText(input.reason, "feedback reason"));
+        const actor = requiredIdentifierText(input.actor, "feedback actor", 512);
+        const reason = requiredSemanticText(input.reason, "feedback reason");
+        this.event("playbook", playbook.playbookId, `playbook_feedback_${input.outcome}`, actor, reason);
         return playbook;
     }
     requireSnapshot(snapshotId, childSessionId) {

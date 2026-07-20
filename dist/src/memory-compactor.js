@@ -20,6 +20,8 @@
  *   4. Delete source entries, store merged entry.
  */
 import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
+import { readPrivateFile, writePrivateFileAtomic } from "./file-privacy.js";
+import { isMemoryEntrySafeForEgress } from "./memory-egress-policy.js";
 // ============================================================================
 // Math helpers
 // ============================================================================
@@ -175,7 +177,10 @@ export async function runCompaction(store, embedder, config, scopes, logger) {
         };
     }
     // Filter out entries without vectors (shouldn't happen but be safe)
-    const valid = entries.filter((e) => e.vector && e.vector.length > 0);
+    const valid = entries.filter((entry) => entry.vector?.length > 0 && isMemoryEntrySafeForEgress(entry));
+    const safetyFiltered = entries.length - valid.length;
+    if (safetyFiltered > 0)
+        logger?.warn(`memory-compactor: filtered ${safetyFiltered} unsafe or vectorless entries`);
     const plans = buildClusters(valid, config.similarityThreshold, config.minClusterSize);
     if (config.dryRun) {
         logger?.info(`memory-compactor [dry-run]: scanned=${valid.length} clusters=${plans.length}`);
@@ -234,8 +239,7 @@ export async function runCompaction(store, embedder, config, scopes, logger) {
  */
 export async function shouldRunCompaction(stateFile, cooldownHours) {
     try {
-        const { readFile } = await import("node:fs/promises");
-        const raw = await readFile(stateFile, "utf8");
+        const raw = await readPrivateFile(stateFile);
         const state = JSON.parse(raw);
         if (typeof state.lastRunAt === "number") {
             const elapsed = Date.now() - state.lastRunAt;
@@ -248,8 +252,5 @@ export async function shouldRunCompaction(stateFile, cooldownHours) {
     return true;
 }
 export async function recordCompactionRun(stateFile) {
-    const { writeFile, mkdir } = await import("node:fs/promises");
-    const { dirname } = await import("node:path");
-    await mkdir(dirname(stateFile), { recursive: true });
-    await writeFile(stateFile, JSON.stringify({ lastRunAt: Date.now() }), "utf8");
+    await writePrivateFileAtomic(stateFile, JSON.stringify({ lastRunAt: Date.now() }));
 }

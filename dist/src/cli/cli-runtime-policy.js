@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import * as readline from "node:readline";
 import { redactDigestReportForDiagnostics, redactDigestRunForDiagnostics, } from "../diagnostics-redaction.js";
 import { digestReport } from "../digest-pipeline.js";
+import { redactMemoryTextForOutput } from "../memory-egress-policy.js";
 import { getDefaultOauthModelForProvider, isOauthModelSupported, listOAuthProviders, normalizeOAuthProviderId } from "../llm-oauth.js";
 export * from "./auth-config-transaction.js";
 // ============================================================================
@@ -151,9 +152,9 @@ export function formatMemory(memory, index) {
     const prefix = index !== undefined ? `${index + 1}. ` : "";
     const id = memory?.id ? String(memory.id) : "unknown";
     const date = new Date(memory.timestamp || memory.createdAt || Date.now()).toISOString().split('T')[0];
-    const fullText = String(memory.text || "");
+    const fullText = redactMemoryTextForOutput(String(memory.text || ""));
     const text = fullText.slice(0, 100) + (fullText.length > 100 ? "..." : "");
-    return `${prefix}[${id}] [${memory.category}:${memory.scope}] ${text} (${date})`;
+    return `${prefix}[${id}] [${redactMemoryTextForOutput(String(memory.category || ""))}:${redactMemoryTextForOutput(String(memory.scope || ""))}] ${text} (${date})`;
 }
 export function formatJson(obj) {
     return JSON.stringify(obj, null, 2);

@@ -3,6 +3,12 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite");
+const { createJiti } = require("jiti");
+const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: false });
+const {
+  ensureLifecycleProjection,
+  openLifecycleProjectionReadAccess,
+} = jiti("../src/sql-lifecycle-projection.ts");
 
 function argument(name, fallback) {
   const index = process.argv.indexOf(name);
@@ -20,6 +26,7 @@ function percentile(values, ratio) {
 const rowCount = argument("--rows", 200_000);
 const queryCount = Math.min(argument("--queries", 64), rowCount);
 const maxP95Ms = argument("--max-p95-ms", 250);
+const maxLifecycleStatsMs = argument("--max-lifecycle-stats-ms", 500);
 const db = new DatabaseSync(":memory:");
 const startedAt = performance.now();
 
@@ -31,21 +38,44 @@ try {
     CREATE TABLE memory_truth (
       id TEXT PRIMARY KEY,
       text TEXT NOT NULL,
+      category TEXT NOT NULL,
       scope TEXT NOT NULL,
-      metadata TEXT NOT NULL
+      timestamp REAL NOT NULL,
+      metadata TEXT NOT NULL,
+      updated_at REAL NOT NULL
     );
     CREATE VIRTUAL TABLE memory_truth_fts USING fts5(memory_id UNINDEXED, text);
   `);
-  const insertTruth = db.prepare("INSERT INTO memory_truth(id, text, scope, metadata) VALUES (?, ?, ?, ?)");
+  ensureLifecycleProjection(db);
+  const insertTruth = db.prepare("INSERT INTO memory_truth(id, text, category, scope, timestamp, metadata, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)");
   const insertFts = db.prepare("INSERT INTO memory_truth_fts(memory_id, text) VALUES (?, ?)");
+  const insertLifecycle = db.prepare(`
+    INSERT INTO memory_lifecycle_projection (
+      memory_id, scope, static_lifecycle, valid_from, invalidated_at, truth_updated_at,
+      projection_fingerprint
+    ) VALUES (
+      ?, ?, 'dynamic', ?, NULL, ?,
+      json_array(?, 'dynamic', CAST(? AS REAL), NULL, CAST(? AS REAL))
+    )
+  `);
   db.exec("BEGIN IMMEDIATE");
   for (let index = 0; index < rowCount; index++) {
     const id = `scale-${String(index).padStart(7, "0")}`;
     const scope = `user:${index % 64}`;
     const text = `SCALERECALL${index} tenant ${index % 64} recovery snapshot rollback verification record ${index}`;
-    insertTruth.run(id, text, scope, '{"state":"confirmed","memory_layer":"durable"}');
+    const timestamp = 1_720_000_000_000 + index;
+    insertTruth.run(id, text, "fact", scope, timestamp, '{"state":"confirmed","memory_layer":"durable"}', timestamp);
     insertFts.run(id, text);
+    insertLifecycle.run(
+      id, scope, timestamp, timestamp,
+      scope, timestamp, timestamp,
+    );
   }
+  db.prepare(`
+    UPDATE memory_lifecycle_projection_state
+    SET projected_rows = ?, updated_at = ?
+    WHERE singleton = 1
+  `).run(rowCount, Date.now());
   db.exec("COMMIT");
   const buildMs = Math.round((performance.now() - startedAt) * 1000) / 1000;
 
@@ -69,6 +99,31 @@ try {
     assert.ok(rows.every((row) => row.scope === expectedScope), `cross-scope leakage at row ${index}`);
   }
 
+  const lifecycleStarted = performance.now();
+  const lifecycleHealthStarted = performance.now();
+  const lifecycleAccess = openLifecycleProjectionReadAccess(db);
+  const lifecycleProjection = lifecycleAccess.health;
+  const lifecycleHealthMs = Math.round((performance.now() - lifecycleHealthStarted) * 1000) / 1000;
+  const lifecycleCountsStarted = performance.now();
+  assert.ok(lifecycleAccess.readScopeCounts, "healthy lifecycle projection reader");
+  const lifecycle = lifecycleAccess.readScopeCounts({
+    scopeSql: "1 = 1",
+    scopeParams: [],
+    at: 1_800_000_000_000,
+  });
+  const lifecycleCountsMs = Math.round((performance.now() - lifecycleCountsStarted) * 1000) / 1000;
+  const lifecycleStatsMs = Math.round((performance.now() - lifecycleStarted) * 1000) / 1000;
+  assert.equal(lifecycleProjection.ok, true, "lifecycle projection revision parity");
+  assert.equal(lifecycle.totalCount, rowCount);
+  assert.equal(
+    Object.values(lifecycle.counts).reduce((sum, counts) => sum + counts.recallable, 0),
+    rowCount,
+  );
+  assert.ok(
+    lifecycleStatsMs <= maxLifecycleStatsMs,
+    `lifecycle stats ${lifecycleStatsMs}ms exceeds ${maxLifecycleStatsMs}ms`,
+  );
+
   const metrics = {
     rows: rowCount,
     queries: queryCount,
@@ -78,6 +133,9 @@ try {
       p95: Math.round(percentile(latencies, 0.95) * 1000) / 1000,
       max: Math.round(Math.max(...latencies) * 1000) / 1000,
     },
+    lifecycleStatsMs,
+    lifecycleHealthMs,
+    lifecycleCountsMs,
     knownAnswerRecall: 1,
     crossScopeLeakage: 0,
   };

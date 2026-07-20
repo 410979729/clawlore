@@ -488,3 +488,65 @@ export async function writePrivateFileAtomic(
     }
   }
 }
+
+/**
+ * Create a new private regular file without replacing an existing path. This
+ * is the safe primitive for artifacts whose accidental overwrite would
+ * destroy provenance, such as a newly extracted skill scaffold.
+ */
+export async function writePrivateFileExclusive(
+  path: string,
+  contents: string,
+  options: PrivatePathOptions = {},
+): Promise<void> {
+  const platform = options.platform ?? process.platform;
+  const directory = dirname(path);
+  ensurePrivateDirectory(directory, options);
+  await assertPrivateWriteTarget(path);
+  const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
+  const handle = await open(
+    path,
+    constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | noFollow,
+    0o600,
+  );
+  try {
+    await handle.writeFile(contents, { encoding: "utf8" });
+    if (platform !== "win32") await handle.chmod(0o600);
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  enforcePrivatePath(path, { ...options, kind: "file" });
+  await syncPrivateDirectory(directory, platform);
+}
+
+/**
+ * Append to a private regular file without following a symlink. The caller
+ * owns directory creation because workspace projections may live in an
+ * existing user-managed directory that must not be recursively re-ACL'd.
+ */
+export async function appendPrivateFile(
+  path: string,
+  contents: string,
+  options: PrivatePathOptions = {},
+): Promise<void> {
+  const platform = options.platform ?? process.platform;
+  await assertPrivateWriteTarget(path);
+  const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
+  const handle = await open(
+    path,
+    constants.O_APPEND | constants.O_CREAT | constants.O_WRONLY | noFollow,
+    0o600,
+  );
+  try {
+    const status = await handle.stat();
+    if (!status.isFile()) throw new Error("CLAWLORE_PRIVATE_WRITE_TARGET_KIND_INVALID");
+    if (platform !== "win32") await handle.chmod(0o600);
+    enforcePrivatePath(path, { ...options, kind: "file" });
+    await handle.writeFile(contents, { encoding: "utf8" });
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  enforcePrivatePath(path, { ...options, kind: "file" });
+}

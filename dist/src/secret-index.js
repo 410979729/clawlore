@@ -1,14 +1,10 @@
 import { evaluateCaptureSafety } from "./capture-safety.js";
 const ALLOWED_SECRET_TYPES = new Set(["password", "token", "api_key", "private_key", "cookie", "credential", "other"]);
-const SECRET_ASSIGNMENT_RE = /\b(api[_\s-]?key|token|secret|password|passwd|credential|private[_\s-]?key|cookie)\s*[:=]\s*[^\s,'"\]}]+/gi;
-const BEARER_RE = /\bbearer\s+[A-Za-z0-9._\-~+/=]{16,}/gi;
 function compactText(value, maxChars) {
     const text = String(value || "")
         .replace(/[\u0000-\u001f\u007f]/g, " ")
         .replace(/\s+/g, " ")
-        .trim()
-        .replace(SECRET_ASSIGNMENT_RE, (_match, key) => `${key}=[REDACTED]`)
-        .replace(BEARER_RE, "bearer [REDACTED]");
+        .trim();
     return text.length > maxChars ? `${text.slice(0, Math.max(1, maxChars - 1)).trimEnd()}…` : text;
 }
 function stringList(value) {
@@ -44,6 +40,9 @@ function safeIndexField(field, value, maxChars) {
     }
     return text;
 }
+function safeIndexList(field, value, maxChars) {
+    return stringList(value).map((item) => safeIndexField(field, item, maxChars)).filter(Boolean);
+}
 export function buildSecretIndex(args) {
     const label = safeIndexField("label", args.label || args.name, 160);
     const service = safeIndexField("service", args.service, 120);
@@ -73,10 +72,10 @@ export function buildSecretIndex(args) {
     if (notes)
         lines.push(`Notes: ${notes}`);
     lines.push("Plaintext secret value: [never accepted by ClawLore]");
-    const entities = [safeLabel, service, account, username, hostname, vaultRef, ...stringList(args.entities)]
+    const entities = [safeLabel, service, account, username, hostname, vaultRef, ...safeIndexList("entities", args.entities, 160)]
         .map((item) => normalizeEntity(item))
         .filter(Boolean);
-    const tags = ["secret-index", "credential", `secret-type:${kind}`, ...stringList(args.tags)]
+    const tags = ["secret-index", "credential", `secret-type:${kind}`, ...safeIndexList("tags", args.tags, 120)]
         .map((item) => item.trim().toLowerCase())
         .filter(Boolean);
     const metadata = {

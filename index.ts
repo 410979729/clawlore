@@ -1,8 +1,4 @@
-/**
- * ClawLore memory plugin for OpenClaw.
- * SQLite-backed long-term memory with hybrid retrieval and multi-scope isolation.
- */
-
+/** ClawLore SQLite-backed memory plugin for OpenClaw. */
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { dirname, join } from "node:path";
 import { mkdir, appendFile } from "node:fs/promises";
@@ -17,9 +13,7 @@ const isClawLoreCliInvocation = () => {
   return args.includes(CLAWLORE_CLI_PRIMARY) || CLAWLORE_CLI_ALIASES.some((name) => args.includes(name));
 };
 
-const isCliRegistrationMode = (api: Pick<OpenClawPluginApi, "registrationMode">) =>
-  api.registrationMode === "cli-metadata" || isClawLoreCliInvocation();
-
+const isCliRegistrationMode = (api: Pick<OpenClawPluginApi, "registrationMode">) => api.registrationMode === "cli-metadata" || isClawLoreCliInvocation();
 // Import core components
 import { MemoryStore } from "./src/store.js";
 import { createMemoryCLI } from "./cli.js";
@@ -76,6 +70,7 @@ import {
   resolveCliPluginConfig,
 } from "./src/core-memory-runtime.js";
 import { registerClawLoreShadowRuntime } from "./src/runtime-shadow-registration.js";
+import { resolveRuntimeDiagnosticFile } from "./src/runtime-diagnostic-receipt.js";
 import { ReflectionRuntimeState } from "./src/reflection-runtime-state.js";
 import { registerAutoRecallHooks } from "./src/auto-recall-hooks.js";
 import { registerAutoCaptureHooks } from "./src/auto-capture-hooks.js";
@@ -177,6 +172,7 @@ function registerCliMetadata(api: OpenClawPluginApi): void {
     llmClient: undefined as ReturnType<typeof createCoreMemoryRuntime>["cliLlmClient"],
     pluginId: CLAWLORE_PLUGIN_ID,
     pluginConfig: (api.pluginConfig ?? {}) as Record<string, unknown>,
+    runtimeDiagnosticFile: undefined as string | undefined,
     beforeAction: async (commandPath: string[]) => {
       const root = commandPath[0];
       if (root === "version" || root === "auth" || root === "authority" || initialized) return;
@@ -188,6 +184,7 @@ function registerCliMetadata(api: OpenClawPluginApi): void {
       context.embedder = runtime.embedder;
       context.llmClient = runtime.cliLlmClient;
       context.pluginConfig = runtime.config as unknown as Record<string, unknown>;
+      context.runtimeDiagnosticFile = resolveRuntimeDiagnosticFile(runtime.resolvedDbPath);
       initialized = true;
     },
   };
@@ -235,6 +232,8 @@ const clawLorePlugin = {
         migrator,
         embedder,
         llmClient: cliLlmClient,
+        pluginConfig: config as unknown as Record<string, unknown>,
+        runtimeDiagnosticFile: resolveRuntimeDiagnosticFile(resolvedDbPath),
       }),
       { commands: [CLAWLORE_CLI_PRIMARY, ...CLAWLORE_CLI_ALIASES] },
     );
@@ -300,7 +299,7 @@ const clawLorePlugin = {
       maxExtractionsPerHour: config.extractionThrottle?.maxExtractionsPerHour,
     });
 
-    registerClawLoreShadowRuntime({
+    const runtimeDiagnostic = registerClawLoreShadowRuntime({
       api,
       config,
       resolvedDbPath,
@@ -348,8 +347,11 @@ const clawLorePlugin = {
       const { access } = runtimeMemoryAccessFor(event, ctx);
       if (!access.denied) {
         autoCaptureSessionState.recordIngress({
-          channelId: ctx.channelId,
-          conversationId: ctx.conversationId,
+          channelId: ctx.channelId ?? event.channelId,
+          accountId: ctx.accountId ?? event.accountId,
+          conversationId: ctx.conversationId ?? event.conversationId ?? event.chatId,
+          chatType: ctx.chatType ?? event.chatType,
+          sessionKey: ctx.sessionKey ?? event.sessionKey,
           content: event.content,
           shouldSkipMessage: shouldSkipReflectionMessage,
         });
@@ -520,6 +522,7 @@ const clawLorePlugin = {
     api.registerService({
       id: CLAWLORE_PLUGIN_ID,
       start: async () => {
+        await runtimeDiagnostic.start();
         api.logger.info(`clawlore: service start (db=${diagnosticIdentifier(resolvedDbPath)})`);
 
         // IMPORTANT: Do not block gateway startup on external network calls.
@@ -620,10 +623,10 @@ const clawLorePlugin = {
           clearTimeout(legacyScanTimer);
           legacyScanTimer = null;
         }
+        await runtimeDiagnostic.stop();
         api.logger.info("clawlore: stopped");
       },
     });
   },
 };
-
 export default clawLorePlugin;

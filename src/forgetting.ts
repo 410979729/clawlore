@@ -1,5 +1,9 @@
 import { evaluateCaptureSafety, sanitizeCaptureText } from "./capture-safety.js";
 import { diagnosticErrorSummary, diagnosticIdentifier } from "./diagnostic-redaction.js";
+import {
+  ensureLifecycleProjection,
+  syncLifecycleProjectionFromTruth,
+} from "./sql-lifecycle-projection.js";
 
 type DatabaseSync = any;
 
@@ -233,6 +237,7 @@ function archiveMemory(db: DatabaseSync, id: string, reason: string, supersededB
   if (supersededBy) metadata.superseded_by = supersededBy;
   db.prepare("UPDATE memory_truth SET metadata = ?, updated_at = ? WHERE id = ?")
     .run(JSON.stringify(metadata), Date.now(), id);
+  syncLifecycleProjectionFromTruth(db, id);
   return true;
 }
 
@@ -241,6 +246,7 @@ function deleteMemory(db: DatabaseSync, id: string): boolean {
   if (!existing) return false;
   db.prepare("DELETE FROM memory_truth_fts WHERE memory_id = ?").run(id);
   db.prepare("DELETE FROM memory_truth WHERE id = ?").run(id);
+  syncLifecycleProjectionFromTruth(db, id);
   return true;
 }
 
@@ -268,6 +274,7 @@ export function runForgetting(
 
   db.exec("BEGIN IMMEDIATE");
   try {
+    ensureLifecycleProjection(db);
     let archived = 0;
     let deleted = 0;
     for (const item of softItems) {

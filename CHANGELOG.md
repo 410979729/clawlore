@@ -4,6 +4,30 @@
 
 No changes yet.
 
+## 1.2.1 - 2026-07-20
+
+- Unified capture, support-bundle, Task Experience, governance-debt, and
+  promotion secret handling under one structured policy. It now covers
+  snake/kebab/camel-case keys, quoted values, YAML block scalars and aliases,
+  and non-Basic/Bearer Authorization schemes without leaking anchor sources.
+- Made structured tool failures dominate contradictory success flags and made
+  Task Experience reject any unresolved failed tool result, even when an
+  unrelated later tool succeeds. Current failures can no longer be erased by
+  trailing success words; explicitly historical repaired failures remain valid.
+- Bound lifecycle reads to a truth-derived health capability. The raw projection
+  count reader is no longer exported, so callers cannot consume a forged but
+  internally self-consistent projection without passing the health gate.
+- Added an explicit non-authorizing pre-push release gate for pull requests and
+  clean local commits. The strict post-push release gate still requires exact
+  remote publication and canonical evidence; pre-push mode cannot claim either.
+- Updated Linux/Windows CI and the reusable workflow template to Node 24.15.0,
+  matching the supported OpenClaw host minimum, with locked installs, protected
+  Windows temporary roots, the supported host fixture, and the pre-push gate
+  instead of an impossible pre-publication gate.
+- Preserved and revalidated governance, journal, operator dashboard, golden
+  recall, hard-delete, SQL authority, OAuth session, Windows ACL,
+  packed-tarball, and release gate protections from 1.2.0.
+
 ## 1.2.0 - 2026-07-16
 
 - Renamed the canonical package, manifest id, product name, repository metadata,

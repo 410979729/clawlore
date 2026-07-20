@@ -291,3 +291,21 @@ test("append-only delta apply rejects a plan that permits lifecycle mutation", a
     await rm(paths.root, { recursive: true, force: true });
   }
 });
+
+test("append-only delta apply names a missing compatibility-backfill prerequisite", async () => {
+  const paths = await fixture();
+  try {
+    const db = new DatabaseSync(paths.source);
+    db.exec("DROP TABLE memory_fts_compat_v2");
+    db.close();
+    await assert.rejects(
+      () => execute(paths),
+      /append-delta prerequisite missing: memory_fts_compat_v2; complete the baseline V2 rollout and compatibility backfill first/,
+    );
+    const check = new DatabaseSync(paths.source, { readOnly: true });
+    assert.equal(check.prepare("SELECT COUNT(*) AS n FROM memory_items").get().n, 1);
+    check.close();
+  } finally {
+    await rm(paths.root, { recursive: true, force: true });
+  }
+});

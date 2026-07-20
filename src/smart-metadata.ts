@@ -4,6 +4,28 @@ import {
   type MemoryTier,
 } from "./memory-categories.js";
 import type { DecayableMemory } from "./decay-engine.js";
+import {
+  normalizeLayer,
+  normalizeLifecycleFieldsFromParsed,
+  normalizeOptionalTimestamp,
+  normalizeSource,
+  normalizeState,
+  normalizeTimestamp,
+  parseMetadataObject,
+  type MemoryLayer,
+  type MemorySource,
+  type MemoryState,
+  type NormalizedLifecycleFields,
+} from "./lifecycle-metadata.js";
+
+export {
+  staticLifecycleForMetadata,
+  type MemoryLayer,
+  type MemorySource,
+  type MemoryState,
+  type NormalizedLifecycleFields,
+  type StaticLifecycle,
+} from "./lifecycle-metadata.js";
 
 type LegacyStoreCategory =
   | "preference"
@@ -26,16 +48,7 @@ export interface MemoryRelation {
   targetId: string;
 }
 
-export type MemoryState = "pending" | "confirmed" | "archived" | "rejected";
-export type MemoryLayer = "durable" | "working" | "reflection" | "archive";
 export type FreshnessStatus = "fresh" | "stale" | "unknown" | "live_check_needed";
-export type MemorySource =
-  | "manual"
-  | "auto-capture"
-  | "task-experience"
-  | "reflection"
-  | "session-summary"
-  | "legacy";
 
 export interface SmartMemoryMetadata {
   l0_abstract: string;
@@ -103,44 +116,6 @@ function normalizeTier(value: unknown): MemoryTier {
   }
 }
 
-function normalizeState(value: unknown): MemoryState {
-  switch (value) {
-    case "pending":
-    case "confirmed":
-    case "archived":
-    case "rejected":
-      return value;
-    default:
-      return "confirmed";
-  }
-}
-
-function normalizeSource(value: unknown): MemorySource {
-  switch (value) {
-    case "manual":
-    case "auto-capture":
-    case "task-experience":
-    case "reflection":
-    case "session-summary":
-    case "legacy":
-      return value;
-    default:
-      return "legacy";
-  }
-}
-
-function normalizeLayer(value: unknown): MemoryLayer {
-  switch (value) {
-    case "durable":
-    case "working":
-    case "reflection":
-    case "archive":
-      return value;
-    default:
-      return "working";
-  }
-}
-
 function normalizeFreshnessStatus(value: unknown): FreshnessStatus | undefined {
   switch (value) {
     case "fresh":
@@ -151,23 +126,6 @@ function normalizeFreshnessStatus(value: unknown): FreshnessStatus | undefined {
     default:
       return undefined;
   }
-}
-
-function deriveDefaultLayer(
-  source: MemorySource,
-  memoryCategory: MemoryCategory,
-  state: MemoryState,
-): MemoryLayer {
-  if (source === "reflection" || source === "session-summary") return "reflection";
-  if (state === "archived" || state === "rejected") return "archive";
-  if (
-    memoryCategory === "profile" ||
-    memoryCategory === "preferences" ||
-    memoryCategory === "events"
-  ) {
-    return "durable";
-  }
-  return "working";
 }
 
 export function reverseMapLegacyCategory(
@@ -208,16 +166,16 @@ function normalizeOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function normalizeTimestamp(value: unknown, fallback: number): number {
-  const n = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(n) || n <= 0) return fallback;
-  return Math.floor(n);
-}
-
-function normalizeOptionalTimestamp(value: unknown): number | undefined {
-  const n = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(n) || n <= 0) return undefined;
-  return Math.floor(n);
+export function parseLifecycleMetadata(
+  rawMetadata: string | undefined,
+  entry: EntryLike = {},
+): NormalizedLifecycleFields {
+  const parsed = parseMetadataObject(rawMetadata);
+  const memoryCategory = reverseMapLegacyCategory(entry.category, entry.text ?? "");
+  return normalizeLifecycleFieldsFromParsed(parsed, {
+    timestamp: entry.timestamp,
+    memoryCategory,
+  });
 }
 
 export function deriveFactKey(
@@ -267,21 +225,27 @@ export function isMemoryActiveAt(
   return !metadata.invalidated_at || metadata.invalidated_at > at;
 }
 
+export function effectiveMemoryLifecycle(
+  metadata: Parameters<typeof isMemoryActiveAt>[0],
+  at = Date.now(),
+): "recallable" | "archived" | "inactive" {
+  const state = String(metadata.state ?? "").trim().toLowerCase();
+  const layer = String(metadata.memory_layer ?? "").trim().toLowerCase();
+  const lifecycle = String(metadata.lifecycle ?? "").trim().toLowerCase();
+  if (state === "rejected" || ["obsolete", "rejected", "superseded"].includes(lifecycle)) {
+    return "inactive";
+  }
+  if (state === "archived" || layer === "archive" || lifecycle === "archived") {
+    return "archived";
+  }
+  return isMemoryActiveAt(metadata, at) ? "recallable" : "inactive";
+}
+
 export function parseSmartMetadata(
   rawMetadata: string | undefined,
   entry: EntryLike = {},
 ): SmartMemoryMetadata {
-  let parsed: Record<string, unknown> = {};
-  if (rawMetadata) {
-    try {
-      const obj = JSON.parse(rawMetadata);
-      if (obj && typeof obj === "object") {
-        parsed = obj as Record<string, unknown>;
-      }
-    } catch {
-      parsed = {};
-    }
-  }
+  const parsed = parseMetadataObject(rawMetadata);
 
   const text = entry.text ?? "";
   const timestamp =
@@ -290,10 +254,12 @@ export function parseSmartMetadata(
       : Date.now();
 
   const memoryCategory = reverseMapLegacyCategory(entry.category, text);
+  const lifecycleFields = normalizeLifecycleFieldsFromParsed(parsed, {
+    timestamp: entry.timestamp,
+    memoryCategory,
+  });
   const l0 = normalizeText(parsed.l0_abstract, text);
   const l2 = normalizeText(parsed.l2_content, text);
-  const validFrom = normalizeTimestamp(parsed.valid_from, timestamp);
-  const invalidatedAt = normalizeOptionalTimestamp(parsed.invalidated_at);
   const observedAt = normalizeOptionalTimestamp(parsed.observed_at);
   const validUntil = normalizeOptionalTimestamp(parsed.valid_until);
   const explicitFreshnessStatus = normalizeFreshnessStatus(parsed.freshness_status);
@@ -304,19 +270,6 @@ export function parseSmartMetadata(
     parsed.live_check_needed === true ||
     freshnessStatus === "live_check_needed" ||
     freshnessStatus === "stale";
-  const fallbackSource =
-    parsed.type === "session-summary"
-      ? "session-summary"
-      : parsed.type === "memory-reflection" || parsed.type === "memory-reflection-item"
-        ? "reflection"
-        : "legacy";
-  const source = normalizeSource(parsed.source ?? fallbackSource);
-  const defaultState =
-    source === "session-summary" ? "archived" : "confirmed";
-  const state = normalizeState(parsed.state ?? defaultState);
-  const memoryLayer = normalizeLayer(
-    parsed.memory_layer ?? deriveDefaultLayer(source, memoryCategory, state),
-  );
   const normalized: SmartMemoryMetadata = {
     ...parsed,
     l0_abstract: l0,
@@ -330,9 +283,8 @@ export function parseSmartMetadata(
     access_count: clampCount(parsed.access_count, 0),
     confidence: clamp01(parsed.confidence, 0.7),
     last_accessed_at: clampCount(parsed.last_accessed_at, timestamp),
-    valid_from: validFrom,
-    invalidated_at:
-      invalidatedAt && invalidatedAt >= validFrom ? invalidatedAt : undefined,
+    valid_from: lifecycleFields.valid_from,
+    invalidated_at: lifecycleFields.invalidated_at,
     observed_at: observedAt,
     valid_until: validUntil,
     freshness_status: freshnessStatus,
@@ -353,9 +305,9 @@ export function parseSmartMetadata(
     superseded_by: normalizeOptionalString(parsed.superseded_by),
     source_session:
       typeof parsed.source_session === "string" ? parsed.source_session : undefined,
-    state,
-    source,
-    memory_layer: memoryLayer,
+    state: lifecycleFields.state,
+    source: lifecycleFields.source,
+    memory_layer: lifecycleFields.memory_layer,
     injected_count: clampCount(parsed.injected_count, 0),
     last_injected_at: normalizeOptionalTimestamp(parsed.last_injected_at),
     last_confirmed_use_at: normalizeOptionalTimestamp(parsed.last_confirmed_use_at),

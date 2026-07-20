@@ -45,6 +45,7 @@ export interface PluginConfig {
   dbPath?: string;
   vectorBackend?: "lancedb" | "sqlite-bruteforce";
   autoCapture?: boolean;
+  /** Deprecated no-op retained only for config compatibility; true is a doctor error. */
   autoBackup?: boolean;
   autoRecall?: boolean;
   autoRecallMinLength?: number;

@@ -10,9 +10,11 @@ export interface MemoryAccessGrant {
   operations: MemoryOperation[];
   subjectPrincipalId: string;
   tenantId: string;
-  agentId?: string;
-  visibility?: MemoryVisibility;
+  agentId: string;
+  visibility: MemoryVisibility;
+  targetPrincipalId?: string;
   conversationId?: string;
+  threadId?: string;
   projectId?: string;
 }
 
@@ -54,16 +56,33 @@ function matchingGrant(
   operation: MemoryOperation,
   grants: MemoryAccessGrant[],
 ): MemoryAccessGrant | undefined {
-  return grants.find((grant) =>
-    grant.effect === "allow"
-    && grant.operations.includes(operation)
-    && grant.subjectPrincipalId === actor.principalId
-    && grant.tenantId === target.tenantId
-    && (!grant.agentId || grant.agentId === target.agentId)
-    && (!grant.visibility || grant.visibility === target.visibility)
-    && (!grant.conversationId || grant.conversationId === target.conversationId)
-    && (!grant.projectId || grant.projectId === target.projectId)
-  );
+  return grants.find((grant) => {
+    if (
+      !grant.id?.trim()
+      || grant.effect !== "allow"
+      || !Array.isArray(grant.operations)
+      || !grant.operations.includes(operation)
+      || grant.subjectPrincipalId !== actor.principalId
+      || grant.tenantId !== target.tenantId
+      || grant.agentId !== target.agentId
+      || grant.visibility !== target.visibility
+    ) return false;
+
+    // Shared visibility alone is never a sufficient selector for a narrower
+    // private/conversation/project resource. Grants must bind the exact target
+    // boundary so one authorization cannot silently fan out to peer records.
+    if (target.visibility === "private") {
+      return grant.targetPrincipalId === target.principalId;
+    }
+    if (target.visibility === "conversation") {
+      return grant.conversationId === target.conversationId
+        && (!target.threadId || grant.threadId === target.threadId);
+    }
+    if (target.visibility === "project") {
+      return grant.projectId === target.projectId;
+    }
+    return true;
+  });
 }
 
 export function decideMemoryAccess(input: {

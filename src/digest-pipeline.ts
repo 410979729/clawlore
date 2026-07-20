@@ -4,6 +4,16 @@ import { isNoise } from "./noise-filter.js";
 import type { LlmClient } from "./llm-client.js";
 import type { MemoryEntry, MemoryStore } from "./store.js";
 import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
+import {
+  digestLedgerRowForOutput,
+  digestPreviewFor as previewFor,
+  digestSafeJson as safeJson,
+  digestSourceIdentifier,
+  parseDigestJsonObject as safeParseJsonObject,
+  requireDigestBoundaryIdentifier,
+  requireDigestSourceType,
+} from "./digest-boundary-policy.js";
+import { isMemoryEntrySafeForEgress } from "./memory-egress-policy.js";
 
 type DatabaseSync = any;
 
@@ -123,34 +133,6 @@ function cleanText(value: string): string {
     .trim();
 }
 
-function previewFor(value: string): string {
-  return cleanText(value)
-    .replace(/\/home\/[^\s"',;)}\]]+/g, "[redacted:path]")
-    .replace(/\/Users\/[^\s"',;)}\]]+/g, "[redacted:path]")
-    .replace(/[A-Z]:\\[^\s"',;)}\]]+/g, "[redacted:path]")
-    .slice(0, 220);
-}
-
-function safeJson(value: unknown): string {
-  return JSON.stringify(value, (_key, item) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) return item;
-    return Object.fromEntries(Object.entries(item as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)));
-  });
-}
-
-function safeParseJsonObject(raw: unknown): Record<string, unknown> {
-  if (!raw) return {};
-  if (typeof raw === "object" && !Array.isArray(raw)) return raw as Record<string, unknown>;
-  try {
-    const parsed = JSON.parse(String(raw));
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : {};
-  } catch {
-    return {};
-  }
-}
-
 function tableExists(db: DatabaseSync, name: string): boolean {
   return Boolean(db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual') AND name = ?").get(name));
 }
@@ -217,9 +199,9 @@ function explicitChunk(params: {
 }): DigestInputChunk {
   return {
     id: `chunk-${randomUUID()}`,
-    source_type: params.sourceType || "explicit",
-    source_id: params.sourceId || "explicit-input",
-    scope: params.scope,
+    source_type: requireDigestSourceType(params.sourceType, "explicit"),
+    source_id: digestSourceIdentifier(params.sourceId || "explicit-input"),
+    scope: requireDigestBoundaryIdentifier(params.scope, "digest scope", "agent:main"),
     text: params.text,
   };
 }
@@ -246,24 +228,29 @@ function collectReflectionChunks(db: DatabaseSync, scope: string, maxChunks: num
     metadata: string;
   }>;
 
-  return rows.map((row) => {
+  return rows.flatMap((row) => {
+    // Digest sends only semantic text to the provider. Legacy provenance stays
+    // local and is normalized separately below, so an old private path in
+    // metadata must not discard otherwise-safe durable text.
+    if (!isMemoryEntrySafeForEgress({ text: row.text || "" })) return [];
     const metadata = safeParseJsonObject(row.metadata);
-    const sourceId =
+    const rawSourceId =
       typeof metadata.eventId === "string" && metadata.eventId.trim()
         ? metadata.eventId.trim()
         : row.id;
-    return {
-      id: `chunk-${row.id}`,
+    const sourceId = digestSourceIdentifier(rawSourceId, "reflection-source");
+    return [{
+      id: `chunk-${digestSourceIdentifier(row.id, "memory")}`,
       source_type: "reflection_event",
       source_id: sourceId,
-      scope: row.scope || scope,
+      scope,
       text: row.text || "",
-    };
+    }];
   });
 }
 
 export function collectDigestChunks(db: DatabaseSync, options: DigestRunOptions = {}): DigestInputChunk[] {
-  const scope = options.scope || "agent:main";
+  const scope = requireDigestBoundaryIdentifier(options.scope, "digest scope", "agent:main");
   const maxChunks = Math.max(1, Math.min(200, Math.trunc(options.maxChunks ?? 25)));
   if (typeof options.inputText === "string" && options.inputText.trim()) {
     return [explicitChunk({
@@ -487,6 +474,8 @@ function insertChunkEvent(
     candidateIds?: string[];
   },
 ): void {
+  const sourceId = digestSourceIdentifier(params.chunk.source_id);
+  const scope = requireDigestBoundaryIdentifier(params.chunk.scope, "digest scope", "agent:main");
   db.prepare(`
     INSERT INTO openclaw_digest_chunks (
       id, run_id, source_type, source_id, scope, status, reason,
@@ -496,12 +485,12 @@ function insertChunkEvent(
     params.id,
     params.runId,
     params.chunk.source_type,
-    params.chunk.source_id,
-    params.chunk.scope || "agent:main",
+    sourceId,
+    scope,
     params.status,
     params.reason,
     previewFor(params.chunk.text),
-    safeJson(params.candidateIds || []),
+    safeJson((params.candidateIds || []).map((id) => digestSourceIdentifier(id, "memory"))),
     nowIso(),
   );
 }
@@ -539,8 +528,8 @@ export async function runDigestPipeline(
   const chunks = collectDigestChunks(db, options);
   const runId = `digest-${randomUUID()}`;
   const startedAt = nowIso();
-  const actor = options.actor || "clawlore:cli";
-  const sourceType = chunks[0]?.source_type || options.sourceType || "reflection_event";
+  const actor = requireDigestBoundaryIdentifier(options.actor, "digest actor", "clawlore:cli");
+  const sourceType = requireDigestSourceType(chunks[0]?.source_type ?? options.sourceType, "reflection_event");
   const runRow: DigestRunRow = {
     id: runId,
     run_date: nowRunDate(),
@@ -603,7 +592,7 @@ export async function runDigestPipeline(
     let chunkCandidates: DigestCandidate[] = [];
     if (options.useLlm === true && options.llmClient) {
       try {
-        chunkCandidates = await llmCandidates(chunk, options.llmClient);
+        chunkCandidates = await llmCandidates({ ...chunk, text: cleaned }, options.llmClient);
       } catch (err) {
         llmParseErrors += 1;
         errors.push(`llm_parse_error:${diagnosticErrorSummary(err)}`);
@@ -728,7 +717,9 @@ export function digestReport(db: DatabaseSync, options: { sampleLimit?: number }
   }
   const sampleLimit = Math.max(0, Math.min(25, Math.trunc(options.sampleLimit ?? 8)));
   const total = Number(db.prepare("SELECT COUNT(*) AS count FROM openclaw_digest_runs").get()?.count || 0);
-  const lastRun = db.prepare("SELECT * FROM openclaw_digest_runs ORDER BY started_at DESC LIMIT 1").get() || {};
+  const lastRun = digestLedgerRowForOutput(
+    (db.prepare("SELECT * FROM openclaw_digest_runs ORDER BY started_at DESC LIMIT 1").get() || {}) as Record<string, unknown>,
+  );
   const candidateRows = tableExists(db, "memory_truth")
     ? Number(db.prepare(`
         SELECT COUNT(*) AS count
@@ -744,7 +735,7 @@ export function digestReport(db: DatabaseSync, options: { sampleLimit?: number }
         FROM openclaw_digest_chunks
         ORDER BY created_at DESC
         LIMIT ?
-      `).all(sampleLimit)
+      `).all(sampleLimit).map((row: Record<string, unknown>) => digestLedgerRowForOutput(row))
     : [];
   const failedStatuses = ["parse_error", "retry_exhausted", "dead_letter"];
   const failed = Number(db.prepare(`
@@ -781,13 +772,13 @@ export function digestRecoveryReport(db: DatabaseSync, options: { limit?: number
     return { status: "not_initialized", candidate_count: 0, candidates: [] };
   }
   const limit = Math.max(1, Math.min(500, Math.trunc(options.limit ?? 100)));
-  const rows = db.prepare(`
+  const rows = (db.prepare(`
     SELECT id, run_id, source_type, source_id, scope, status, reason, preview, created_at
     FROM openclaw_digest_chunks
     WHERE status IN ('parse_error', 'retry_exhausted', 'dead_letter')
     ORDER BY created_at ASC
     LIMIT ?
-  `).all(limit);
+  `).all(limit) as Array<Record<string, unknown>>).map((row) => digestLedgerRowForOutput(row));
   return {
     status: rows.length > 0 ? "needs_recovery" : "ready",
     candidate_count: rows.length,
@@ -807,14 +798,15 @@ export function recoverDigestChunks(
     return { ...report, dry_run: dryRun, recovered: 0 };
   }
   const at = nowIso();
+  const actor = requireDigestBoundaryIdentifier(options.actor, "digest recovery actor", "clawlore:cli");
   for (const row of rows) {
     db.prepare(`
       UPDATE openclaw_digest_chunks
       SET status = 'pending_recovery',
-          reason = reason || '; recovery_requested_by:${options.actor || "clawlore:cli"} @ ${at}'
+          reason = reason || ?
       WHERE id = ?
         AND status IN ('parse_error', 'retry_exhausted', 'dead_letter')
-    `).run(row.id);
+    `).run(`; recovery_requested_by:${actor} @ ${at}`, row.id);
   }
   return {
     status: "recovery_scheduled",

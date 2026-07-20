@@ -91,8 +91,10 @@ export function buildRuntimeScopeMetadata(input) {
         metadata.thread_id = threadId;
     if (platform)
         metadata.platform = platform;
+    // The resolved path influences runtime routing but is not durable memory
+    // content. Persist only the fact that a workspace boundary was resolved.
     if (workspaceDir)
-        metadata.workspace_dir = workspaceDir;
+        metadata.workspace_bound = true;
     if (scopeId)
         metadata.scope_id = scopeId;
     if (normalizedScopeFilter === undefined) {

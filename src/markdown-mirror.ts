@@ -1,8 +1,10 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { appendFile, mkdir } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { readFileSync } from "node:fs";
+import { redactMemoryTextForOutput } from "./memory-egress-policy.js";
+import { appendPrivateFile } from "./file-privacy.js";
 
 type AgentWorkspaceMap = Record<string, string>;
 
@@ -64,12 +66,12 @@ export function createMdMirrorWriter(
         ? join(workspaceMap[meta.agentId], "memory")
         : fallbackDir;
       const filePath = join(mirrorDir, `${ts.toISOString().split("T")[0]}.md`);
-      const agentLabel = meta?.agentId ? ` agent=${meta.agentId}` : "";
-      const sourceLabel = meta?.source ? ` source=${meta.source}` : "";
-      const safeText = entry.text.replace(/\n/g, " ").slice(0, 500);
-      const line = `- ${ts.toISOString()} [${entry.category}:${entry.scope}]${agentLabel}${sourceLabel} ${safeText}\n`;
-      await mkdir(mirrorDir, { recursive: true });
-      await appendFile(filePath, line, "utf8");
+      const agentLabel = meta?.agentId ? ` agent=${redactMemoryTextForOutput(meta.agentId)}` : "";
+      const sourceLabel = meta?.source ? ` source=${redactMemoryTextForOutput(meta.source)}` : "";
+      const safeText = redactMemoryTextForOutput(entry.text).replace(/\n/g, " ").slice(0, 500);
+      const line = `- ${ts.toISOString()} [${redactMemoryTextForOutput(entry.category)}:${redactMemoryTextForOutput(entry.scope)}]${agentLabel}${sourceLabel} ${safeText}\n`;
+      await mkdir(mirrorDir, { recursive: true, mode: 0o700 });
+      await appendPrivateFile(filePath, line);
     } catch (error) {
       api.logger.warn(`mdMirror: write failed: ${summarizeError(error)}`);
     }

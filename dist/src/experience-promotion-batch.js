@@ -56,6 +56,7 @@ function compactPromotionSummary(promotion) {
         playbooks_promoted: promotion.playbooks_promoted,
         playbooks_needing_review: promotion.playbooks_needing_review,
         duplicates_skipped: promotion.duplicates_skipped,
+        historical_episodes_frozen: promotion.historical_episodes_frozen,
         skipped: promotion.skipped,
         item_count: promotion.items.length,
     };

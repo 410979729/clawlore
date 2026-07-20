@@ -2,6 +2,7 @@ import type { ContextCandidateV1 } from "../../application/context-composer.js";
 import type { MemoryAddressV2 } from "../../v2/domain/memory-address.js";
 import { adaptLegacyContextSources } from "./legacy-context-sources.js";
 import type { CompatibilityRetrievalRequestV1 } from "./compatibility-context-adapter.js";
+import { filterUnsafeMemoryResults } from "../../memory-egress-policy.js";
 
 export interface LegacyShadowRetrievalResultV1 {
   entry: {
@@ -62,7 +63,7 @@ export function createLegacyShadowCandidateRetrieverV1(
       ...(request.signal ? { signal: request.signal } : {}),
     });
     return adaptLegacyContextSources({
-      autoRecall: results.map((result) => ({
+      autoRecall: filterUnsafeMemoryResults(results).map((result) => ({
         id: result.entry.id,
         text: result.entry.text,
         category: result.entry.category,

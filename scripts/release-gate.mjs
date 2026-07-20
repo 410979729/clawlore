@@ -15,6 +15,11 @@ import {
 } from "./release-evidence-contract.mjs";
 import { committedGitBlobSha256, releaseInputIdentity } from "./release-input-identity.mjs";
 import { assertReleaseSourceState } from "./release-source-state.mjs";
+import {
+  assertRemoteReleaseCommit,
+  assertRepositoryIdentity,
+} from "./repository-identity.mjs";
+import { assertReleaseDoctor } from "./release-operator-contract.mjs";
 
 async function exists(path) {
   try {
@@ -73,6 +78,23 @@ function runOpenClawCapture(command, args, options = {}) {
   return runCapture(command, args, options);
 }
 
+function captureOpenClawReport(command, args, options, label) {
+  const target = /\.(?:c?js|mjs)$/i.test(command)
+    ? { command: process.execPath, args: [command, ...args] }
+    : spawnTarget(command, args);
+  const result = spawnSync(target.command, target.args, {
+    encoding: "utf8",
+    shell: false,
+    cwd: options.cwd,
+    env: options.env || process.env,
+  });
+  if (result.error) throw result.error;
+  return {
+    report: parseJsonWithPreamble(result.stdout || "", label),
+    status: result.status,
+  };
+}
+
 function parseJsonWithPreamble(raw, label) {
   const start = raw.indexOf("{");
   if (start < 0) {
@@ -82,6 +104,45 @@ function parseJsonWithPreamble(raw, label) {
     return JSON.parse(raw.slice(start));
   } catch (err) {
     throw new Error(`release gate failed: ${label} returned invalid JSON: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+function doctorArgs() {
+  const args = ["clawlore", "doctor", "--json", "--quiet"];
+  const principal = String(process.env.CLAWLORE_RUNTIME_PRINCIPAL || "").trim();
+  if (principal) args.push("--principal", principal);
+  return args;
+}
+
+function assertRuntimeDiagnostic(report, expectedRuntimeDigest) {
+  const runtime = report?.runtimeDiagnostic;
+  if (!runtime || runtime.ok !== true) {
+    throw new Error("release gate failed: ClawLore runtime diagnostic did not report ok=true");
+  }
+  if (runtime.configuredMode === "disabled") {
+    if (runtime.status !== "disabled") {
+      throw new Error("release gate failed: disabled ClawLore runtime diagnostic is inconsistent");
+    }
+    return;
+  }
+  const receipt = runtime.receipt;
+  if (
+    runtime.status !== "registered"
+    || receipt?.runtime?.status !== "registered"
+    || receipt?.runtime?.registeredHookCount !== 1
+    || JSON.stringify(receipt?.runtime?.registeredHooks) !== JSON.stringify(["message_received"])
+    || receipt?.runtime?.writeEnabled !== false
+    || receipt?.runtime?.promptMutationEnabled !== false
+    || receipt?.runtime?.contextEngineRegistered !== false
+    || !Array.isArray(receipt?.runtime?.blockingReasons)
+    || receipt.runtime.blockingReasons.length !== 0
+    || receipt?.readiness?.status !== "ready"
+    || receipt?.readiness?.bindingVerified !== true
+    || !Array.isArray(receipt?.readiness?.errors)
+    || receipt.readiness.errors.length !== 0
+    || (expectedRuntimeDigest && receipt?.binding?.runtimeDigest !== expectedRuntimeDigest)
+  ) {
+    throw new Error("release gate failed: ClawLore shadow runtime receipt contract is not satisfied");
   }
 }
 
@@ -117,10 +178,40 @@ const allowNestedGitRoot = enabledByEnvironment(
   "SCOPE_RECALL_ALLOW_NESTED_GIT_ROOT",
 );
 const sourceOnly = enabledByEnvironment("CLAWLORE_SOURCE_ONLY", "SCOPE_RECALL_SOURCE_ONLY");
+const prePush = enabledByEnvironment("CLAWLORE_PRE_PUSH");
 const sourceInsideGitRoot = sourceRoot === gitRoot || sourceRoot.startsWith(`${gitRoot}/`);
+
+if (prePush && !sourceOnly) {
+  throw new Error("release gate failed: pre-push mode must remain source-only and non-authorizing");
+}
 
 if (gitRoot !== sourceRoot && !(allowNestedGitRoot && sourceInsideGitRoot)) {
   throw new Error(`release gate failed: run from plugin git root (${gitRoot}), not ${sourceRoot}`);
+}
+
+const repositoryIdentity = assertRepositoryIdentity({
+  declaredRepository: packageJson.repository,
+  originUrl: runCapture("git", ["remote", "get-url", "origin"]).trim(),
+});
+const gitCommit = runCapture("git", ["rev-parse", "HEAD"]).trim();
+const releaseRef = String(process.env.CLAWLORE_RELEASE_REF || "refs/heads/main").trim();
+if (prePush) {
+  console.log("release gate: NON-AUTHORIZING pre-push mode; remote publication is deliberately not claimed");
+} else {
+  const remoteRefArgs = [releaseRef, ...(releaseRef.startsWith("refs/tags/") ? [`${releaseRef}^{}`] : [])];
+  const remoteHeadProbe = spawnSync("git", ["ls-remote", "--exit-code", "origin", ...remoteRefArgs], {
+    encoding: "utf8",
+    shell: false,
+    cwd: sourceRoot,
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+  });
+  assertRemoteReleaseCommit({
+    identity: repositoryIdentity,
+    status: remoteHeadProbe.status,
+    stdout: remoteHeadProbe.stdout,
+    localHead: gitCommit,
+    targetRef: releaseRef,
+  });
 }
 
 if (packageJson.version !== manifest.version) {
@@ -140,7 +231,7 @@ if (
   throw new Error("release gate failed: package script publication contract is missing or invalid");
 }
 if (
-  packageJson.engines?.node !== ">=24.0.0 <25" ||
+  packageJson.engines?.node !== ">=24.15.0 <25" ||
   JSON.stringify(packageJson.os) !== JSON.stringify(["linux", "win32"]) ||
   packageJson.peerDependencies?.openclaw !== ">=2026.7.1-beta.5 <2027" ||
   packageJson.peerDependenciesMeta?.openclaw?.optional !== true
@@ -525,7 +616,6 @@ run("node", ["scripts/golden-benchmark.mjs", "--summary"]);
 run("node", ["scripts/scalability-benchmark.mjs", "--rows", "200000", "--queries", "64"]);
 
 const candidateIdentity = await runtimeArtifactIdentity(sourceRoot);
-const gitCommit = runCapture("git", ["rev-parse", "HEAD"]).trim();
 const gitDirty = Boolean(runCapture("git", ["status", "--porcelain", "--", diffPathspec || "."]).trim());
 assertReleaseSourceState({ gitDirty, sourceOnly });
 let extensionRoot;
@@ -585,13 +675,17 @@ if (!sourceOnly && !enabledByEnvironment("CLAWLORE_SKIP_RUNTIME_SMOKE", "SCOPE_R
   if (!inspect.plugin?.rootDir || await realpath(inspect.plugin.rootDir) !== extensionRoot) {
     throw new Error("release gate failed: OpenClaw inspect rootDir does not match the verified live extension");
   }
-  const doctor = parseJsonWithPreamble(
-    runOpenClawCapture(openclawCli, ["clawlore", "doctor", "--json", "--quiet"], { env: runtimeEnv }),
+  const doctorResult = captureOpenClawReport(
+    openclawCli,
+    doctorArgs(),
+    { env: runtimeEnv },
     "OpenClaw ClawLore doctor",
   );
-  if (doctor.ok !== true) {
-    throw new Error("release gate failed: OpenClaw runtime doctor did not report ok=true");
-  }
+  const doctor = assertReleaseDoctor({
+    ...doctorResult,
+    principal: String(process.env.CLAWLORE_RUNTIME_PRINCIPAL || "").trim(),
+  });
+  assertRuntimeDiagnostic(doctor, candidateIdentity.digest);
 }
 
 const packJson = runCapture("npm", ["pack", "--dry-run", "--json"]);
@@ -745,6 +839,7 @@ try {
   if (packedDoctor.ok !== true) {
     throw new Error("release gate failed: installed-tarball OpenClaw doctor did not report ok=true");
   }
+  assertRuntimeDiagnostic(packedDoctor);
   for (const command of ["clawlore", "scope-recall", "memory-pro"]) {
     const versionOutput = runOpenClawCapture(packedOpenClawCli, [command, "version"], { env: isolatedRuntimeEnv });
     if (!versionOutput.includes(packageJson.version)) {
@@ -841,6 +936,7 @@ try {
   if (legacyDoctor.ok !== true) {
     throw new Error("release gate failed: migrated legacy identity doctor did not report ok=true");
   }
+  assertRuntimeDiagnostic(legacyDoctor);
 } finally {
   await rm(packScanRoot, { recursive: true, force: true });
 }
@@ -854,12 +950,13 @@ console.log(`release gate SBOM ok: ${sbom.components.length} components sha256=$
 run("node", ["scripts/supply-chain-audit.mjs"]);
 console.log(`release gate pack filename/content scan ok: ${packFiles.length} files`);
 const releaseEvidence = {
-  schema: "clawlore.release-evidence.v2",
+  schema: "clawlore.release-evidence.v3",
   package: `${packageJson.name}@${packageJson.version}`,
   observedCommit: gitCommit,
   releaseInput: releaseInputIdentity({ gitRoot, sourceRoot, diffPathspec }),
   runtimeDigest: candidateIdentity.digest,
   sourceOnly,
+  publicationVerified: !prePush,
   dirty: gitDirty,
   packFileCount: packFiles.length,
   packageLockSha256: committedPackageLockSha256,
@@ -891,7 +988,11 @@ const releaseEvidence = {
 const evidenceJson = `${JSON.stringify(releaseEvidence, null, 2)}\n`;
 const canonicalEvidencePath = resolve(releaseScriptContract.evidenceFile);
 const writeCanonicalEvidence = enabledByEnvironment("CLAWLORE_WRITE_RELEASE_EVIDENCE");
-if (writeCanonicalEvidence) {
+if (prePush && writeCanonicalEvidence) {
+  throw new Error("release gate failed: non-authorizing pre-push mode cannot write canonical release evidence");
+} else if (prePush) {
+  console.log("release gate: pre-push evidence is ephemeral; canonical release evidence was not accepted or rewritten");
+} else if (writeCanonicalEvidence) {
   await writeFile(canonicalEvidencePath, evidenceJson, { encoding: "utf8", mode: 0o600 });
 } else {
   const checkedEvidence = JSON.parse(await readFile(canonicalEvidencePath, "utf8"));

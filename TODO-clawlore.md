@@ -1,6 +1,337 @@
 # ClawLore v1 TODO
 
-Updated: 2026-07-17
+Updated: 2026-07-20
+
+## 2026-07-19 live timeline and independent-audit remediation
+
+- [x] Preserve the 11:14:24 CST guarded-rollout refusal as a distinct event.
+      `clawlore-live-rollout-20260719-resume.service` ran as root, could not
+      inspect the user-owned plugin path, reduced every failed status probe to
+      `active_tasks=-1`, and exited at the 900-second bound before stop/swap/
+      config mutation. It was not a deployment and was not replayed.
+- [x] Correct the later live truth independently: a separate rollout deployed
+      baseline commit `33d164c4047da630341d26198461c4d3da2ba74e` at
+      14:40:35 CST. Gateway is active/running with `NRestarts=0`, healthz is
+      live, runtime logs prove one registered read-only shadow hook with writes,
+      prompt mutation, and ContextEngine disabled, and the old doctor reports
+      1,061 SQL/FTS rows with no FTS drift.
+- [x] Reproduce and fix eleventh-audit RB-1 in source: auto-recall no longer
+      embeds assembled prompts, asymmetric ingress/prompt hooks share a stable
+      turn boundary, repeated hooks are idempotent, and raw query previews are
+      opt-in rather than default ledger content.
+- [x] Reproduce and fix RB-2 in source: doctor now computes principal-visible
+      rows and legacy migration debt. Default isolation remains enabled; the
+      1,060 legacy `agent:main` rows require an explicit exact-principal
+      allowlist or a backup/receipt-bound migration instead of a silent bypass.
+- [x] Reproduce and fix RB-3 in source: runtime registration writes a private
+      diagnostic receipt, doctor and release gate consume the same receipt,
+      shadow requires exactly one read-only hook and zero blocking reasons, and
+      readiness generation rejects any output that is not already the final
+      absolute configured pointer.
+- [x] Close SF-1/SF-2/SF-3 in source: abandoned-session/reflection caches now
+      have TTL/LRU/hard caps and eviction metrics; task completion uses
+      sentence-aware positive/negative evidence; `autoBackup` is documented as
+      a deprecated no-op and `true` becomes a doctor issue rather than a false
+      backup promise.
+- [x] Add release repository identity controls. The gate requires package
+      metadata and `origin` to name the same canonical repository. The twelfth
+      remediation further requires local `HEAD` to equal an explicit remote
+      release branch/tag, so a reachable but stale remote cannot pass.
+- [x] Build and validate the remediated source: 467 tests / 465 pass / 0 fail /
+      2 platform skips; typecheck and build pass; vector-repair smoke passes;
+      commercial golden recall is 124/124 with zero scope leakage; 200,000-row
+      FTS known-answer recall is 1 with p95 0.069 ms; installed-package runtime
+      and LanceDB smokes pass.
+
+### Twelfth independent review remediation (source only)
+
+- [x] Close RB-1 without reintroducing principal-as-turn identity. Exact
+      run/message aliases bind one turn; real session/conversation queues are
+      bounded and consumed once; principal scope is only a correlation hint.
+      If two id-less turns are concurrently ambiguous, auto-recall skips rather
+      than attaching the wrong query. Session cleanup cannot traverse a
+      principal hint into another session.
+- [x] Close RB-2 with a process-bound short lease. Runtime receipts carry a
+      random instance id, PID plus OS process-start token, a 10-second heartbeat
+      and a 30-second expiry. Doctor rejects dead, reused, unverifiable, expired,
+      or config/readiness-mismatched instances; plugin stop immediately writes
+      an invalidated receipt.
+- [x] Close RB-3 by separating task success from promotion authority. Task
+      episodes now persist `promotion_eligible`, `reviewer_passed`, and explicit
+      review provenance. Automatic promotion requires a positive reviewer
+      decision; decline, low-confidence, parse-failure, and capture-safety
+      outcomes remain non-promotable even when the task itself succeeded.
+- [x] Close SF-1/SF-2. Protective ACL/security success statements no longer
+      look like task failures. SQL truth stats classify recallable, archived,
+      and other inactive rows with canonical lifecycle rules; visible rows and
+      legacy migration debt count recallable rows only.
+- [x] Close SF-3/SF-4. Live release accepts explicit `--principal` and
+      `--release-ref`; exact allowlist omissions/mismatches receive directed
+      failures. Local release commit must already be published at the selected
+      `refs/heads/*` or `refs/tags/*` target.
+- [x] Rebuild and validate the twelfth-remediation source: 482 tests / 480 pass /
+      0 fail / 2 platform skips; strict typecheck/build and vector-repair smoke
+      pass; commercial golden recall is 124/124 with no leakage; 200,000-row
+      FTS p95 is 0.047 ms with recall 1; final pack is 244 files and the
+      installed-package runtime/LanceDB smokes pass.
+
+### Thirteenth independent review remediation (source only)
+
+- [x] Close the new auto-recall blocker. An ambiguous id-less A/B pair now
+      detaches from the weak pending queue after a safe skip, so later turn C
+      recovers immediately; exact run/message aliases remain available for a
+      late exact match and no raw query text enters diagnostics.
+- [x] Close the runtime and ACL lifecycle regressions. Runtime
+      `start -> stop -> start` rebuilds a healthy lease from immutable
+      composition truth with generation-fenced heartbeats. Mixed protective
+      ACL plus authorized-user failure statements are classified as failure in
+      both English and Chinese.
+- [x] Unify capture, support-bundle, and Experience transcript secret handling
+      behind one domain policy. Add common provider/token/key formats without
+      treating placeholders as credentials.
+- [x] Replace full-table lifecycle metadata parsing with a rebuildable,
+      transactionally maintained SQLite projection and SQL aggregation.
+      Measured lifecycle stats are 90.839 ms at 200,000 rows and 487.000 ms at
+      1,000,000 rows, with recall 1 and zero cross-scope leakage.
+- [x] Keep old TaskEpisodes fail-closed as explicitly counted historical
+      records. Do not silently approve them or invent an unaudited override
+      path in this release.
+- [x] Harden V2 failure boundaries: preserve the original rollback error,
+      require compatibility tables before append apply, verify convergence and
+      integrity before commit, and emit a directed encrypted-snapshot recovery
+      contract for post-commit failures.
+- [x] Close accepted static hardening: explicit empty episode scope fails
+      closed; shared episode visibility is symmetric; playbook FTS applies ACL
+      filters before rank/limit; fail-open memory dedup records
+      `dedup_skipped=true` when its vector precheck is unavailable.
+- [x] Rebuild and validate the thirteenth-remediation source: 491 tests / 489
+      pass / 0 fail / 2 Windows-only skips; typecheck, build, vector repair,
+      124/124 golden, 200K and 1M scale gates, 246-file pack, installed runtime/
+      LanceDB, and isolated real OpenClaw load/doctor/three-command smokes pass.
+      Full evidence is in
+      `docs/clawlore/eval/clawlore-v1-thirteenth-independent-audit-remediation-run-2026-07-19.md`.
+
+### Fourteenth independent review remediation (source only)
+
+- [x] Close RB-1 by scanning every secret-pattern match and exempting only
+      whole placeholder tokens. Capture, Experience, shared redaction, and
+      nested support bundles now agree on placeholder-first, secret-first,
+      multi-secret, and embedded-placeholder-word cases.
+- [x] Close RB-2 by synchronizing candidate promotion, forgetting,
+      governance cleanup/rollback, and legacy hygiene migration with lifecycle
+      projection inside the same SQLite transaction. Fault injection proves
+      truth/projection/audit rollback together, and a static DML allowlist
+      prevents new unsynchronized mutation owners.
+- [x] Close SF-1/SF-2/SF-3. ACL fallback recognizes conjunction subject
+      switches; projection table/state/index recover as one versioned schema;
+      ordinary reopen plus stats/doctor report revision drift without writes;
+      explicit
+      `repair-lifecycle-projection` is dry-run-first and `--apply` is the only
+      repair authority.
+- [x] Rebuild and validate the fourteenth-remediation source: 498 tests / 496
+      pass / 0 fail / 2 Windows-only skips; 28/28 post-document governance
+      regressions; typecheck/build/vector repair; golden 124/124; honest
+      doctor-path scale at 200K/1M, with the million-row 1,500 ms ceiling
+      explicit; 246-file pack; installed runtime/LanceDB; isolated OpenClaw
+      inspect/doctor/no-write drift preview/apply repair/three-command smoke.
+      Full evidence is in
+      `docs/clawlore/eval/clawlore-v1-fourteenth-independent-audit-remediation-run-2026-07-19.md`.
+
+### Sixteenth independent review remediation (source only)
+
+- [x] Reproduce the five executable counterexamples before changing source:
+      env/HTTP-header secrets escaped capture and downstream redaction;
+      lifecycle health missed a same-revision derived-row mutation; and an
+      unknown legitimate ACL subject was misclassified as a protective
+      continuation.
+- [x] Extend the single secret-policy owner with env-style credentials,
+      Basic/Proxy-Authorization, and Cookie/Set-Cookie detection. Capture,
+      support bundles, and task-experience transcript preparation now consume
+      the same policy and preserve exact placeholder exemptions.
+- [x] Version the lifecycle projection schema at v2. Each row now carries a
+      CHECK-bound projection fingerprint; read-only health inspection reports
+      `row_projection_mismatch`, and only the explicit repair path rebuilds a
+      stale projection.
+- [x] Replace the finite ACL-subject fallback with a bounded grammatical
+      subject-shift check. Unrecognized legitimate subjects such as employees,
+      paying customers, ordinary staff, and 普通员工 are no longer hidden, while
+      chained denials for the original unauthorized subject remain protective.
+- [x] Pass the remediated Linux gates: 43/43 focused, 502 total / 500 pass /
+      0 fail / 2 platform skips, strict typecheck/build, architecture and
+      lifecycle governance suites, and the 200,000-row benchmark with recall
+      1, leakage 0, FTS p95 0.049 ms, and lifecycle diagnostics 351.386 ms.
+- [x] Re-run on the authorized Windows work computer under the same private
+      user-profile TEMP/TMP contract as CI. Official portable Node 24.15.0 was
+      checksum-verified; all nine changed source/test files matched Linux
+      SHA-256 exactly; focused tests passed 33/33; full tests passed 493 with
+      0 failures and 8 platform skips out of 501; typecheck/build passed. The
+      owned isolated root was then removed and verified absent.
+- [ ] Create or rename the canonical GitHub repository, update `origin`, and
+      publish one clean exact ref. The source release gate intentionally stops
+      at package/origin mismatch; no repository currently exists at the
+      declared canonical location.
+- [ ] Run a new independent read-only review against that clean remote-ref
+      candidate. The successful Windows run proves the current bytes, not a
+      future commit that does not yet exist.
+- [ ] Keep live deployment and bulk database mutation blocked until the SATA
+      fault and encrypted off-machine backup/restore gap are closed, then seek
+      fresh deployment authorization. This remediation changed no live plugin,
+      config, database, Gateway, or service.
+
+Detailed evidence:
+`docs/clawlore/eval/clawlore-v1-sixteenth-independent-audit-remediation-run-2026-07-20.md`.
+
+### Seventeenth independent review remediation (source only)
+
+- [x] Promote the review's mechanism-level counterexamples into formal tests:
+      namespaced YAML/JSON credentials in ordinary support-bundle fields; a
+      wrong lifecycle plus a matching row fingerprint; and ACL failures joined
+      with `plus`, `as well as`, `以及`, or `加上`.
+- [x] Keep one secret-policy owner and extend it to quoted/unquoted namespace
+      keys with `=`/`:` forms. Capture, support bundles, and task-experience
+      transcript preparation now consume the same structured/text policy.
+- [x] Replace projection-self-consistency as health proof. Auxiliary schema v4
+      derives expected lifecycle and validity from `memory_truth`, compares
+      them field by field, and detects a fully self-consistent forged
+      projection. Explicit repair remains the only rebuild authority.
+- [x] Extract canonical lifecycle normalization into
+      `src/lifecycle-metadata.ts`; reduce `smart-metadata.ts` from the temporary
+      814-line hotspot to 694 lines and preserve source-governance boundaries.
+- [x] Replace finite ACL-connector handling with clause/subject-level
+      fail-closed classification. Only an unauthorized/attacker-subject denial
+      is protective; a legitimate-subject denial remains a task failure.
+- [x] Pass final Linux gates: 37/37 audit-focused, 12/12 structure/governance,
+      506 total / 504 pass / 0 fail / 2 platform skips, typecheck, build,
+      production audit with 0 vulnerabilities, 229/229 source-dist mapping,
+      and the 200,000-row gate with recall 1, leakage 0, FTS p95 0.061 ms, and
+      lifecycle stats 437.267 ms.
+- [x] Pass the authorized Windows Node 24.14 isolated gate: candidate archive
+      digest matched across machines; 30/30 audit-focused; 505 total / 497
+      pass / 0 fail / 8 platform skips; typecheck/build; 229/229 source-dist
+      mapping. Remove the owned Windows and local transfer roots and verify
+      both absent.
+- [ ] Resolve canonical repository identity, form one clean source+dist commit,
+      publish an exact branch/tag, regenerate release evidence, and obtain a
+      fresh independent review of those exact bytes. The release gate correctly
+      stops at the current package/origin mismatch.
+- [ ] Keep live rollout, V2 writes/cutover, and live data remediation outside
+      this source-only round. Joy explicitly deferred the SATA/SSD hardware
+      item until the planned upgrade; it is not an actionable plugin task.
+
+Detailed evidence:
+`docs/clawlore/eval/clawlore-v1-seventeenth-independent-audit-remediation-run-2026-07-20.md`.
+
+### Eighteenth independent review remediation (source only)
+
+- [x] Promote the review's camelCase JSON, YAML block-scalar, ordinary
+      support-bundle, and complete Task Experience capture-gate
+      counterexamples into formal regressions.
+- [x] Add parser-backed YAML/JSON value-range redaction with one normalized
+      secret-key policy for snake/kebab/dotted/namespaced/camelCase keys,
+      quoted values, and block scalars. Keep capture safety, support bundles,
+      and Task Experience transcript preparation on the same owner.
+- [x] Make structured task outcome the primary Experience gate: production
+      capture requires a successful `agent_end`, an explicit successful
+      terminal tool-result envelope, and a verified completion claim. Do not
+      treat free-form stdout as structured success.
+- [x] Keep clause/subject failure classification as defense in depth and reject
+      `employees still have no access`, `neither can paying customers`, and
+      `普通员工仍没有管理端访问权限` through the full capture gate.
+- [x] Extract `src/secret-structured-text.ts` and
+      `src/task-outcome-evidence.ts` as focused domain modules; reduce
+      `src/task-experience.ts` from 735 to 679 lines and update architecture
+      ownership/governance tests.
+- [x] Pass Linux gates: 36/36 audit-focused, 8/8 structure/security, 511 total
+      / 509 pass / 0 fail / 2 platform skips, typecheck, build, `git diff
+      --check`, production audit with 0 vulnerabilities, 233/233 source-dist
+      mapping, pack dry-run, and the 200,000-row benchmark with recall 1,
+      leakage 0, FTS p95 0.050 ms, and lifecycle stats 439.119 ms.
+- [x] Pass the authorized Windows Node 24.14 isolated gate on the matching
+      source-input manifest: 510 total / 502 pass / 0 fail / 8 platform skips,
+      typecheck, and build. Remove the exact owned Windows and local transfer
+      roots and verify the Windows root absent.
+- [ ] Resolve the canonical repository, correct `origin`, form one clean
+      source+dist commit, publish an exact branch/tag with unique build
+      identity, regenerate release evidence, and obtain a fresh independent
+      review. The source gate correctly stops at package/origin mismatch.
+- [ ] Keep live rollout, V2 writes/cutover, recall scope changes, Experience
+      rollout, and low-confidence secret review outside this source-only
+      round. They need separate read-only evidence and explicit authorization.
+
+Detailed evidence:
+`docs/clawlore/eval/clawlore-v1-eighteenth-independent-audit-remediation-run-2026-07-20.md`.
+
+### Nineteenth self-audit remediation (source only)
+
+- [x] Audit persistence and egress beyond the eighteenth-round entry points.
+      Provider/embedding failures, CLI and support output, reflection/digest,
+      governance, legacy rebuild, shadow/compaction, V2 Truth, and V2
+      Experience now consume explicit shared admission, metadata, egress, and
+      write policies instead of relying on caller discipline.
+- [x] Make unresolved structured task failures terminal for Experience. A
+      later unrelated success cannot erase them; repaired historical failures
+      require explicit repair and final-verification evidence.
+- [x] Close runtime state and file-privacy edges: bounded TTL ownership for
+      recall/capture state, owner-only atomic files and locks, symlink/traversal
+      refusal, private SQLite sidecars, and protected reflection,
+      self-improvement, migration, and shadow state.
+- [x] Separate V2 identifier validity from semantic write authority. Truth and
+      Experience persistence now require explicit scope/state/evidence and the
+      final shared persistence policy across distillation, migration, append,
+      and rollout paths.
+- [x] Finish the architecture non-growth pass. New responsibilities have
+      focused owners, reverse-dependency debt is 29, `src/store.ts` is 2,008
+      lines under its 2,010-line ceiling, and release mapping is 244/244.
+- [x] Correct the supported Node 24 floor from 24.14 to 24.15. Package/lock
+      engines, Linux/Windows CI, the reusable workflow, release contract,
+      tests, and changelog now match OpenClaw 2026.7.1-2's
+      `>=24.15.0 <25` requirement.
+- [x] Pass the supported Linux Node 24.15 gates: 570 total / 568 pass / 0 fail
+      / 2 skips, typecheck/build, 244/244 source-dist mapping, 0 production
+      vulnerabilities, 260-file pack, recall 1, cross-scope leakage 0, and the
+      complete pre-push gate from an isolated clean matching-origin checkout.
+- [x] Pass the authorized isolated Windows Node 24.15 complete pre-push gate:
+      569 total / 552 pass / 0 fail / 17 platform skips, typecheck/build,
+      packed runtime/LanceDB/real OpenClaw/legacy smokes, 0 production
+      vulnerabilities, 260-file pack, and matching Linux release/runtime/lock
+      identities. Remove both owned Windows and local transfer roots and verify
+      them absent.
+- [ ] Create or rename the canonical private `410979729/clawlore` repository,
+      update `origin`, and form one clean source+tracked-dist commit. The real
+      gate intentionally rejects the current legacy origin; the clean isolated
+      pass proves the candidate rather than bypassing provenance.
+- [ ] Run the real clean-commit pre-push gate, push an exact branch, run the
+      strict post-push evidence gate, and obtain one fresh independent review
+      of that exact ref before tag/release publication.
+- [ ] Keep live deployment, recall/Experience cutover, V2/data governance, and
+      the low-confidence live secret review outside this source-only result.
+      Each needs separate evidence and authorization; the SATA/SSD task remains
+      explicitly deferred by Joy.
+
+Detailed evidence:
+`docs/clawlore/eval/clawlore-v1-nineteenth-self-audit-remediation-run-2026-07-20.md`.
+- [ ] Obtain a new independent read-only review of the exact clean candidate.
+      Current fixes remain a dirty source+tracked-dist worktree and are not
+      deployed, committed, pushed, tagged, or released.
+- [ ] Create or rename the canonical GitHub repository
+      `410979729/clawlore`, then update `origin`. It does not currently exist;
+      `origin` still points to `scope-recall-openclaw`, so the new source gate
+      intentionally stops at repository identity before claiming release
+      acceptance.
+- [ ] Commit the source and tracked `dist` as one clean candidate, regenerate
+      canonical evidence from that commit, run the exact Windows Node 24 and
+      independent-review gates, then decide version/tag publication policy.
+- [ ] Deploy the remediated candidate only under a fresh authorization. Before
+      restart: capture a fresh rollback config, set deprecated `autoBackup` to
+      false, choose exact legacy allowlist versus receipt-backed scope migration,
+      regenerate readiness at the final configured path, and run idle/status
+      probes under `User=a`/`Group=a`. Post-restart acceptance requires the new
+      doctor with the intended principal, one runtime hook, health, auth/search,
+      and real Telegram recall. The present valid `thinkingDefault: "ultra"`
+      setting is not a current blocker.
+
+Historical refusal archive:
+`../../archive/clawlore-live-rollout-20260719_104516-resume`.
 
 ## R2 — Canonical brand and architecture convergence
 
@@ -45,8 +376,10 @@ Detailed plan:
 - [x] Complete public-contract and security/transaction comment audit.
 - [x] Pass focused/full Linux gates and all three Linux package smokes on the
       architecture-closure candidate.
-- [ ] Pass the exact Windows Node 24 gate and independent review before any
-      live identity rollout.
+- [ ] Re-run the exact Windows Node 24 gate on the future clean remote-ref
+      candidate and obtain independent review before any live identity
+      rollout. The 2026-07-20 dirty-candidate Windows run passed; it is not a
+      substitute for clean-ref release acceptance.
 
 Bundle-2 Linux verification: 43/43 focused tests; evidence-write and normal-mode
 source gates each passed 395 total / 393 passed / 0 failed / 2 platform skips,

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { evaluateCaptureSafety } from "./capture-safety.js";
+import { evaluateCaptureSafety, sanitizeCaptureText } from "./capture-safety.js";
 import { diagnosticErrorSummary, diagnosticIdentifier } from "./diagnostic-redaction.js";
+import { appendPrivateFile, enforcePrivatePath } from "./file-privacy.js";
 import { asNonEmptyString, DEFAULT_REFLECTION_ERROR_REMINDER_MAX_ENTRIES, DEFAULT_REFLECTION_MAX_INPUT_CHARS, DEFAULT_REFLECTION_MESSAGE_COUNT, DEFAULT_REFLECTION_THINK_LEVEL, DEFAULT_REFLECTION_TIMEOUT_MS, parsePositiveInt, } from "./plugin-config.js";
 import { createReflectionCommandOrchestrator } from "./reflection-command-orchestrator.js";
 import { createReflectionEventId } from "./reflection-event-store.js";
@@ -213,6 +214,8 @@ export function registerReflectionHooks(params) {
             getToolErrorSignals: (sessionKey, maxEntries) => state.errorEntries(sessionKey, maxEntries),
             generateReflectionText: createReflectionTextGenerator({ diagnosticErrorSummary, diagnosticIdentifier }),
             appendSelfImprovementEntry,
+            enforcePrivateFile: (path) => enforcePrivatePath(path, { kind: "file" }),
+            appendPrivateFile,
             createReflectionEventId,
             embedPassage: (text) => embedder.embedPassage(text),
             vectorSearch: (vector, limit, minScore, scopeFilter) => store.vectorSearch(vector, limit, minScore, scopeFilter),
@@ -262,20 +265,20 @@ export function registerReflectionHooks(params) {
             const now = new Date(input.timestampMs ?? Date.now());
             const date = now.toISOString().split("T")[0];
             const time = now.toISOString().split("T")[1].split(".")[0];
-            const text = [
+            const untrustedText = [
                 `Session: ${date} ${time} UTC`,
-                `Session Key: ${input.sessionKey}`,
-                `Session ID: ${input.sessionId}`,
-                `Source: ${input.source}`,
                 "",
                 "Conversation Summary:",
                 input.sessionContent,
             ].join("\n");
-            const safety = evaluateCaptureSafety(text);
+            const safety = evaluateCaptureSafety(untrustedText);
             if (!safety.allowed) {
                 api.logger.debug(`clawlore: skipped unsafe system session summary reason=${safety.reason} pattern=${safety.pattern ?? "unknown"}`);
                 return;
             }
+            const text = sanitizeCaptureText(untrustedText);
+            if (!text)
+                return;
             await store.store({
                 text,
                 vector: await embedder.embedPassage(text),

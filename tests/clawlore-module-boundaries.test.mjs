@@ -63,6 +63,14 @@ test("application services do not depend on concrete storage adapters", async ()
 
 test("canonical application and OpenClaw adapters obey the active inward boundary", async () => {
   const activeRoots = [join(canonicalRoot, "application"), join(canonicalRoot, "adapters", "openclaw")];
+  // Canonical V1 domain modules still live at src/ while the gradual
+  // architecture migration is in progress. Keep this allowlist exact so an
+  // application import cannot turn into an unrestricted root-module escape.
+  const canonicalDomainModules = new Set([
+    "memory-egress-policy.ts",
+    "secret-redaction.ts",
+    "secret-structured-text.ts",
+  ]);
   const crossCuttingAdapterExceptions = new Set([
     "diagnostic-redaction.ts",
     "file-privacy.ts",
@@ -79,6 +87,7 @@ test("canonical application and OpenClaw adapters obey the active inward boundar
         const targetRelative = relative(canonicalRoot, target).split(sep).join("/");
         const allowedTarget = targetRelative.startsWith("application/")
           || targetRelative.startsWith("v2/domain/")
+          || canonicalDomainModules.has(targetRelative)
           || (!fromApplication && targetRelative.startsWith("adapters/openclaw/"))
           || (!fromApplication && crossCuttingAdapterExceptions.has(targetRelative));
         if (!allowedTarget) {

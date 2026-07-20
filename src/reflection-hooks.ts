@@ -1,8 +1,9 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { createHash } from "node:crypto";
 
-import { evaluateCaptureSafety } from "./capture-safety.js";
+import { evaluateCaptureSafety, sanitizeCaptureText } from "./capture-safety.js";
 import { diagnosticErrorSummary, diagnosticIdentifier } from "./diagnostic-redaction.js";
+import { appendPrivateFile, enforcePrivatePath } from "./file-privacy.js";
 import type { createEmbedder } from "./embedder.js";
 import type { MarkdownMirrorWriter } from "./markdown-mirror.js";
 import {
@@ -253,6 +254,8 @@ export function registerReflectionHooks(params: {
         getToolErrorSignals: (sessionKey, maxEntries) => state.errorEntries(sessionKey, maxEntries),
         generateReflectionText: createReflectionTextGenerator({ diagnosticErrorSummary, diagnosticIdentifier }),
         appendSelfImprovementEntry,
+        enforcePrivateFile: (path) => enforcePrivatePath(path, { kind: "file" }),
+        appendPrivateFile,
         createReflectionEventId,
         embedPassage: (text) => embedder.embedPassage(text),
         vectorSearch: (vector, limit, minScore, scopeFilter) => store.vectorSearch(vector, limit, minScore, scopeFilter),
@@ -310,20 +313,19 @@ export function registerReflectionHooks(params: {
       const now = new Date(input.timestampMs ?? Date.now());
       const date = now.toISOString().split("T")[0];
       const time = now.toISOString().split("T")[1].split(".")[0];
-      const text = [
+      const untrustedText = [
         `Session: ${date} ${time} UTC`,
-        `Session Key: ${input.sessionKey}`,
-        `Session ID: ${input.sessionId}`,
-        `Source: ${input.source}`,
         "",
         "Conversation Summary:",
         input.sessionContent,
       ].join("\n");
-      const safety = evaluateCaptureSafety(text);
+      const safety = evaluateCaptureSafety(untrustedText);
       if (!safety.allowed) {
         api.logger.debug(`clawlore: skipped unsafe system session summary reason=${safety.reason} pattern=${safety.pattern ?? "unknown"}`);
         return;
       }
+      const text = sanitizeCaptureText(untrustedText);
+      if (!text) return;
       await store.store({
         text,
         vector: await embedder.embedPassage(text),

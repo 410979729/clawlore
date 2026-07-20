@@ -4,6 +4,7 @@ import { candidateDebtReport } from "./candidate-promotion.js";
 import { digestReport } from "./digest-pipeline.js";
 import { graphHygieneReport } from "./graph-hygiene.js";
 import { isMemoryActiveAt, parseSmartMetadata } from "./smart-metadata.js";
+import { inspectLifecycleProjection } from "./sql-lifecycle-projection.js";
 function tableNames(db) {
     const rows = db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual')").all();
     return new Set(rows.map((row) => String(row.name)));
@@ -130,6 +131,17 @@ export function buildOperatorDashboard(db, options = {}) {
     const freshness = freshnessHealth(db, tables);
     const digest = digestReport(db, { sampleLimit: 5 });
     const fts = ftsHealth(db, tables);
+    const lifecycleProjection = tables.has("memory_truth")
+        ? inspectLifecycleProjection(db)
+        : {
+            ok: false,
+            status: "missing",
+            reason: "memory_truth_missing",
+            truthRows: 0,
+            projectedRows: 0,
+            stateProjectedRows: null,
+            repairRequired: false,
+        };
     const experience = experienceHealth(db, tables);
     const memoryRows = tables.has("memory_truth") ? countRows(db, "memory_truth") : 0;
     const activeGovernanceDirty = Object.values(governanceDirtyCounts).reduce((sum, value) => sum + Number(value || 0), 0);
@@ -138,6 +150,7 @@ export function buildOperatorDashboard(db, options = {}) {
     const digestFailedRuns = Number(digest.failed_runs || 0);
     const dashboardOk = memoryRows > 0
         && fts.status === "ok"
+        && lifecycleProjection.ok
         && activeGovernanceDirty === 0
         && journal.candidate_count === 0
         && candidateCount === 0
@@ -153,6 +166,7 @@ export function buildOperatorDashboard(db, options = {}) {
         summary: {
             memory_rows: memoryRows,
             fts_status: fts.status,
+            lifecycle_projection_status: lifecycleProjection.status,
             governance_cleanup_candidates: activeGovernanceDirty,
             journal_recovery_status: journal.status,
             journal_replay_candidates: journal.candidate_count,
@@ -167,6 +181,7 @@ export function buildOperatorDashboard(db, options = {}) {
         },
         sections: {
             fts,
+            lifecycle_projection: lifecycleProjection,
             governance_cleanup: {
                 active_dirty_counts: governanceDirtyCounts,
             },

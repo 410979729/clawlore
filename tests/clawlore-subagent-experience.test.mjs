@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -88,8 +88,33 @@ test("subagent snapshots and child writes preserve isolated/fork and candidate-o
   const store = new SqliteExperienceStoreV2(join(root, "experience.sqlite"));
   store.open();
   try {
+    if (process.platform !== "win32") {
+      assert.equal((await stat(root)).mode & 0o077, 0);
+      assert.equal((await stat(join(root, "experience.sqlite"))).mode & 0o077, 0);
+    }
     const service = new SubagentExperienceServiceV2(store, clock());
     const adapter = new OpenClawSubagentExperienceAdapterV2(service);
+    assert.throws(() => adapter.prepareSubagentSpawn({
+      mode: "fork", parentSessionId: "parent", childSessionId: "secret-goal-child", runId: "secret-goal-run",
+      taskGoal: '{"databasePassword":"synthetic-subagent-goal-secret"}', actor: actor(), contextPack: pack(),
+    }), /safety policy/);
+    const unsafePack = pack();
+    unsafePack.taskContext[0].text = "serviceToken: synthetic-context-secret";
+    assert.throws(() => adapter.prepareSubagentSpawn({
+      mode: "fork", parentSessionId: "parent", childSessionId: "secret-context-child", runId: "secret-context-run",
+      taskGoal: "Inspect deployment", actor: actor(), contextPack: unsafePack,
+    }), /safety policy/);
+    assert.throws(() => adapter.prepareSubagentSpawn({
+      mode: "fork", parentSessionId: "parent", childSessionId: "attachment-goal-child", runId: "attachment-goal-run",
+      taskGoal: "[Image attached at: /tmp/private-token-image.png]\nInspect deployment",
+      actor: actor(), contextPack: pack(),
+    }), /safety policy/);
+    assert.throws(() => adapter.prepareSubagentSpawn({
+      mode: "fork", parentSessionId: "parent", childSessionId: "unsafe-address-child", runId: "unsafe-address-run",
+      taskGoal: "Inspect deployment",
+      actor: { ...actor(), principalId: "/home/a/.ssh/id_ed25519" },
+      contextPack: { ...pack(), actorAddress: { ...actor(), principalId: "/home/a/.ssh/id_ed25519" } },
+    }), /safety policy/);
     const isolated = adapter.prepareSubagentSpawn({
       mode: "isolated", parentSessionId: "parent", childSessionId: "child-1", runId: "run-1",
       taskGoal: "Inspect deployment", actor: actor(), contextPack: pack(),
@@ -97,12 +122,27 @@ test("subagent snapshots and child writes preserve isolated/fork and candidate-o
     });
     assert.deepEqual(isolated.items.map((item) => item.memoryId), ["shared-explicit"]);
     assert.ok(isolated.items.every((item) => item.readOnly));
+    assert.throws(() => store.saveSnapshot({
+      ...isolated, snapshotId: "direct-revoked-snapshot", status: "revoked",
+    }), /must be active/);
+    assert.throws(() => store.saveSnapshot({
+      ...isolated, snapshotId: "direct-unsafe-snapshot",
+      taskGoal: "Inspect /home/a/.ssh/id_ed25519 before continuing",
+    }), /safety policy/);
+    assert.equal(store.getSnapshot("direct-revoked-snapshot"), null);
+    assert.equal(store.getSnapshot("direct-unsafe-snapshot"), null);
 
     const forked = adapter.prepareSubagentSpawn({
       mode: "fork", parentSessionId: "parent", childSessionId: "child-2", runId: "run-2",
       taskGoal: "Fork deployment context", actor: actor(), contextPack: pack(),
     });
     assert.deepEqual(forked.items.map((item) => item.memoryId), ["private-parent", "shared-explicit"]);
+    assert.throws(() => adapter.onSubagentEnded({
+      snapshotId: forked.snapshotId, childSessionId: "child-2", taskClass: "deployment", outcome: "success",
+      toolReceiptIds: ["receipt-secret-evidence"],
+      evidence: ["Authorization: Digest synthetic-subagent-evidence-secret"],
+    }), /safety policy/);
+    assert.equal(store.getSnapshot(forked.snapshotId).status, "active");
 
     assert.throws(() => service.recordChildScratch({
       snapshotId: isolated.snapshotId, childSessionId: "child-1", content: "Durable child fact", retention: "durable",
@@ -110,11 +150,31 @@ test("subagent snapshots and child writes preserve isolated/fork and candidate-o
     assert.throws(() => service.recordChildScratch({
       snapshotId: isolated.snapshotId, childSessionId: "child-1", content: "token=secret-shaped-value", retention: "working",
     }), /safety policy/);
+    assert.throws(() => service.recordChildScratch({
+      snapshotId: isolated.snapshotId, childSessionId: "child-1",
+      content: '{"databasePassword":"synthetic-subagent-secret"}', retention: "working",
+    }), /safety policy/);
+    assert.throws(() => service.recordChildScratch({
+      snapshotId: isolated.snapshotId, childSessionId: "child-1",
+      content: "Authorization: Digest synthetic-subagent-credential-material", retention: "working",
+    }), /safety policy/);
+    assert.throws(() => service.recordChildScratch({
+      snapshotId: isolated.snapshotId, childSessionId: "child-1",
+      content: "Inspect /home/a/.ssh/id_ed25519 before continuing", retention: "working",
+    }), /safety policy/);
+    assert.throws(() => service.recordChildScratch({
+      snapshotId: isolated.snapshotId, childSessionId: "child-1",
+      content: "[Image attached at: /tmp/private-token-image.png]\nCandidate observation", retention: "working",
+    }), /safety policy/);
     const scratch = service.recordChildScratch({
       snapshotId: isolated.snapshotId, childSessionId: "child-1", content: "Candidate observation", retention: "working",
     });
     assert.equal(scratch.lifecycle, "candidate");
     assert.equal(scratch.retention, "working");
+    assert.throws(() => store.saveScratch({
+      ...scratch, scratchId: "direct-unsafe-scratch",
+      content: "Inspect /home/a/.ssh/id_ed25519 before continuing",
+    }), /safety policy/);
 
     const incomplete = adapter.onSubagentEnded({
       snapshotId: isolated.snapshotId, childSessionId: "child-1", taskClass: "deployment",
@@ -133,6 +193,14 @@ test("subagent snapshots and child writes preserve isolated/fork and candidate-o
     });
     assert.equal(rejected.parentVerification, "disputed");
     assert.equal(rejected.lifecycle, "quarantined");
+    assert.throws(() => store.updateEpisode({
+      ...rejected, taskGoal: "Changed immutable goal", updatedAt: "2026-07-12T01:31:00.000Z",
+    }), /immutable fields/);
+    assert.throws(() => store.appendEvent({
+      eventId: "direct-unsafe-event", entityType: "episode", entityId: rejected.episodeId,
+      eventType: "unsafe_event", actor: "operator",
+      reason: "Read /home/a/.ssh/id_ed25519", createdAt: "2026-07-12T01:31:00.000Z",
+    }), /safety policy/);
   } finally {
     store.close();
     await rm(root, { recursive: true, force: true });
@@ -166,6 +234,29 @@ test("parent verification, repeated evidence, replay, feedback, and supersede pr
     }
 
     const single = service.createPlaybookCandidate(playbookInput([episodes[0].episodeId]));
+    assert.throws(() => store.savePlaybook({
+      ...single, playbookId: "direct-promoted-playbook", lifecycle: "promoted", operatorReviewed: true,
+    }), /must begin as an unreviewed candidate/);
+    assert.throws(() => store.savePlaybook({
+      ...single, playbookId: "direct-unsafe-playbook",
+      trigger: "Read /home/a/.ssh/id_ed25519 before deployment",
+    }), /safety policy/);
+    assert.throws(() => store.updatePlaybook({
+      ...single, title: "Changed immutable title", lifecycle: "promoted", operatorReviewed: true,
+      updatedAt: "2026-07-12T01:31:00.000Z",
+    }), /immutable fields/);
+    assert.throws(() => service.createPlaybookCandidate({
+      ...playbookInput([episodes[0].episodeId]),
+      trigger: "databasePassword: |\n  synthetic-playbook-trigger-secret",
+    }), /safety policy/);
+    assert.throws(() => service.createPlaybookCandidate({
+      ...playbookInput([episodes[0].episodeId]),
+      steps: [{
+        stepId: "unsafe",
+        instruction: '{"serviceToken":"synthetic-playbook-step-secret"}',
+        requiredTools: ["exec"],
+      }],
+    }), /safety policy/);
     assert.throws(() => service.createPlaybookCandidate({
       ...playbookInput([episodes[0].episodeId]), parentSessionId: "other-parent",
     }), /not owned/);
@@ -174,6 +265,11 @@ test("parent verification, repeated evidence, replay, feedback, and supersede pr
     }), /single-run playbook/);
 
     const repeated = service.createPlaybookCandidate(playbookInput(episodes.map((item) => item.episodeId)));
+    assert.throws(() => service.promotePlaybook({
+      playbookId: repeated.playbookId, actor: "parent",
+      reason: "Authorization: Bearer synthetic-promotion-secret-material",
+    }), /safety policy/);
+    assert.equal(store.getPlaybook(repeated.playbookId).lifecycle, "candidate");
     const promoted = service.promotePlaybook({
       playbookId: repeated.playbookId, actor: "parent", reason: "two verified independent runs",
     });

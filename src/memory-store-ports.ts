@@ -15,6 +15,26 @@ export interface MemorySearchResult {
   score: number;
 }
 
+export interface MemoryTruthStats {
+  totalCount: number;
+  scopeCounts: Record<string, number>;
+  categoryCounts: Record<string, number>;
+  lifecycleScopeCounts: Record<string, {
+    recallable: number;
+    archived: number;
+    inactive: number;
+  }>;
+  lifecycleProjection?: {
+    ok: boolean;
+    status: string;
+    reason: string;
+    truthRows: number;
+    projectedRows: number;
+    stateProjectedRows: number | null;
+    repairRequired: boolean;
+  };
+}
+
 export interface StoreConfig {
   dbPath: string;
   vectorDim: number;
@@ -120,11 +140,7 @@ export interface MemoryTruthPort {
   getById(id: string, scopeFilter?: string[]): Promise<MemoryEntry | null>;
   delete(id: string, scopeFilter?: string[]): Promise<boolean>;
   list(scopeFilter?: string[], category?: string, limit?: number, offset?: number): Promise<MemoryEntry[]>;
-  stats(scopeFilter?: string[]): Promise<{
-    totalCount: number;
-    scopeCounts: Record<string, number>;
-    categoryCounts: Record<string, number>;
-  }>;
+  stats(scopeFilter?: string[]): Promise<MemoryTruthStats>;
   update(
     id: string,
     updates: {

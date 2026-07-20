@@ -12,6 +12,7 @@ import {
 } from "./conflict-governance.js";
 import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
 import { isNoise } from "./noise-filter.js";
+import { redactMemoryTextForOutput } from "./memory-egress-policy.js";
 import {
   runtimeBoundaryMetadata
 } from "./runtime-memory-boundary.js";
@@ -192,11 +193,13 @@ export function registerMemoryStoreTool(
             // Fail-open by design: dedup must never block a legitimate memory write.
             // excludeInactive: superseded historical records must not block new writes.
             let existing: Awaited<ReturnType<MemoryStore["vectorSearch"]>> = [];
+            let dedupSkipped = false;
             try {
               existing = await runtimeContext.store.vectorSearch(vector, 1, 0.1, [
                 targetScope,
               ], { excludeInactive: true });
             } catch (err) {
+              dedupSkipped = true;
               console.warn(
                 `clawlore: duplicate pre-check failed, continue store: ${diagnosticErrorSummary(err)}`,
               );
@@ -207,13 +210,13 @@ export function registerMemoryStoreTool(
                 content: [
                   {
                     type: "text",
-                    text: `Similar memory already exists: "${existing[0].entry.text}"`,
+                    text: `Similar memory already exists: "${redactMemoryTextForOutput(existing[0].entry.text)}"`,
                   },
                 ],
                 details: {
                   action: "duplicate",
                   existingId: existing[0].entry.id,
-                  existingText: existing[0].entry.text,
+                  existingText: redactMemoryTextForOutput(existing[0].entry.text),
                   existingScope: existing[0].entry.scope,
                   similarity: existing[0].score,
                 },
@@ -243,6 +246,7 @@ export function registerMemoryStoreTool(
                       state: "confirmed",
                       memory_layer: deriveManualMemoryLayer(category as string),
                       last_confirmed_use_at: Date.now(),
+                      dedup_skipped: dedupSkipped,
                       bad_recall_count: 0,
                       suppressed_until_turn: 0,
                     },
@@ -283,6 +287,7 @@ export function registerMemoryStoreTool(
                 scope: entry.scope,
                 category: entry.category,
                 importance: entry.importance,
+                dedupSkipped,
                 conflictReview,
               },
             };

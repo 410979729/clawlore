@@ -1,8 +1,473 @@
 # ClawLore v1 project handoff
 
 Current through Phase 9, H1-H5 production hardening, the R1 canonical identity
-transition, the seventh and eighth independent reviews, and R2 brand/
-architecture bundle 5 through 2026-07-17.
+transition, R2 brand/architecture bundle 5, the 2026-07-19 live rollout, and
+the eleventh through eighteenth independent audit source-remediation rounds.
+
+## 2026-07-19 live timeline and eleventh-audit remediation
+
+### 11:14 guarded attempt: refused before mutation
+
+Joy authorized rollout of exact source commit
+`33d164c4047da630341d26198461c4d3da2ba74e`. The staged source,
+readiness, package, and backup controls passed, but the deployment did not
+occur. `clawlore-live-rollout-20260719-resume.service` exhausted its bounded
+900-second idle wait because each Gateway task probe returned unknown
+(`active_tasks=-1`), then terminated at 11:14:24 CST with exit status 3.
+The exact cause is reproducible: the transient system unit had no `User=` and
+therefore ran as root; under that identity OpenClaw blocks the user-owned live
+ClawLore plugin path, rejects config validation, and makes
+`gateway call status` exit 1. The same command returns a valid integer task
+count under the instance identity. There was no automatic retry.
+
+The refusal occurred before the script's Gateway stop and extension-swap
+boundary. No deployment receipt, rollback directory, or failed-candidate
+directory was created. The live Gateway remained the same process started at
+2026-07-18 23:28:01 CST, with `NRestarts=0`, active/running state, and HTTP 200
+from `/healthz`. The current config SHA-256 is identical to the freshly
+captured `backup/openclaw.json.before`, so the later Brave configuration was
+preserved.
+
+The old live plugin is independently verified intact: a relative content
+manifest over all 5,897 files exactly matches
+`backup/clawlore-live-before.tgz`; candidate provenance and
+`dist/src/cli/auth-config-transaction.js` are absent from live; and runtime
+inspection reports `clawlore@1.2.0` enabled, activated, and loaded from
+`/home/a/openclaw-tianji/home/state/extensions/clawlore/dist/index.js`.
+Read-only doctor returned `ok=true`, with SQL truth, FTS truth/rows, and vector
+rows all 1,061 and zero missing or stale FTS/vector rows.
+
+The exact refusal audit/staging archive is
+`/home/a/openclaw-tianji/home/state/workspace/archive/clawlore-live-rollout-20260719_104516-resume`.
+It and the old live backup remain rollback/audit assets. The failed unit must
+not be replayed automatically.
+
+Cleanup at the refusal boundary remained failure-safe: the archive, old live
+backup, staged candidate, and untracked
+`dist/clawlore-build-provenance.json` were preserved. After the 14:40 rollout,
+the latter was proved byte-identical to the live provenance and removed only
+from the remediated source tree so it cannot mislabel a future package; the
+live copy and rollout archives remain. The state hygiene audit reported 93
+unrelated existing category hits:
+45 backup-like residue, 4 foreign canonical documents, 5 root backups, and 39
+session backups (overlapping categories). None was deleted.
+
+### 14:40 later rollout: baseline `33d164c` deployed
+
+A separate later rollout did deploy the same baseline commit. Current live
+evidence, rechecked at 16:40 CST, is Gateway `active/running` since 14:40:35,
+MainPID 276689, `NRestarts=0`, and HTTP live from `/healthz`. Runtime logs at
+14:40:47 and 14:40:59 record `status=registered`, mode `shadow`, exactly one
+hook, writes false, prompt mutation false, ContextEngine false, and no blocking
+reasons. Runtime inspection reports `clawlore@1.2.0` enabled, activated, and
+loaded from the canonical live extension. The baseline doctor remains
+`ok=true`, with 1,061 SQL truth/FTS rows and zero missing/stale FTS rows.
+
+The live build provenance names source commit `33d164c…`, but that commit id no
+longer identifies the current working candidate by itself: the repository now
+contains uncommitted audit remediations and a rebuilt `dist`. The remediated
+source `dist/index.js` SHA-256 is `a678170c…`; live remains `95b1da2b…`.
+Therefore the fixes below are not deployed.
+
+### Eleventh independent audit: source fixes completed, live unchanged
+
+The independent report's three release blockers were reproduced rather than
+accepted on assertion alone:
+
+- Auto-recall now aliases asymmetric hook payloads to one stable turn, never
+  embeds assembled prompts, claims a turn only once, bounds abandoned turn
+  state, and stores digest/length query evidence by default.
+- Doctor now evaluates runtime accessibility for an explicit principal and
+  reports legacy scope migration debt. Principal isolation stays secure by
+  default; 1,060 `agent:main` rows are not silently exposed.
+- Runtime registration now persists a private diagnostic receipt. Doctor and
+  release gate require the same shadow truth: ready and unexpired binding,
+  registered status, one `message_received` hook, writes/prompt mutation/
+  ContextEngine false, and no blocking reasons. Readiness generation requires
+  the final configured absolute output path before hashing.
+
+The three should-fix items in the same round are also closed in source. Shared
+TTL/LRU/hard-cap state bounds reflection and abandoned session maps; Experience
+completion parsing no longer treats a protective `cannot/不能` sentence as task
+failure; and public schema/docs/doctor now state that `autoBackup` is a
+deprecated no-op instead of promising plaintext backups. Repository publication
+now fails unless package metadata matches `origin` and the canonical remote
+HEAD is reachable.
+
+Validation on the rebuilt source: 467 total tests, 465 pass, 0 fail, 2 platform
+skips; strict typecheck and build pass; vector-repair smoke passes; commercial
+golden is 124/124 with zero scope leakage; 200,000-row FTS known-answer recall
+is 1 with p95 0.069 ms; installed-package runtime and LanceDB smokes pass.
+
+Full release acceptance is intentionally blocked. Package metadata names
+`github.com/410979729/clawlore`, that repository is not currently reachable,
+and local `origin` still names `scope-recall-openclaw`. The source gate now
+stops at this mismatch. A clean source+dist commit, canonical evidence,
+Windows gate, review, and version/tag decision remain outstanding.
+
+No live config, extension, database, or service was changed during this audit
+remediation. The current config validates under the installed OpenClaw with
+Node 24.15; the earlier claim that `thinkingDefault: "ultra"` was invalid is
+obsolete. A future remediated rollout still needs fresh authorization,
+`autoBackup:false`, an explicit exact-principal legacy allowlist or a
+backup/receipt-bound migration, a newly bound readiness receipt at the final
+configured path, a user-owned rollout unit, and post-restart principal-aware
+doctor plus real Telegram recall.
+
+### Twelfth independent review: source fixes completed, live unchanged
+
+The twelfth report found three new blockers in the uncommitted eleventh-round
+candidate. All three were reproduced and closed in source:
+
+- Auto-recall no longer maps a long-lived principal scope as a turn alias.
+  Exact run/message identities bind one turn; session/conversation pending
+  queues are bounded and consumed once. Interleaved id-less turns that cannot
+  be safely correlated now skip recall instead of crossing, and `session_end`
+  only clears exact/session aliases.
+- The runtime diagnostic is now a renewable short lease rather than a static
+  file. It binds a random instance id to PID plus OS process-start identity,
+  refreshes every 10 seconds, expires after 30 seconds, rejects dead/PID-reused/
+  unverifiable processes, and is invalidated immediately on plugin stop.
+- A successful task episode is no longer automatic Experience promotion
+  authority. Promotion requires `promotion_eligible=true`, reviewer approval,
+  and explicit review provenance. Reviewer decline, low confidence, parse
+  failure, and capture-safety skips remain non-promotable end to end.
+
+The four should-fix findings are also closed. Completion parsing recognizes
+verified ACL/security success statements without hiding real access failures.
+Runtime accessibility uses canonical lifecycle classification: archived and
+other inactive rows are reported separately, while visible rows and migration
+debt count recallable rows only. The operator runbook and gate now accept an
+explicit trusted `--principal`, give directed missing/mismatch errors, and
+require local `HEAD` to equal a selected remote branch/tag via `--release-ref`.
+Wildcard principals are rejected in every principal segment.
+
+Final source verification after the last changes: 482 tests / 480 pass / 0
+fail / 2 platform skips; strict typecheck and build pass; vector repair smoke
+passes; commercial golden recall is 124/124 with no scope leakage; the
+200,000-row FTS benchmark has known-answer recall 1, p95 0.047 ms, and no
+leakage; the final npm pack contains 244 files; installed-package runtime and
+LanceDB store/reopen/recall/delete/repair smokes pass. Source release gate
+correctly stops at the existing package/origin identity mismatch before making
+any release claim.
+
+The rebuilt source `dist/index.js` SHA-256 is `8226bfa4…`; live remains
+`95b1da2b…`, proving these changes are not deployed. The working tree currently
+has 49 tracked modified and 20 untracked paths because the eleventh and twelfth
+remediations plus tracked build output have not been committed. No remote,
+live extension/config/database/service, tag, or release was changed.
+
+The next safe boundary is a clean source+dist candidate, exact remote ref,
+fresh independent review, and then a separately authorized backup-backed live
+rollout with the intended principal and new runtime lease checked by doctor.
+
+### Thirteenth independent review: source fixes completed, live unchanged
+
+The thirteenth review verified that the twelfth round's original three blockers
+were closed, then found one new blocker and four release-hardening gaps. The
+new blocker is closed: when id-less concurrent ingress A/B is ambiguous, the
+weak pending queue is detached after the safe skip, so a later ordinary turn C
+recovers immediately. Exact run/message aliases are retained for late exact
+correlation, and raw messages are not logged.
+
+The runtime diagnostic service now survives `start -> stop -> start` by leasing
+from immutable healthy composition truth, with heartbeat generation fencing.
+Experience completion parsing distinguishes protective unauthorized-user
+denials from a later authorized-user failure. Pre-gate episodes remain
+explicitly counted `legacy_episode_historical` records; they are not silently
+approved, and this release does not invent a weak operator override without a
+separate actor/reason/evidence receipt.
+
+Secret detection and redaction are now one domain policy shared by capture,
+support bundles, and Experience transcript preparation. The policy covers the
+previous rules plus common Stripe, GitLab, Google OAuth, SendGrid, Twilio, AWS
+temporary key, broader GitHub/Slack/JWT, PuTTY, and alphanumeric password forms.
+
+Lifecycle diagnostics no longer pull every metadata JSON value into
+JavaScript. A rebuildable auxiliary SQLite projection is updated with truth
+transactions and aggregated in SQL. The 200,000-row lifecycle measurement fell
+from the audit's roughly one second to 90.839 ms; the new 1,000,000-row gate is
+487.000 ms. Both retain known-answer recall 1 and zero cross-scope leakage.
+
+V2 transaction handling now preserves the original error if rollback itself
+fails, checks compatibility-backfill prerequisites before append apply, and
+validates convergence/integrity/foreign keys before initial rollout commit. A
+post-commit failure emits `CLAWLORE_V2_POST_COMMIT_RECOVERY_REQUIRED` and
+requires verified encrypted-snapshot restoration to a new location; it does
+not claim an unsafe in-place automatic rollback.
+
+The remaining accepted static hardening is also closed. Empty episode scopes
+fail closed; shared-scope episode visibility is symmetric; playbook FTS pushes
+scope/status/task filters ahead of rank/limit; and fail-open manual-memory
+duplicate checks persist `dedup_skipped=true` when their vector precheck is
+unavailable.
+
+Final Linux verification: 491 total / 489 pass / 0 fail / 2 Windows-only
+skips; strict typecheck/build, vector repair, 124/124 golden, 200K and 1M scale
+gates, 246-file pack, installed-package runtime/LanceDB smokes, and isolated
+real OpenClaw load/doctor/three-command smokes all pass. Candidate
+`dist/index.js` is still `8226bfa4...`; live remains `95b1da2b...`.
+
+Release remains NO-GO. The worktree has 72 tracked modified and 25 untracked
+paths, `origin` still points at `scope-recall-openclaw`, the exact Windows Node
+24 gate and clean-candidate independent review remain open, and no commit,
+push, tag, release, configuration, database, service, or live extension was
+changed. Detailed evidence:
+`eval/clawlore-v1-thirteenth-independent-audit-remediation-run-2026-07-19.md`.
+
+### Fourteenth independent review: source fixes completed, live unchanged
+
+The review's two blockers and three should-fix findings were independently
+reproduced and accepted. Secret matching now scans every hit in a pattern and
+only exempts an exact placeholder token, so an earlier fixture cannot hide a
+later credential and ordinary values containing placeholder words remain
+sensitive.
+
+All current direct `memory_truth` governance mutations now synchronize the
+lifecycle projection in the same SQLite transaction: candidate promotion,
+forgetting archive/delete, cleanup/rollback, legacy hygiene migration, and the
+standard truth store. Fault injection proves truth, projection, and audit state
+roll back together. A source gate rejects new raw DML owners outside the exact
+allowlist. Health checks compare schema, row count, state count, scope, and
+truth update revision rather than treating equal counts as freshness.
+
+Projection table, state, and index recover as one versioned auxiliary schema.
+Doctor and stats are read-only on drift and return an explicit issue instead of
+silently rebuilding or returning stale lifecycle counts. Ordinary reopen of an
+established authority also never initializes or repairs that auxiliary state;
+fresh authority creation and the receipt-backed legacy upgrade are the only
+startup-time initialization boundaries. The new
+`repair-lifecycle-projection` operator command previews by default and rebuilds
+only with `--apply`. ACL text fallback also handles authorized-subject switches
+after conjunctions in English and Chinese.
+
+Final Linux verification: 498 total / 496 pass / 0 fail / 2 Windows-only
+skips; 28/28 post-document governance tests; typecheck/build/vector repair;
+golden 124/124; 200K FTS p95 0.055 ms and complete lifecycle diagnostics
+211.412 ms; 1M FTS p95 0.073 ms and complete lifecycle diagnostics 1,077.821
+ms under an explicit 1,500 ms million-row ceiling; 246-file pack; installed
+runtime/LanceDB; isolated real OpenClaw inspect/doctor/no-write drift preview/
+apply-repair/three-command smokes. The scale numbers now include freshness
+inspection as well as aggregation; the default 500 ms ceiling remains the 200K
+gate. An unqualified 1M probe failed that 500 ms ceiling at 1,121.687 ms before
+the declared 1,500 ms million-row gate passed; do not report the former as a
+product regression or conceal it as a successful default run.
+
+Release remains NO-GO. Repository identity still blocks the source gate,
+Windows Node 24 and a new clean-commit independent review remain open, and the
+candidate (83 tracked dirty plus 26 untracked paths) is not committed, pushed,
+tagged, released, or deployed. Candidate
+runtime digest is `09949335...`; live is `25b0979c...`. Detailed evidence:
+`eval/clawlore-v1-fourteenth-independent-audit-remediation-run-2026-07-19.md`.
+
+### Sixteenth independent review: source fixes and Windows rerun completed, live unchanged
+
+The sixteenth report was correct that the formal candidate had not advanced,
+that release identity was still unresolved, and that live storage/backup state
+made deployment unsafe. Its executable code findings were reproduced from the
+same frozen source before repair. Five red assertions covered three root
+causes: env-style credentials and credential-bearing HTTP headers escaped the
+shared secret policy; lifecycle health accepted a same-revision mutation of a
+derived projection field; and task-completion parsing treated an unknown
+legitimate ACL subject as if it were still the unauthorized subject.
+
+The source remediation keeps one owner per rule. `secret-redaction.ts` now
+covers env credentials, Basic/Proxy authorization, and cookie headers for all
+capture, support-bundle, and Experience transcript consumers. Lifecycle
+projection schema v2 stores a CHECK-bound fingerprint of its derived fields;
+read-only inspection reports `row_projection_mismatch`, while the existing
+explicit repair authority remains the only rebuild path. ACL completion
+parsing now detects a substantive post-denial subject phrase without a finite
+noun allowlist and preserves same-subject chained denials.
+
+Linux verification passed 43/43 focused assertions, 11/11 architecture/source
+governance assertions, 14/14 lifecycle/governance assertions, and 502 total /
+500 pass / 0 fail / 2 platform skips. Strict typecheck and build passed. The
+200,000-row benchmark retained known-answer recall 1 and cross-scope leakage 0,
+with FTS p95 0.049 ms and complete lifecycle diagnostics 351.386 ms under the
+500 ms gate.
+
+The prior Windows red gate was traced to its audit fixture, not bypassed in
+production code: the NAS/system temp ancestry was writable by a broad
+principal and correctly triggered `CLAWLORE_WINDOWS_ACL_ANCESTOR_UNTRUSTED`.
+On the authorized work computer, a new protected directory under the current
+user profile reproduced the workflow's trusted TEMP/TMP boundary. Official
+portable Node 24.15.0 was SHA-256 verified; the frozen audit snapshot was
+copied locally on that computer; and a target-local patch changed nine files.
+Their SHA-256 values matched the Linux candidate exactly. `npm ci` completed,
+focused tests passed 33/33, the full Windows suite passed 493 with 0 failures
+and 8 platform skips out of 501, and Windows typecheck/build passed. The
+isolated directory contained only `repo`, `temp`, and `tools`; it was removed
+after verification and confirmed absent. The original audit evidence was not
+modified.
+
+This is still not release acceptance. `package.json` declares
+`github.com/410979729/clawlore`, while `origin` remains
+`github.com/410979729/scope-recall-openclaw`; the canonical repository is not
+reachable. The source gate therefore exits at repository identity before any
+release claim. A clean commit, exact remote branch/tag, regenerated evidence,
+and a fresh independent review remain required. Storage errors and the
+off-machine encrypted backup/restore gap separately keep live deployment and
+bulk database mutation blocked. No live extension, configuration, database,
+Gateway, service, remote, commit, tag, or release changed in this round.
+Detailed evidence:
+`eval/clawlore-v1-sixteenth-independent-audit-remediation-run-2026-07-20.md`.
+The closing state-hygiene audit still reports 95 unrelated outside-workspace
+category hits; the owned Linux and Windows test roots are absent, and those
+pre-existing state/session/plugin artifacts were not deleted in this task.
+
+### Seventeenth independent review: mechanism fixes and cross-platform rerun completed
+
+The seventeenth review correctly showed that the sixteenth-round changes only
+covered selected examples. Its executable counterexamples were promoted into
+formal tests before the implementation was accepted. Namespaced YAML/JSON
+credential assignments escaped ordinary support-bundle fields; a wrong
+lifecycle plus a matching row fingerprint remained self-consistent but
+contradicted truth; and ACL failures joined with previously unlisted phrases
+could still look successful.
+
+The secret detector/redactor remains one shared policy and now handles quoted
+or unquoted namespace keys with `=` or `:` across capture, support bundles, and
+task-experience transcripts. Lifecycle health no longer trusts a projection
+digest as proof of truth binding. Schema v4 derives the expected lifecycle and
+validity bounds from `memory_truth` and compares them with the projection. The
+canonical normalization rules moved into the 150-line
+`lifecycle-metadata.ts`; `smart-metadata.ts` fell from the temporary 814-line
+hotspot to 694 lines. ACL completion now classifies negative clauses and their
+subjects fail-closed instead of enumerating connectors.
+
+Final Linux verification passed 37/37 audit-focused assertions, 12/12
+structure/governance assertions, and 506 total / 504 pass / 0 fail / 2
+platform skips. Typecheck, build, production dependency audit, `git diff
+--check`, and 229/229 source-dist mapping passed. The final 200,000-row gate
+retained recall 1 and zero leakage, with FTS p95 0.061 ms and lifecycle stats
+437.267 ms.
+
+The authorized Windows work-computer rerun used official checksum-verified
+portable Node 24.14.0 and a protected process-local TEMP/TMP root. The
+candidate archive digest matched across machines. Audit-focused tests passed
+30/30; the full suite passed 497 with 0 failures and 8 platform skips out of
+505; typecheck, build, and 229/229 source-dist mapping passed. Two discarded
+environment runs were diagnosed as default TEMP ancestry and an accidental
+trailing-space TEMP value; no production path guard was weakened. The owned
+Windows root, including that malformed child, and the local transfer root were
+removed and verified absent.
+
+Release remains NO-GO for provenance rather than these three code findings.
+The worktree is still dirty on baseline `33d164c`, package metadata names
+`410979729/clawlore`, and `origin` still names the legacy repository. No live
+plugin, config, database, Gateway, service, remote, commit, tag, or release was
+changed. Joy explicitly deferred the SATA/SSD item until hardware upgrade, so
+this round neither investigated nor acted on it. Detailed evidence:
+`eval/clawlore-v1-seventeenth-independent-audit-remediation-run-2026-07-20.md`.
+
+### Eighteenth independent review: parser-backed secrets and structured outcome gate completed
+
+The eighteenth review confirmed that lifecycle truth binding remained closed,
+but extended the other two input families beyond the seventeenth-round matrix.
+Common camelCase credential keys and YAML block scalars still escaped the text
+policy, and natural-language authorized-user failures could still pass the
+complete Task Experience gate.
+
+The public secret detector/redactor remains the single policy owner. A focused
+`secret-structured-text.ts` domain module now parses valid YAML/JSON with exact
+value ranges and normalizes snake, kebab, dotted, namespaced, camelCase, and
+quoted key forms before policy evaluation. Embedded malformed fragments use a
+bounded fallback with the same key classifier. Redaction removes the complete
+quoted, multi-word, or block-scalar value while keeping serializer shape
+legible. Capture safety, support bundles, and Experience transcripts all use
+the same path. `passwordPolicy` and `tokenCount` remain explicit negative
+cases.
+
+Task outcome moved into the focused `task-outcome-evidence.ts` domain module.
+The production hook passes the real `agent_end` event, and the capture gate now
+requires its explicit success bit, a terminal successful structured tool
+result, and a final completion-plus-verification claim. Free-form stdout is
+not success evidence. Clause/subject classification remains defense in depth,
+so employee/customer/ordinary-staff capability failures reject the full gate
+even when the rest of the transcript looks successful. `task-experience.ts`
+fell from 735 to 679 lines.
+
+Linux verification passed 36/36 audit-focused assertions, 8/8
+structure/security assertions, and 511 total / 509 pass / 0 fail / 2 platform
+skips. Typecheck, build, `git diff --check`, production audit, 233/233
+source-dist mapping, pack dry-run, and the 200,000-row benchmark passed. The
+final benchmark retained recall 1 and zero leakage, with FTS p95 0.050 ms and
+lifecycle stats 439.119 ms.
+
+The authorized Windows work-computer run used checksum-verified portable Node
+24.14.0, protected process-local TEMP/TMP/cache paths, and the same source
+inputs (cross-machine manifest digest matched). The full suite passed 502 with
+0 failures and 8 platform skips out of 510; typecheck and build passed. The
+owned Windows audit root and local comparison/transfer roots were removed, and
+the Windows root was independently verified absent.
+
+Release remains NO-GO. The worktree is dirty on baseline `33d164c`, package
+metadata names `410979729/clawlore`, and `origin` still names the legacy
+repository; the source release gate stops at that mismatch. Live recall scope
+alignment, Experience effectiveness, V2/data convergence, and the
+low-confidence secret-pattern review were not changed or authorized. No live
+plugin, config, DB/vector, Gateway, service, remote, commit, tag, or release was
+mutated. Detailed evidence:
+`eval/clawlore-v1-eighteenth-independent-audit-remediation-run-2026-07-20.md`.
+
+### Nineteenth self-audit: complete pre-push candidate gate passed, provenance still external
+
+A fresh call-site and boundary audit did not stop at the two eighteenth-round
+counterexamples. It traced every durable input, merge, metadata, provider
+output, export, CLI/support response, reflection/digest path, legacy path, and
+V2 Truth/Experience write. Explicit focused modules now own final admission,
+metadata, egress, merge, provider-output, and V2 persistence policy. Structured
+task failures are terminal unless the transcript proves repair and final
+verification. Runtime recall/capture state is bounded and exactly owned;
+private files, locks, SQLite sidecars, migration markers, shadow traces,
+reflection state, and self-improvement state share owner-only atomic and
+symlink-safe boundaries.
+
+Architecture governance was tightened at the same time. Independent
+responsibilities were extracted rather than appended to hotspots;
+reverse-dependency debt is 29; `src/store.ts` remains at 2,008 lines under its
+2,010-line non-growth ceiling; and the source/dist release mapping is 244/244.
+The candidate version is 1.2.1.
+
+The final compatibility audit found that Node 24.14 was still accepted even
+though the installed OpenClaw 2026.7.1-2 host requires Node 24.15 or newer on
+the Node 24 line. Package/lock engines, CI, the reusable workflow, release
+contract, tests, and changelog now require `>=24.15.0 <25`.
+
+Linux Node 24.15 passed 570 total / 568 pass / 0 fail / 2 skips, typecheck,
+build, 244/244 mapping, 0 production vulnerabilities, a 260-file pack, recall
+1, and zero cross-scope leakage. The exact candidate then passed the complete
+pre-push gate from an isolated clean Git checkout whose non-network origin
+matched the canonical package identity, including tarball install, packed
+runtime/LanceDB/real OpenClaw/legacy migration smokes, SBOM, and benchmarks.
+
+The authorized Windows work-computer run used checksum-verified official
+portable Node 24.15 in an owner-only isolated root and did not alter global
+Node or the work environment. The complete pre-push gate passed: 569 total /
+552 pass / 0 fail / 17 platform skips, typecheck/build, all packed smokes, 0
+production vulnerabilities, 260 package files, recall 1, and zero scope
+leakage. Release-input, runtime, and lock identities matched Linux exactly.
+There were no residual audit-root Node processes. The Windows root and local
+transfer root were removed and independently verified absent.
+
+The source bytes are ready to form a clean commit, but the real checkout is not
+yet publishable. Package metadata names `410979729/clawlore`; actual `origin`
+still names `410979729/scope-recall-openclaw`; the canonical repository is not
+reachable; and the candidate is not committed. The real gate rejects this as
+designed. Joy must choose repository creation versus rename, after which the
+exact sequence is: update origin, form one clean source+tracked-dist commit,
+run real pre-push, push an exact branch, run strict post-push evidence, and
+obtain a fresh independent review before tag/release.
+
+Live recall/Experience effectiveness, V2/data governance, and the
+low-confidence live secret candidate remain separate operational work. No
+live plugin, config, database/vector, Gateway, service, remote, commit, tag,
+release, work environment, or deferred SATA/SSD state was changed. Detailed
+The final workspace hygiene audit reports 105 overlapping out-of-workspace
+state/session/third-party residues; no task-owned Linux or Windows test root
+remains. Detailed evidence:
+`eval/clawlore-v1-nineteenth-self-audit-remediation-run-2026-07-20.md`.
 
 ## Authenticated live identity rollout preflight
 
@@ -558,19 +1023,18 @@ cleanup, and independent review remain open. See
 
 ## Current live boundary
 
-The 2026-07-14 H5 artifact remains the deployed runtime under the legacy plugin
-identity. H5 completed recovery, exact deployment, schema-v3 acceptance,
-post-restart probes, bounded soak, and a fresh `no_cutover` decision. Its exact
-deployed runtime digest was
-`c4e43382dbbf09379e51ba1334a8574fcf1369a496f7bb1246cdeb0c455d2251`.
+Baseline commit `33d164c4047da630341d26198461c4d3da2ba74e` is the deployed
+ClawLore 1.2.0 runtime. It became live at 14:40:35 CST on 2026-07-19. The
+eleventh-audit source fixes described above have not been deployed.
 
-Live behavior remains V1 fallback plus ClawLore read-only shadow. Telegram is
+Live behavior is V1 fallback plus ClawLore read-only shadow. Telegram is
 sender-allowlisted, every configured group plus the wildcard group denies the
 declared memory/governance tool surface, the service uses `UMask=0077`, and
 SQLite/WAL/SHM are `0600`. Runtime model credentials are SecretRefs. V2 writes,
 lifecycle promotion, ContextEngine, prompt mutation, and final recall remain
-disabled. The 1.2 source candidate has intentionally not changed live extension
-files, database truth, memory slot, or V2 rollout controls.
+disabled. Baseline doctor is storage-healthy, but it predates the new runtime
+receipt and principal-accessibility doctor contract; `ok=true` must not be read
+as clearance for the remediated release.
 
 The H5 report is
 `eval/clawlore-v1-h5-production-deployment-run-2026-07-14.md`.
@@ -585,14 +1049,16 @@ not an implied approval to switch later without fresh evidence.
 
 ## Next controlled boundary
 
-1. Extract auto-capture policy and conversation-state handling from `index.ts`
-   under characterization tests; do not combine it with Markdown retrieval,
-   runtime construction, storage convergence, or a live rollout.
-2. At the next release-candidate boundary, run the exact candidate through the
-   Windows Node 24 source gate, then remove and verify absence of only the
-   clearly owned audit roots.
-3. Obtain independent review before repository publication. If accepted,
-   create or rename the GitHub repository to `clawlore`, verify the destination,
-   then update `origin` and push the audited commit.
-4. Treat any live identity migration as a separate backup-backed rollout with
-   an atomic config/extension switch, post-restart gates, and rollback evidence.
+1. Create or rename the GitHub repository to `clawlore`, verify it is reachable,
+   then update `origin`; do not weaken the repository-identity gate.
+2. Commit source and tracked `dist` as one candidate, regenerate canonical
+   release evidence, and run the exact Windows Node 24 plus independent-review
+   gates before version/tag publication.
+3. Make an explicit operator decision for the 1,060 legacy `agent:main` rows:
+   exact current-principal allowlist for bounded compatibility, or a private
+   backup/receipt-bound scope migration. Do not disable principal isolation.
+4. Treat deployment of the remediated candidate as a new backup-backed rollout:
+   set deprecated `autoBackup` false, generate readiness at the final pointer,
+   run probes under `User=a`/`Group=a`, atomically swap, restart once, and require
+   principal-aware doctor, runtime receipt, health/auth/search, and real Telegram
+   recall before acceptance.

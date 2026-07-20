@@ -1,9 +1,9 @@
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { buildReflectionMappedMetadata } from "./reflection-mapped-metadata.js";
 import { extractInjectableReflectionMappedMemoryItems, extractReflectionLearningGovernanceCandidates, } from "./reflection-slices.js";
-import { evaluateCaptureSafety } from "./capture-safety.js";
-import { findPreviousReflectionSessionFile, readSessionConversationWithResetFallback, sanitizeReflectionFileToken, } from "./reflection-transcript.js";
+import { evaluateCaptureSafety, sanitizeCaptureText } from "./capture-safety.js";
+import { findPreviousReflectionSessionFile, readSessionConversationWithResetFallback, redactReflectionText, sanitizeReflectionFileToken, } from "./reflection-transcript.js";
 function isAgentDeclaredInConfig(cfg, agentId) {
     const target = agentId.trim();
     if (!target)
@@ -20,13 +20,19 @@ function isAgentDeclaredInConfig(cfg, agentId) {
         return false;
     }
 }
-async function ensureDailyLogFile(dailyPath, dateStr) {
+async function ensureDailyLogFile(dailyPath, dateStr, enforcePrivateFile) {
     try {
-        await readFile(dailyPath, "utf-8");
+        enforcePrivateFile(dailyPath);
+        return;
     }
-    catch {
-        await writeFile(dailyPath, `# ${dateStr}\n\n`, "utf-8");
+    catch (error) {
+        if (error?.code !== "ENOENT")
+            throw error;
     }
+    await writeFile(dailyPath, `# ${dateStr}\n\n`, {
+        encoding: "utf-8", flag: "wx", mode: 0o600,
+    });
+    enforcePrivateFile(dailyPath);
 }
 /**
  * Builds the command:new/reset reflection use case around explicit host, store,
@@ -144,13 +150,13 @@ export function createReflectionCommandOrchestrator(options, dependencies) {
             if (generated.runner === "cli") {
                 dependencies.logger.warn(`memory-reflection: embedded runner unavailable, used openclaw CLI fallback for ` +
                     `session=${dependencies.diagnosticIdentifier(currentSessionId)}` +
-                    (generated.error ? ` (${generated.error})` : ""));
+                    (generated.error ? ` (${dependencies.diagnosticErrorSummary(generated.error)})` : ""));
             }
             else if (generated.usedFallback) {
                 dependencies.logger.warn(`memory-reflection: fallback used for session=${dependencies.diagnosticIdentifier(currentSessionId)}` +
-                    (generated.error ? ` (${generated.error})` : ""));
+                    (generated.error ? ` (${dependencies.diagnosticErrorSummary(generated.error)})` : ""));
             }
-            const reflectionText = generated.text;
+            const reflectionText = redactReflectionText(generated.text);
             const header = [
                 `# Reflection: ${dateStr} ${timeHms} UTC`,
                 "",
@@ -164,7 +170,7 @@ export function createReflectionCommandOrchestrator(options, dependencies) {
             ].join("\n");
             const reflectionBody = `${header}${reflectionText.trim()}\n`;
             const outDir = join(workspaceDir, "memory", "reflections", dateStr);
-            await mkdir(outDir, { recursive: true });
+            await mkdir(outDir, { recursive: true, mode: 0o700 });
             const agentToken = sanitizeReflectionFileToken(sourceAgentId, "agent");
             const sessionToken = sanitizeReflectionFileToken(currentSessionId || "unknown", "session");
             let relPath = "";
@@ -176,7 +182,9 @@ export function createReflectionCommandOrchestrator(options, dependencies) {
                     await writeFile(join(workspaceDir, candidateRelPath), reflectionBody, {
                         encoding: "utf-8",
                         flag: "wx",
+                        mode: 0o600,
                     });
+                    dependencies.enforcePrivateFile(join(workspaceDir, candidateRelPath));
                     relPath = candidateRelPath;
                     break;
                 }
@@ -219,7 +227,10 @@ export function createReflectionCommandOrchestrator(options, dependencies) {
                         `pattern=${safety.pattern ?? "unknown"}`);
                     continue;
                 }
-                const vector = await dependencies.embedPassage(mapped.text);
+                const mappedText = sanitizeCaptureText(mapped.text);
+                if (!mappedText)
+                    continue;
+                const vector = await dependencies.embedPassage(mappedText);
                 let existing = [];
                 try {
                     existing = await dependencies.vectorSearch(vector, 1, 0.1, [targetScope]);
@@ -231,7 +242,7 @@ export function createReflectionCommandOrchestrator(options, dependencies) {
                 if (existing.length > 0 && existing[0].score > 0.95)
                     continue;
                 const storedEntry = await dependencies.storeMemory({
-                    text: mapped.text,
+                    text: mappedText,
                     vector,
                     importance: mapped.category === "decision" ? 0.85 : 0.8,
                     category: mapped.category,
@@ -282,8 +293,8 @@ export function createReflectionCommandOrchestrator(options, dependencies) {
                 dependencies.clearDerivedSession(sessionKey);
             }
             const dailyPath = join(workspaceDir, "memory", `${dateStr}.md`);
-            await ensureDailyLogFile(dailyPath, dateStr);
-            await appendFile(dailyPath, `- [${timeHms} UTC] Reflection generated: \`${relPath}\`\n`, "utf-8");
+            await ensureDailyLogFile(dailyPath, dateStr, dependencies.enforcePrivateFile);
+            await dependencies.appendPrivateFile(dailyPath, `- [${timeHms} UTC] Reflection generated: \`${relPath}\`\n`);
             dependencies.logger.info(`memory-reflection: wrote file=${dependencies.diagnosticIdentifier(relPath)} ` +
                 `for session=${dependencies.diagnosticIdentifier(currentSessionId)}`);
         }

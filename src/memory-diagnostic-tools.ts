@@ -16,6 +16,7 @@ import {
   clampInt,
   MEMORY_CATEGORIES,
   memoryMetadataMatches,
+  normalizeInlineText,
   renderMemoryEntry,
   requireRuntimeAgentId,
   requireRuntimeMemoryAccess,
@@ -26,6 +27,7 @@ import {
   sanitizeMemoryForSerialization,
   serializeMemoryEntry,
   stringEnum,
+  truncateText,
   type ToolContext
 } from "./tool-runtime-policy.js";
 
@@ -223,7 +225,7 @@ export function registerMemoryDebugTool(
               traceLines.push(``, `No results survived the pipeline.`);
               return {
                 content: [{ type: "text", text: traceLines.join("\n") }],
-                details: { count: 0, query, trace },
+                details: { count: 0, query: normalizeInlineText(query), trace },
               };
             }
 
@@ -233,7 +235,7 @@ export function registerMemoryDebugTool(
               if (r.sources.bm25) sources.push("BM25");
               if (r.sources.reranked) sources.push("reranked");
               const categoryTag = getDisplayCategoryTag(r.entry);
-              return `${i + 1}. [${r.entry.id}] [${categoryTag}] ${r.entry.text.slice(0, 120)}${r.entry.text.length > 120 ? "..." : ""} (${(r.score * 100).toFixed(1)}%${sources.length > 0 ? `, ${sources.join("+")}` : ""})`;
+              return `${i + 1}. [${r.entry.id}] [${categoryTag}] ${truncateText(normalizeInlineText(r.entry.text), 120)} (${(r.score * 100).toFixed(1)}%${sources.length > 0 ? `, ${sources.join("+")}` : ""})`;
             });
 
             const text = [...traceLines, ``, `Results (${results.length}):`, ...resultLines].join("\n");
@@ -242,7 +244,7 @@ export function registerMemoryDebugTool(
               details: {
                 count: results.length,
                 memories: sanitizeMemoryForSerialization(results),
-                query,
+                query: normalizeInlineText(query),
                 trace,
               },
             };
@@ -352,7 +354,7 @@ export function registerMemoryListTool(
                   .toISOString()
                   .split("T")[0];
                 const categoryTag = getDisplayCategoryTag(entry);
-                return `${safeOffset + i + 1}. [${entry.id}] [${categoryTag}] ${entry.text.slice(0, 100)}${entry.text.length > 100 ? "..." : ""} (${date})`;
+                return `${safeOffset + i + 1}. [${entry.id}] [${categoryTag}] ${truncateText(normalizeInlineText(entry.text), 100)} (${date})`;
               })
               .join("\n");
 
@@ -367,7 +369,7 @@ export function registerMemoryListTool(
                 count: entries.length,
                 memories: entries.map((e) => ({
                   id: e.id,
-                  text: e.text,
+                  text: normalizeInlineText(e.text),
                   category: getDisplayCategoryTag(e),
                   rawCategory: e.category,
                   scope: e.scope,
@@ -500,7 +502,7 @@ export function registerMemoryContextTool(
                 details: {
                   action: "context",
                   count: 0,
-                  query,
+                  query: query ? normalizeInlineText(query) : query,
                   filters: { scope, category, source, state, layer, limit: safeLimit, offset: safeOffset },
                   scopes: scopeFilter,
                 },
@@ -516,7 +518,7 @@ export function registerMemoryContextTool(
               details: {
                 action: "context",
                 count: entries.length,
-                query,
+                query: query ? normalizeInlineText(query) : query,
                 filters: { scope, category, source, state, layer, limit: safeLimit, offset: safeOffset },
                 scopes: scopeFilter,
                 memories: entries.map((entry) => serializeMemoryEntry(entry, includeFullText)),

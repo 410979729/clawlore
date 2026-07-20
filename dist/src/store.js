@@ -1,15 +1,15 @@
-/**
- * LanceDB Storage Layer with Multi-Scope Support
- */
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
-import { existsSync, accessSync, constants, mkdirSync, realpathSync, lstatSync, } from "node:fs";
+import { existsSync, accessSync, constants, realpathSync, lstatSync, } from "node:fs";
 import { dirname, join } from "node:path";
-import { buildSmartMetadata, isMemoryActiveAt, parseSmartMetadata, stringifySmartMetadata } from "./smart-metadata.js";
+import { buildSmartMetadata, effectiveMemoryLifecycle, isMemoryActiveAt, parseSmartMetadata, stringifySmartMetadata } from "./smart-metadata.js";
 import { SqlTruthStore, } from "./sql-truth-store.js";
 import { SqliteBruteForceVectorStore } from "./sqlite-vector-store.js";
 import { diagnosticErrorSummary, diagnosticIdentifier } from "./diagnostic-redaction.js";
 import { ensurePrivateDirectory } from "./file-privacy.js";
+import { ensurePrivateLockFile } from "./private-lock-file.js";
+import { assertMemoryEntrySafeForPersistence } from "./memory-entry-write-policy.js";
+import { isMemoryEntrySafeForEgress } from "./memory-egress-policy.js";
 import { MemoryStoreFacade } from "./memory-store-facade.js";
 // ============================================================================
 // LanceDB Dynamic Import
@@ -147,17 +147,7 @@ class MemoryStoreRuntime {
     async runWithFileLock(fn) {
         const lockfile = await loadLockfile();
         const lockPath = join(this.config.dbPath, ".memory-write.lock");
-        if (!existsSync(lockPath)) {
-            try {
-                mkdirSync(dirname(lockPath), { recursive: true });
-            }
-            catch { }
-            try {
-                const { writeFileSync } = await import("node:fs");
-                writeFileSync(lockPath, "", { flag: "wx" });
-            }
-            catch { }
-        }
+        await ensurePrivateLockFile(lockPath);
         const release = await lockfile.lock(lockPath, {
             retries: { retries: 5, factor: 2, minTimeout: 100, maxTimeout: 2000 },
             stale: 10000,
@@ -591,7 +581,7 @@ class MemoryStoreRuntime {
             return batch.flatMap((entry, index) => {
                 const vector = vectors[index];
                 if (!Array.isArray(vector) || vector.length !== this.config.vectorDim) {
-                    errors.push(`${entry.id}: embedding dimension mismatch (expected ${this.config.vectorDim}, got ${Array.isArray(vector) ? vector.length : "missing"})`);
+                    errors.push(`${diagnosticIdentifier(entry.id)}: embedding dimension mismatch (expected ${this.config.vectorDim}, got ${Array.isArray(vector) ? vector.length : "missing"})`);
                     return [];
                 }
                 return [{ ...entry, vector }];
@@ -604,7 +594,7 @@ class MemoryStoreRuntime {
                 try {
                     const vector = await embedder.embedPassage(entry.text);
                     if (!Array.isArray(vector) || vector.length !== this.config.vectorDim) {
-                        errors.push(`${entry.id}: embedding dimension mismatch (expected ${this.config.vectorDim}, got ${Array.isArray(vector) ? vector.length : "missing"})`);
+                        errors.push(`${diagnosticIdentifier(entry.id)}: embedding dimension mismatch (expected ${this.config.vectorDim}, got ${Array.isArray(vector) ? vector.length : "missing"})`);
                         continue;
                     }
                     rebuilt.push({ ...entry, vector });
@@ -641,6 +631,7 @@ class MemoryStoreRuntime {
             timestamp: Date.now(),
             metadata: entry.metadata || "{}",
         };
+        assertMemoryEntrySafeForPersistence(fullEntry);
         return this.runWithFileLock(async () => {
             this.writeSqlTruthUpsert(fullEntry, "store");
             await this.addVectorCompanion(fullEntry, "store");
@@ -670,6 +661,7 @@ class MemoryStoreRuntime {
                 : Date.now(),
             metadata: entry.metadata || "{}",
         };
+        assertMemoryEntrySafeForPersistence(full);
         return this.runWithFileLock(async () => {
             this.writeSqlTruthUpsert(full, "import");
             await this.addVectorCompanion(full, "import");
@@ -832,7 +824,6 @@ class MemoryStoreRuntime {
             return this.lexicalFallbackSearch(query, safeLimit, scopeFilter, options);
         }
         try {
-            // Use FTS query type explicitly
             let searchQuery = this.table.search(query, "fts").limit(fetchLimit);
             // Apply scope filter if provided
             if (scopeFilter && scopeFilter.length > 0) {
@@ -1074,6 +1065,7 @@ class MemoryStoreRuntime {
                 totalCount: 0,
                 scopeCounts: {},
                 categoryCounts: {},
+                lifecycleScopeCounts: {},
             };
         }
         if (this.sqlTruthStore) {
@@ -1086,19 +1078,26 @@ class MemoryStoreRuntime {
                 .join(" OR ");
             query = query.where(`((${scopeConditions}) OR scope IS NULL)`);
         }
-        const results = await query.select(["scope", "category"]).toArray();
+        const results = await query.select(["scope", "category", "text", "timestamp", "metadata"]).toArray();
         const scopeCounts = {};
         const categoryCounts = {};
+        const lifecycleScopeCounts = {};
         for (const row of results) {
             const scope = row.scope ?? "global";
             const category = row.category;
             scopeCounts[scope] = (scopeCounts[scope] || 0) + 1;
             categoryCounts[category] = (categoryCounts[category] || 0) + 1;
+            const counts = lifecycleScopeCounts[scope] ??= { recallable: 0, archived: 0, inactive: 0 };
+            const lifecycle = effectiveMemoryLifecycle(parseSmartMetadata(row.metadata, {
+                text: row.text, category: category, timestamp: Number(row.timestamp),
+            }));
+            counts[lifecycle] += 1;
         }
         return {
             totalCount: results.length,
             scopeCounts,
             categoryCounts,
+            lifecycleScopeCounts,
         };
     }
     async update(id, updates, scopeFilter) {
@@ -1120,6 +1119,7 @@ class MemoryStoreRuntime {
                     importance: updates.importance ?? original.importance,
                     metadata: updates.metadata ?? original.metadata,
                 };
+                assertMemoryEntrySafeForPersistence(updated);
                 this.writeSqlTruthUpsert(updated, "update");
                 if (Array.isArray(updated.vector) && updated.vector.length === this.config.vectorDim) {
                     await this.replaceVectorCompanion(updated, "update-delete-old-vector", "update-add-vector");
@@ -1148,7 +1148,6 @@ class MemoryStoreRuntime {
                     .toArray();
             }
             else {
-                // Prefix match
                 const all = await this.table.query()
                     .select([
                     "id",
@@ -1171,7 +1170,6 @@ class MemoryStoreRuntime {
                 return null;
             const row = rows[0];
             const rowScope = row.scope ?? "global";
-            // Check scope permissions
             if (scopeFilter &&
                 scopeFilter.length > 0 &&
                 !scopeFilter.includes(rowScope)) {
@@ -1187,7 +1185,6 @@ class MemoryStoreRuntime {
                 timestamp: Number(row.timestamp),
                 metadata: row.metadata || "{}",
             };
-            // Build updated entry, preserving original timestamp
             const updated = {
                 ...original,
                 text: updates.text ?? original.text,
@@ -1198,6 +1195,7 @@ class MemoryStoreRuntime {
                 timestamp: original.timestamp, // preserve original
                 metadata: updates.metadata ?? original.metadata,
             };
+            assertMemoryEntrySafeForPersistence(updated);
             // LanceDB doesn't support in-place update; delete + re-add.
             // Serialize updates per store instance to avoid stale rollback races.
             // If the add fails after delete, attempt best-effort recovery without
@@ -1262,6 +1260,8 @@ class MemoryStoreRuntime {
                 importance: replacement.importance,
                 metadata: metadata.newMetadata,
             };
+            assertMemoryEntrySafeForPersistence(invalidatedOld);
+            assertMemoryEntrySafeForPersistence(newEntry);
             this.sqlTruthStore.supersedeAtomically(invalidatedOld, newEntry, metadata.factKey);
             if (Array.isArray(invalidatedOld.vector) && invalidatedOld.vector.length === this.config.vectorDim) {
                 await this.replaceVectorCompanion(invalidatedOld, "supersede-delete-old-vector", "supersede-add-invalidated-old-vector");
@@ -1319,10 +1319,8 @@ class MemoryStoreRuntime {
                 }
                 return deletedIds.length;
             }
-            // Count first
             const countResults = await this.table.query().where(whereClause).toArray();
             const deleteCount = countResults.length;
-            // Then delete
             if (deleteCount > 0) {
                 await this.table.delete(whereClause);
                 for (const row of countResults) {
@@ -1499,6 +1497,7 @@ class MemoryStoreRuntime {
         const entries = fullRebuild
             ? truthEntries
             : truthEntries.filter((entry) => !vectorIdSet.has(entry.id) || repairUpsertIds.has(entry.id));
+        const unsafeEntries = entries.filter((entry) => !isMemoryEntrySafeForEgress(entry));
         const staleVectorIds = limit === undefined
             ? [...new Set([
                     ...vectorIdsBefore.filter((id) => !truthIds.has(id)),
@@ -1518,7 +1517,9 @@ class MemoryStoreRuntime {
         };
         if (dryRun) {
             result.processed = entries.length;
-            result.rebuilt = entries.length;
+            result.rebuilt = entries.length - unsafeEntries.length;
+            result.skipped = unsafeEntries.length;
+            result.errors.push(...unsafeEntries.map((entry) => `${diagnosticIdentifier(entry.id)}: rejected by egress safety policy`));
             return result;
         }
         return this.runWithFileLock(async () => {
@@ -1527,12 +1528,15 @@ class MemoryStoreRuntime {
                     result.staleVectorRowsDeleted++;
                 }
                 else {
-                    result.errors.push(`${id}: vector companion delete failed; durable repair debt retained`);
+                    result.errors.push(`${diagnosticIdentifier(id)}: vector companion delete failed; durable repair debt retained`);
                 }
             }
             for (let i = 0; i < entries.length; i += batchSize) {
                 const batch = entries.slice(i, i + batchSize);
-                const rebuiltEntries = await this.embedRebuildBatch(embedder, batch, result.errors);
+                const safeBatch = batch.filter((entry) => isMemoryEntrySafeForEgress(entry));
+                result.errors.push(...batch.filter((entry) => !isMemoryEntrySafeForEgress(entry))
+                    .map((entry) => `${diagnosticIdentifier(entry.id)}: rejected by egress safety policy`));
+                const rebuiltEntries = await this.embedRebuildBatch(embedder, safeBatch, result.errors);
                 result.processed += batch.length;
                 result.skipped += batch.length - rebuiltEntries.length;
                 for (const entry of rebuiltEntries) {
@@ -1540,7 +1544,7 @@ class MemoryStoreRuntime {
                         result.rebuilt++;
                     }
                     else {
-                        result.errors.push(`${entry.id}: vector companion upsert failed; durable repair debt retained`);
+                        result.errors.push(`${diagnosticIdentifier(entry.id)}: vector companion upsert failed; durable repair debt retained`);
                     }
                 }
             }
@@ -1560,7 +1564,6 @@ class MemoryStoreRuntime {
             return { success: true };
         }
         try {
-            // Drop existing FTS index if any
             const indices = await this.table.listIndices();
             for (const idx of indices) {
                 if (idx.indexType === "FTS" || idx.columns?.includes("text")) {

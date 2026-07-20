@@ -53,7 +53,7 @@ test("tool facades preserve the pre-split runtime export contract", () => {
 
 test("split CLI policy resolves package identity from the source layout", () => {
   const policy = jiti("../src/cli/cli-runtime-policy.ts");
-  assert.equal(policy.getPluginVersion(), "1.2.0");
+  assert.equal(policy.getPluginVersion(), "1.2.1");
 });
 
 test("current runtime code uses canonical modules and V2 paths only for versioned contracts", () => {

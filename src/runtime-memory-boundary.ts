@@ -61,7 +61,7 @@ function text(value: unknown): string | undefined {
  */
 export function isCanonicalPrincipalKey(value: unknown): value is string {
   const principal = text(value);
-  if (!principal || principal !== value || principal.length > 512 || /[\s\u0000-\u001f\u007f]/.test(principal)) {
+  if (!principal || principal !== value || principal.length > 512 || principal.includes("*") || /[\s\u0000-\u001f\u007f]/.test(principal)) {
     return false;
   }
   const firstSeparator = principal.indexOf(":");
@@ -89,6 +89,19 @@ function pick(contexts: unknown[], keys: string[]): string | undefined {
 
 function shortHash(value: string, length = 32): string {
   return createHash("sha256").update(value).digest("hex").slice(0, length);
+}
+
+export function runtimePrincipalIdentity(principalKey: string): {
+  principalHash: string;
+  scope: string;
+} {
+  if (!isCanonicalPrincipalKey(principalKey)) {
+    throw new Error("principalKey must be an exact canonical platform:account:principal key");
+  }
+  return {
+    principalHash: shortHash(principalKey, 16),
+    scope: `user:${shortHash(principalKey)}`,
+  };
 }
 
 interface SessionBoundary {
@@ -165,14 +178,13 @@ export function resolveRuntimeMemoryBoundary(input: {
     const principalId = senderId ?? conversationId ?? session.peerId;
     if (!principalId || !platform) return { kind: "unknown", platform, accountId };
     const principalKey = `${platform}:${accountId}:${principalId}`;
-    const principalHash = shortHash(principalKey, 16);
+    const principalIdentity = runtimePrincipalIdentity(principalKey);
     return {
       kind: "private",
       platform,
       accountId,
       principalKey,
-      principalHash,
-      scope: `user:${shortHash(principalKey)}`,
+      ...principalIdentity,
     };
   }
 

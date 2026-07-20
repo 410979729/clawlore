@@ -105,10 +105,36 @@ test("auto-recall trace ledger redacts query text and raw memory ids", () => {
   assert.equal(report.total, 1);
   assert.equal(report.items[0].injected_count, 1);
   assert.equal(report.items[0].crossed_scope_count, 1);
-  assert.match(report.items[0].query_preview, /redacted/);
+  assert.match(report.items[0].query_preview, /^sha256:[a-f0-9]{16};length=\d+$/);
   assert.doesNotMatch(serialized, /sk-test-not-real/);
+  assert.doesNotMatch(serialized, /please inspect/);
   assert.doesNotMatch(serialized, /memory-secret-raw-id/);
   assert.match(report.items[0].memory_refs[0].memory_ref, /^mem_[a-f0-9]{16}$/);
+});
+
+test("auto-recall optional previews and metadata reuse canonical secret redaction", () => {
+  const db = new DatabaseSync(":memory:");
+  const aliasSecret = "SyntheticLedgerAliasSecret123";
+  const digestSecret = "SyntheticLedgerDigestSecret123";
+  recordAutoRecallTrace(db, {
+    scope_id: "agent:main",
+    query_source: `Authorization: Digest response=\"${digestSecret}\"`,
+    query: `shared: &credential ${aliasSecret}\npassword: *credential`,
+    include_query_preview: true,
+    decision: "skipped",
+    reason: "policy review",
+    metadata: {
+      databasePassword: "Synthetic Metadata Secret 123",
+      nested: { diagnostic: `Authorization: Digest response=\"${digestSecret}\"` },
+    },
+  });
+
+  const report = listAutoRecallTraces(db, { scope_id: "agent:main" });
+  const serialized = JSON.stringify(report);
+  assert.doesNotMatch(serialized, new RegExp(aliasSecret));
+  assert.doesNotMatch(serialized, new RegExp(digestSecret));
+  assert.doesNotMatch(serialized, /Synthetic Metadata Secret 123/);
+  assert.match(serialized, /REDACTED|redacted-secret/);
 });
 
 test("promotion batch dry-run is zero-write and apply records batch items", () => {
@@ -124,6 +150,11 @@ test("promotion batch dry-run is zero-write and apply records batch items", () =
     tool_names: ["node:test"],
     evidence: ["node --test tests/experience-roadmap.test.mjs passed"],
     verification: ["typecheck passed"],
+    metadata: {
+      promotion_eligible: true,
+      reviewer_passed: true,
+      promotion_review: { decision: "approved", source: "roadmap-test-reviewer" },
+    },
   });
 
   const preview = runPromotionBatch(db, { scope_id: "agent:main", dry_run: true });
@@ -159,6 +190,11 @@ test("new promotion records use ClawLore task classes while legacy classes remai
     tool_names: ["node:test"],
     evidence: ["Focused ClawLore runtime tests passed."],
     verification: ["node --test passed"],
+    metadata: {
+      promotion_eligible: true,
+      reviewer_passed: true,
+      promotion_review: { decision: "approved", source: "roadmap-test-reviewer" },
+    },
   });
 
   const result = promoteExperiences(db, { scope_id: "agent:main", dry_run: false });
@@ -168,6 +204,111 @@ test("new promotion records use ClawLore task classes while legacy classes remai
   ).get();
   assert.equal(playbook.task_class, "clawlore_quality_check");
   assert.equal(playbook.title, "ClawLore 质量检查经验手册");
+});
+
+test("automatic promotion requires explicit positive reviewer provenance", () => {
+  const db = new DatabaseSync(":memory:");
+  ensureExperienceSchema(db);
+  const rejectedReasons = [
+    "review_declined",
+    "review_invalid_or_low_confidence",
+    "review_parse_failure",
+    "capture_safety_secret_like",
+  ];
+  for (const [index, reason] of rejectedReasons.entries()) {
+    createTaskEpisode(db, {
+      scope_id: "agent:main",
+      session_id: `session-rejected-${index}`,
+      task_class: "clawlore_quality_check",
+      task_goal: `Rejected experience ${index}`,
+      status: "completed",
+      outcome: "success",
+      tool_names: ["node:test"],
+      evidence: ["focused test passed"],
+      verification: ["verification passed"],
+      metadata: {
+        auto_created: true,
+        capture_action: "skipped",
+        capture_reason: reason,
+        reviewer_passed: false,
+        promotion_eligible: false,
+        promotion_review: { decision: "rejected", source: "task-experience-reviewer", reason },
+      },
+    });
+  }
+  createTaskEpisode(db, {
+    scope_id: "agent:main",
+    session_id: "session-approved",
+    task_class: "clawlore_quality_check",
+    task_goal: "Approved ClawLore focused verification",
+    status: "completed",
+    outcome: "success",
+    tool_names: ["node:test"],
+    evidence: ["focused test passed"],
+    verification: ["verification passed"],
+    metadata: {
+      promotion_eligible: true,
+      reviewer_passed: true,
+      promotion_review: { decision: "approved", source: "task-experience-reviewer" },
+    },
+  });
+
+  const preview = promoteExperiences(db, { scope_id: "agent:main", dry_run: true });
+  assert.equal(preview.episodes_scanned, 5);
+  assert.equal(preview.playbooks_created, 1);
+  assert.equal(preview.playbooks_promoted, 1);
+  assert.equal(preview.skipped, 4);
+  assert.equal(
+    preview.items.filter((item) => item.action === "skip" && item.reason === "promotion_not_eligible").length,
+    4,
+  );
+});
+
+test("automatic promotion reuses the canonical secret policy", () => {
+  const db = new DatabaseSync(":memory:");
+  ensureExperienceSchema(db);
+  createTaskEpisode(db, {
+    scope_id: "agent:main",
+    session_id: "session-secret-policy",
+    task_class: "clawlore_quality_check",
+    task_goal: "Review the authentication adapter without persisting credentials.",
+    status: "completed",
+    outcome: "success",
+    tool_names: ["node:test"],
+    evidence: [
+      JSON.stringify({ log: "Authorization: Digest username=\\\"demo\\\", response=\\\"SyntheticPromotionSecret123\\\"" }),
+    ],
+    verification: ["focused test passed"],
+    metadata: {
+      promotion_eligible: true,
+      reviewer_passed: true,
+      promotion_review: { decision: "approved", source: "roadmap-test-reviewer" },
+    },
+  });
+
+  const preview = promoteExperiences(db, { scope_id: "agent:main", dry_run: true });
+  assert.equal(preview.playbooks_created, 0);
+  assert.equal(preview.items[0].reason, "secret-like-content");
+});
+
+test("legacy episodes are explicitly reported as frozen historical records", () => {
+  const db = new DatabaseSync(":memory:");
+  ensureExperienceSchema(db);
+  createTaskEpisode(db, {
+    scope_id: "agent:main",
+    session_id: "legacy-session",
+    task_goal: "Historical task recorded before promotion review provenance existed",
+    status: "completed",
+    outcome: "success",
+    tool_names: ["node:test"],
+    evidence: ["historical verification passed"],
+    verification: ["passed"],
+  });
+
+  const preview = promoteExperiences(db, { scope_id: "agent:main", dry_run: true });
+  assert.equal(preview.playbooks_created, 0);
+  assert.equal(preview.historical_episodes_frozen, 1);
+  assert.equal(preview.items[0].reason, "legacy_episode_historical");
 });
 
 test("scope policy labels global, same-scope, and cross-customer decisions", () => {

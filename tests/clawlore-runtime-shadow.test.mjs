@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
@@ -85,6 +85,34 @@ test("runtime shadow trace excludes raw principal and memory text", async () => 
     assert.doesNotMatch(serialized, /user-secret-id/);
     assert.doesNotMatch(serialized, /private raw memory text/);
     verifyPrivatePath(traceFile, { kind: "file" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("runtime shadow trace refuses a symlink target before append", {
+  skip: process.platform === "win32",
+}, async () => {
+  const root = await mkdtemp(join(tmpdir(), "clawlore-shadow-symlink-"));
+  try {
+    const target = join(root, "target.jsonl");
+    const traceFile = join(root, "trace.jsonl");
+    await writeFile(target, "unchanged\n", { mode: 0o600 });
+    await symlink(target, traceFile);
+    const sink = new JsonlRuntimeShadowTraceSink(traceFile, 16_384);
+    await assert.rejects(() => sink.append({
+      schemaVersion: 1,
+      traceId: "symlink-refusal",
+      status: "skipped",
+      retrievalInvoked: false,
+      candidateCount: 0,
+      selectedCount: 0,
+      usedTokens: 0,
+      stages: [],
+      rejectionReasons: [],
+      createdAt: "2026-07-20T12:00:00.000Z",
+    }), /SYMLINK/u);
+    assert.equal(await readFile(target, "utf8"), "unchanged\n");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +9,9 @@ const require = createRequire(import.meta.url);
 const { createJiti } = require("jiti");
 const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: false });
 const { createReflectionCommandOrchestrator } = jiti("../src/reflection-command-orchestrator.ts");
+const { appendPrivateFile, enforcePrivatePath } = jiti("../src/file-privacy.ts");
+
+const enforcePrivateFile = (path) => enforcePrivatePath(path, { kind: "file" });
 
 const reflectionText = [
   "## Context (session background)",
@@ -60,6 +63,8 @@ test("reflection command exits before side effects when runtime access is denied
     getToolErrorSignals: () => [],
     generateReflectionText: async () => { generated += 1; throw new Error("unexpected"); },
     appendSelfImprovementEntry: async () => {},
+    enforcePrivateFile,
+    appendPrivateFile,
     createReflectionEventId: () => "event",
     embedPassage: async () => [],
     vectorSearch: async () => [],
@@ -98,6 +103,8 @@ test("reflection command recovers the base session and completes file/store orch
     const observed = {
       conversation: "",
       storeParams: null,
+      providerInputs: [],
+      storedMemories: [],
       derived: null,
       invalidated: "",
       cleared: 0,
@@ -123,17 +130,28 @@ test("reflection command recovers the base session and completes file/store orch
       generateReflectionText: async (params) => {
         observed.conversation = params.conversation;
         return {
-          text: reflectionText,
+          text: reflectionText.replace(
+            "- near-term adjustment",
+            "- near-term adjustment [Image attached at: /tmp/clawlore-reflection-private.png]",
+          ),
           usedFallback: false,
           promptHash: "hash",
           runner: "embedded",
         };
       },
       appendSelfImprovementEntry: async () => {},
+      enforcePrivateFile,
+      appendPrivateFile,
       createReflectionEventId: () => "event-1",
-      embedPassage: async () => [1, 0],
+      embedPassage: async (text) => {
+        observed.providerInputs.push(text);
+        return [1, 0];
+      },
       vectorSearch: async () => [],
-      storeMemory: async () => ({ timestamp: 1 }),
+      storeMemory: async (entry) => {
+        observed.storedMemories.push(entry);
+        return { ...entry, timestamp: 1 };
+      },
       storeReflection: async (params) => {
         observed.storeParams = params;
         return { slices: { derived: ["near-term adjustment"] } };
@@ -175,13 +193,20 @@ test("reflection command recovers the base session and completes file/store orch
     assert.equal(observed.invalidated, "main");
     assert.equal(observed.cleared, 1);
     assert.ok(observed.pruned >= 2);
+    assert.equal(observed.providerInputs.join("\n").includes("clawlore-reflection-private.png"), false);
+    assert.equal(JSON.stringify(observed.storedMemories).includes("clawlore-reflection-private.png"), false);
 
     const reflectionPath = join(root, observed.storeParams.sourceReflectionPath);
     assert.match(await readFile(reflectionPath, "utf8"), /Error Signatures: abcdef0123456789/);
+    assert.equal((await readFile(reflectionPath, "utf8")).includes("clawlore-reflection-private.png"), false);
     assert.match(
       await readFile(join(root, "memory", "2026-07-17.md"), "utf8"),
       /Reflection generated:/,
     );
+    if (process.platform !== "win32") {
+      assert.equal((await stat(reflectionPath)).mode & 0o077, 0);
+      assert.equal((await stat(join(root, "memory", "2026-07-17.md"))).mode & 0o077, 0);
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }

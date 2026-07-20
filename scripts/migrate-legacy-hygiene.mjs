@@ -15,6 +15,10 @@ const {
   buildSmartMetadata,
   stringifySmartMetadata,
 } = jiti("../src/smart-metadata.ts");
+const {
+  ensureLifecycleProjection,
+  syncLifecycleProjectionFromTruth,
+} = jiti("../src/sql-lifecycle-projection.ts");
 
 const SCRIPT_VERSION = "openclaw-legacy-hygiene-v1";
 
@@ -287,10 +291,12 @@ function applyUpdates(db, updates) {
     );
     deleteFts?.run(item.id);
     insertFts?.run(item.id);
+    syncLifecycleProjectionFromTruth(db, item.id);
   };
 
   db.exec("BEGIN IMMEDIATE");
   try {
+    ensureLifecycleProjection(db);
     for (const item of updates.archive) applyOne(item);
     for (const item of updates.normalize) applyOne(item);
     db.exec("COMMIT");

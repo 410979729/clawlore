@@ -27,7 +27,12 @@ const {
 } = jiti("../src/graph-hygiene.ts");
 const { recoveryReport, scheduleReplay } = jiti("../src/journal-recovery.ts");
 const { buildOperatorDashboard } = jiti("../src/operator-dashboard.ts");
-const { runForgettingWithVectorSync } = jiti("../src/forgetting.ts");
+const { runForgetting, runForgettingWithVectorSync } = jiti("../src/forgetting.ts");
+const {
+  ensureLifecycleProjection,
+  inspectLifecycleProjection,
+  openLifecycleProjectionReadAccess,
+} = jiti("../src/sql-lifecycle-projection.ts");
 
 function createMemoryTruthDb() {
   const db = new DatabaseSync(":memory:");
@@ -77,6 +82,12 @@ function insertMemoryWith(db, row) {
   db.prepare("INSERT INTO memory_truth_fts(memory_id, text, metadata_text) VALUES (?, ?, '')").run(row.id, row.text);
 }
 
+function lifecycleCounts(db) {
+  const access = openLifecycleProjectionReadAccess(db);
+  assert.ok(access.readScopeCounts, access.health.reason);
+  return access.readScopeCounts({ scopeSql: "1=1", scopeParams: [] }).counts["agent:main"];
+}
+
 test("governance cleanup dry-run, apply, and rollback handle template noise", () => {
   const db = createMemoryTruthDb();
   insertMemory(db, "ops", "Operations workflow summary from journal digest: user: 继续 assistant: 完成。");
@@ -100,6 +111,8 @@ test("governance cleanup dry-run, apply, and rollback handle template noise", ()
   const archived = JSON.parse(db.prepare("SELECT metadata FROM memory_truth WHERE id = 'ops'").get().metadata);
   assert.equal(archived.lifecycle, "archived");
   assert.equal(archived.rollback_batch_id, "apply-batch");
+  assert.equal(inspectLifecycleProjection(db).ok, true);
+  assert.deepEqual(lifecycleCounts(db), { recallable: 1, archived: 2, inactive: 0 });
 
   const rollbackDry = rollbackCleanupBatch(db, { batchId: "apply-batch", dryRun: true });
   assert.equal(rollbackDry.rollback_candidates, 2);
@@ -108,6 +121,8 @@ test("governance cleanup dry-run, apply, and rollback handle template noise", ()
   const rollback = rollbackCleanupBatch(db, { batchId: "apply-batch", dryRun: false });
   assert.equal(rollback.restored, 2);
   assert.equal(JSON.parse(db.prepare("SELECT metadata FROM memory_truth WHERE id = 'ops'").get().metadata).lifecycle, undefined);
+  assert.equal(inspectLifecycleProjection(db).ok, true);
+  assert.deepEqual(lifecycleCounts(db), { recallable: 3, archived: 0, inactive: 0 });
 });
 
 test("hard delete forgetting fails closed without vector companion callback", async () => {
@@ -124,6 +139,25 @@ test("hard delete forgetting fails closed without vector companion callback", as
   assert.equal(result.deleted, 0);
   assert.deepEqual(result.delete_ids, ["secret-row"]);
   assert.ok(db.prepare("SELECT id FROM memory_truth WHERE id = 'secret-row'").get());
+});
+
+test("forgetting archives duplicates and deletes sensitive rows with lifecycle parity", () => {
+  const db = createMemoryTruthDb();
+  insertMemory(db, "duplicate-a", "same durable memory");
+  insertMemory(db, "duplicate-b", "same durable memory");
+  insertMemory(db, "sensitive", "password=RealSecret123");
+
+  const result = runForgetting(db, {
+    scopeFilter: ["agent:main"],
+    dryRun: false,
+    hardDeleteSensitive: true,
+  });
+
+  assert.equal(result.archived, 1);
+  assert.equal(result.deleted, 1);
+  assert.equal(inspectLifecycleProjection(db).ok, true);
+  assert.deepEqual(lifecycleCounts(db), { recallable: 1, archived: 1, inactive: 0 });
+  assert.equal(db.prepare("SELECT 1 FROM memory_truth WHERE id='sensitive'").get(), undefined);
 });
 
 function createJournalDb() {
@@ -225,10 +259,49 @@ test("candidate memory promotion is dry-run first and audits applied safe promot
   assert.equal(promoted.lifecycle, "promoted");
   assert.equal(promoted.state, "confirmed");
   assert.equal(kept.lifecycle, "candidate");
+  assert.equal(inspectLifecycleProjection(db).ok, true);
+  assert.deepEqual(lifecycleCounts(db), { recallable: 2, archived: 0, inactive: 0 });
   assert.equal(
     db.prepare("SELECT COUNT(*) AS count FROM governance_audit_events WHERE batch_id='apply-candidate-batch' AND event_type='memory_candidate_promotion'").get().count,
     1,
   );
+});
+
+test("candidate promotion and lifecycle projection roll back together on projection failure", () => {
+  const db = createMemoryTruthDb();
+  insertMemoryWith(db, {
+    id: "fault-candidate",
+    text: "Joy prefers direct verified progress reports.",
+    category: "preference",
+    metadata: {
+      lifecycle: "candidate",
+      state: "pending",
+      memory_category: "preferences",
+      confidence: 0.9,
+    },
+  });
+  promoteMemoryCandidates(db, { dryRun: true });
+  // The apply path initializes the projection before opening its mutation transaction.
+  ensureLifecycleProjection(db);
+  db.exec(`
+    CREATE TRIGGER fail_lifecycle_projection_update
+    BEFORE UPDATE ON memory_lifecycle_projection
+    BEGIN
+      SELECT RAISE(ABORT, 'fixture lifecycle projection failure');
+    END;
+  `);
+
+  assert.throws(
+    () => promoteMemoryCandidates(db, { dryRun: false, batchId: "fault-batch" }),
+    /fixture lifecycle projection failure/,
+  );
+  const metadata = JSON.parse(db.prepare(
+    "SELECT metadata FROM memory_truth WHERE id='fault-candidate'",
+  ).get().metadata);
+  assert.equal(metadata.lifecycle, "candidate");
+  assert.equal(db.prepare(
+    "SELECT COUNT(*) AS count FROM governance_audit_events WHERE batch_id='fault-batch'",
+  ).get().count, 0);
 });
 
 test("graph hygiene reports unsupported without graph tables and removes orphan companion rows when present", () => {

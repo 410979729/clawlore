@@ -2,6 +2,7 @@
  * CLI Commands for Memory Management
  */
 
+import { diagnosticErrorSummary } from "../diagnostic-redaction.js";
 
 import {
   type CliRegistrationContext,
@@ -9,6 +10,7 @@ import {
   formatMemory,
   writeJson
 } from "./cli-runtime-policy.js";
+import { redactMemoryEntryForOutput } from "../memory-egress-policy.js";
 
 
 export function registerMemoryCommands(runtime: CliRegistrationContext): void {
@@ -52,7 +54,7 @@ export function registerMemoryCommands(runtime: CliRegistrationContext): void {
         );
 
         if (options.json) {
-          console.log(formatJson(memories));
+          console.log(formatJson(memories.map((memory) => redactMemoryEntryForOutput(memory))));
         } else {
           if (memories.length === 0) {
             console.log("No memories found.");
@@ -64,7 +66,7 @@ export function registerMemoryCommands(runtime: CliRegistrationContext): void {
           }
         }
       } catch (error) {
-        console.error("Failed to list memories:", error);
+        console.error(`Failed to list memories: ${diagnosticErrorSummary(error)}`);
         process.exit(1);
       }
     });
@@ -109,7 +111,7 @@ export function registerMemoryCommands(runtime: CliRegistrationContext): void {
           }
         }
       } catch (error) {
-        console.error("Search failed:", error);
+        console.error(`Search failed: ${diagnosticErrorSummary(error)}`);
         process.exit(1);
       }
     });
@@ -172,7 +174,7 @@ export function registerMemoryCommands(runtime: CliRegistrationContext): void {
           });
         }
       } catch (error) {
-        console.error("Failed to get statistics:", error);
+        console.error(`Failed to get statistics: ${diagnosticErrorSummary(error)}`);
         process.exit(1);
       }
     });

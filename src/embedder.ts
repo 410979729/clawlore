@@ -226,7 +226,7 @@ function getProviderLabel(baseURL: string | undefined, model: string): string {
     try {
       return new URL(base).host;
     } catch {
-      return base;
+      return "custom endpoint";
     }
   }
 
@@ -324,22 +324,15 @@ export function formatEmbeddingProviderError(
   error: unknown,
   opts: { baseURL?: string; model: string; mode?: "single" | "batch" },
 ): string {
-  const raw = getErrorMessage(error).trim();
-  if (
-    raw.startsWith("Embedding provider authentication failed") ||
-    raw.startsWith("Embedding provider unreachable") ||
-    raw.startsWith("Failed to generate embedding from ") ||
-    raw.startsWith("Failed to generate batch embeddings from ")
-  ) {
-    return raw;
-  }
-
   const status = getErrorStatus(error);
   const code = getErrorCode(error);
   const provider = getProviderLabel(opts.baseURL, opts.model);
-  const detail = raw.length > 0 ? raw : "unknown error";
-  const suffix = [status, code].filter(Boolean).join(" ");
-  const detailText = suffix ? `${suffix}: ${detail}` : detail;
+  const safeCode = code && /^[A-Za-z0-9_.-]{1,80}$/.test(code) ? code : undefined;
+  const detailText = [
+    status !== undefined ? `status=${status}` : undefined,
+    safeCode ? `code=${safeCode}` : undefined,
+    diagnosticErrorSummary(error),
+  ].filter(Boolean).join(", ");
   const genericPrefix =
     opts.mode === "batch"
       ? `Failed to generate batch embeddings from ${provider}: `
@@ -363,9 +356,9 @@ export function formatEmbeddingProviderError(
   if (isNetworkError(error)) {
     let hint = `Verify the endpoint is reachable`;
     if (opts.baseURL) {
-      hint += ` at ${opts.baseURL}`;
+      hint += ` for ${provider}`;
     }
-    hint += ` and that model \"${opts.model}\" is available.`;
+    hint += " and that the configured model is available.";
     return `Embedding provider unreachable (${detailText}). ${hint}`;
   }
 
@@ -669,8 +662,7 @@ export class Embedder {
     });
 
     if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      throw new Error(`Ollama embedding failed: ${response.status} ${response.statusText} ??${body.slice(0, 200)}`);
+      throw new Error(`Ollama embedding failed: status=${response.status}`);
     }
 
     const data = await response.json();
@@ -732,8 +724,7 @@ export class Embedder {
 
     // All keys exhausted with rate-limit errors
     throw new Error(
-      `All ${maxAttempts} API keys exhausted (rate limited). Last error: ${lastError?.message || "unknown"}`,
-      { cause: lastError }
+      `All ${maxAttempts} API keys exhausted (rate limited). Last error: ${diagnosticErrorSummary(lastError)}`,
     );
   }
 
@@ -905,7 +896,7 @@ export class Embedder {
           const chunkResult = smartChunk(text, this._model);
 
           if (chunkResult.chunks.length === 0) {
-            throw new Error(`Failed to chunk document: ${errorMsg}`);
+            throw new Error(`Failed to chunk document: ${diagnosticErrorSummary(error)}`);
           }
 
           // FR-03: Single chunk output detection — if smartChunk produced only
@@ -939,8 +930,9 @@ export class Embedder {
                 const embedding = await this.embedSingle(chunk, task, depth + 1, signal);
                 return { embedding };
               } catch (chunkError) {
-                console.warn(`Failed to embed chunk ${idx}:`, chunkError);
-                throw chunkError;
+                const summary = diagnosticErrorSummary(chunkError);
+                console.warn(`Failed to embed chunk ${idx}: ${summary}`);
+                throw new Error(`Embedding chunk ${idx} failed: ${summary}`);
               }
             })
           );
@@ -964,9 +956,9 @@ export class Embedder {
 
           return finalEmbedding;
         } catch (chunkError) {
-          // Preserve and surface the more specific chunkError
-          console.warn(`Chunking failed:`, chunkError);
-          throw chunkError;
+          const summary = diagnosticErrorSummary(chunkError);
+          console.warn(`Chunking failed: ${summary}`);
+          throw new Error(`Embedding chunking failed: ${summary}`);
         }
       }
 
@@ -975,7 +967,7 @@ export class Embedder {
         model: this._model,
         mode: "single",
       });
-      throw new Error(friendly, { cause: error instanceof Error ? error : undefined });
+      throw new Error(friendly);
     }
   }
 
@@ -1092,9 +1084,7 @@ export class Embedder {
             model: this._model,
             mode: "batch",
           });
-          throw new Error(`Failed to embed documents after chunking attempt: ${friendly}`, {
-            cause: error instanceof Error ? error : undefined,
-          });
+          throw new Error(`Failed to embed documents after chunking attempt: ${friendly}`);
         }
       }
 
@@ -1103,9 +1093,7 @@ export class Embedder {
         model: this._model,
         mode: "batch",
       });
-      throw new Error(friendly, {
-        cause: error instanceof Error ? error : undefined,
-      });
+      throw new Error(friendly);
     }
   }
 
@@ -1193,8 +1181,7 @@ export class MiniMaxEmbedder {
       });
 
       if (!response.ok) {
-        const text = await response.text().catch(() => "");
-        lastError = new Error(`MiniMax embedding failed: ${response.status} ${response.statusText} ${text.slice(0, 300)}`.trim());
+        lastError = new Error(`MiniMax embedding failed: status=${response.status}`);
         if (this.isRateLimitStatus(response.status) && attempt < this._apiKeys.length - 1) continue;
         throw lastError;
       }

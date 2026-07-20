@@ -2,6 +2,10 @@ import { randomUUID } from "node:crypto";
 import { evaluateCaptureSafety, sanitizeCaptureText } from "./capture-safety.js";
 import { isNoise } from "./noise-filter.js";
 import { ensureGovernanceAuditSchema } from "./governance-cleanup.js";
+import {
+  ensureLifecycleProjection,
+  syncLifecycleProjectionFromTruth,
+} from "./sql-lifecycle-projection.js";
 
 type DatabaseSync = any;
 
@@ -471,70 +475,84 @@ export function promoteMemoryCandidates(
   const reviewed: CandidatePromotionReviewItem[] = [];
   const mutations = { promoted: 0, archived: 0, kept: 0, skipped: 0 };
 
-  if (!dryRun) ensureGovernanceAuditSchema(db);
-
-  for (const row of rows) {
-    const metadata = safeJsonObject(row.metadata);
-    const decision = classifyCandidateRow(row);
-    const effectiveAction =
-      decision.action === "archive" && !options.archiveNoise
-        ? "keep_candidate"
-        : decision.action;
-    reviewed.push({
-      id: row.id,
-      scope: row.scope || "global",
-      category: row.category || "other",
-      decision: decision.action,
-      effective_action: effectiveAction,
-      reason: decision.reason,
-      risk: decision.risk,
-      confidence: decision.confidence,
-      importance: decision.importance,
-      memory_type: decision.memory_type,
-      updated_at: Number(row.updated_at || row.timestamp || 0),
-      preview: previewFor(candidateText(row, metadata) || row.text),
-    });
-
-    if (effectiveAction === "promote") mutations.promoted += 1;
-    else if (effectiveAction === "archive") mutations.archived += 1;
-    else if (effectiveAction === "skip") mutations.skipped += 1;
-    else mutations.kept += 1;
-
-    if (dryRun || (effectiveAction !== "promote" && effectiveAction !== "archive")) continue;
-    const after = metadataAfter(metadata, {
-      action: effectiveAction,
-      reason: decision.reason,
-      batchId,
-      actor,
-      at,
-    });
-    db.prepare(`
-      UPDATE memory_truth
-      SET metadata = ?, updated_at = ?
-      WHERE id = ? AND ${candidateWhereClause()}
-    `).run(jsonStable(after), Date.now(), row.id);
-    recordAuditEvent(db, {
-      action: effectiveAction,
-      row,
-      before: metadata,
-      after,
-      reason: decision.reason,
-      batchId,
-      actor,
-      at,
-    });
+  if (!dryRun) {
+    ensureGovernanceAuditSchema(db);
+    db.exec("BEGIN IMMEDIATE");
   }
 
-  const after = candidateDebtReport(db, { limit });
-  return {
-    ok: true,
-    status: dryRun ? "dry_run" : "applied",
-    dry_run: dryRun,
-    batch_id: batchId,
-    archive_noise: options.archiveNoise === true,
-    before,
-    mutations,
-    after,
-    reviewed,
-  };
+  try {
+    if (!dryRun) ensureLifecycleProjection(db);
+    for (const row of rows) {
+      const metadata = safeJsonObject(row.metadata);
+      const decision = classifyCandidateRow(row);
+      const effectiveAction =
+        decision.action === "archive" && !options.archiveNoise
+          ? "keep_candidate"
+          : decision.action;
+      reviewed.push({
+        id: row.id,
+        scope: row.scope || "global",
+        category: row.category || "other",
+        decision: decision.action,
+        effective_action: effectiveAction,
+        reason: decision.reason,
+        risk: decision.risk,
+        confidence: decision.confidence,
+        importance: decision.importance,
+        memory_type: decision.memory_type,
+        updated_at: Number(row.updated_at || row.timestamp || 0),
+        preview: previewFor(candidateText(row, metadata) || row.text),
+      });
+
+      if (effectiveAction === "promote") mutations.promoted += 1;
+      else if (effectiveAction === "archive") mutations.archived += 1;
+      else if (effectiveAction === "skip") mutations.skipped += 1;
+      else mutations.kept += 1;
+
+      if (dryRun || (effectiveAction !== "promote" && effectiveAction !== "archive")) continue;
+      const after = metadataAfter(metadata, {
+        action: effectiveAction,
+        reason: decision.reason,
+        batchId,
+        actor,
+        at,
+      });
+      const mutation = db.prepare(`
+        UPDATE memory_truth
+        SET metadata = ?, updated_at = ?
+        WHERE id = ? AND ${candidateWhereClause()}
+      `).run(jsonStable(after), Date.now(), row.id);
+      if (Number(mutation?.changes || 0) === 0) continue;
+      syncLifecycleProjectionFromTruth(db, row.id);
+      recordAuditEvent(db, {
+        action: effectiveAction,
+        row,
+        before: metadata,
+        after,
+        reason: decision.reason,
+        batchId,
+        actor,
+        at,
+      });
+    }
+
+    const after = candidateDebtReport(db, { limit });
+    if (!dryRun) db.exec("COMMIT");
+    return {
+      ok: true,
+      status: dryRun ? "dry_run" : "applied",
+      dry_run: dryRun,
+      batch_id: batchId,
+      archive_noise: options.archiveNoise === true,
+      before,
+      mutations,
+      after,
+      reviewed,
+    };
+  } catch (error) {
+    if (!dryRun) {
+      try { db.exec("ROLLBACK"); } catch {}
+    }
+    throw error;
+  }
 }

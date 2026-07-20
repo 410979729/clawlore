@@ -1,5 +1,17 @@
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import {
+  appendPrivateFile,
+  enforcePrivatePath,
+  ensurePrivateDirectory,
+  readPrivateFile,
+  writePrivateFileAtomic,
+  writePrivateFileExclusive,
+} from "./file-privacy.js";
+import {
+  normalizeSelfImprovementBody,
+  normalizeSelfImprovementLabel,
+  normalizeSelfImprovementSummary,
+} from "./self-improvement-content-policy.js";
 
 export const DEFAULT_LEARNINGS_TEMPLATE = `# Learnings
 
@@ -41,29 +53,35 @@ function todayYmd(): string {
 
 async function nextLearningId(filePath: string, prefix: "LRN" | "ERR"): Promise<string> {
   const date = todayYmd();
-  let count = 0;
-  try {
-    const content = await readFile(filePath, "utf-8");
-    const matches = content.match(new RegExp(`\\[${prefix}-${date}-\\d{3}\\]`, "g"));
-    count = matches?.length ?? 0;
-  } catch {
-    // ignore
-  }
+  const content = await readPrivateFile(filePath);
+  const matches = content.match(new RegExp(`\\[${prefix}-${date}-\\d{3}\\]`, "g"));
+  const count = matches?.length ?? 0;
   return `${prefix}-${date}-${String(count + 1).padStart(3, "0")}`;
 }
 
 export async function ensureSelfImprovementLearningFiles(baseDir: string): Promise<void> {
   const learningsDir = join(baseDir, ".learnings");
-  await mkdir(learningsDir, { recursive: true });
+  ensurePrivateDirectory(learningsDir);
 
   const ensureFile = async (filePath: string, content: string) => {
     try {
-      const existing = await readFile(filePath, "utf-8");
+      enforcePrivatePath(filePath, { kind: "file" });
+      const existing = await readPrivateFile(filePath);
       if (existing.trim().length > 0) return;
-    } catch {
-      // write default below
+      await writePrivateFileAtomic(filePath, `${content.trim()}\n`);
+      return;
+    } catch (error: any) {
+      if (error?.code !== "ENOENT") throw error;
     }
-    await writeFile(filePath, `${content.trim()}\n`, "utf-8");
+    try {
+      await writePrivateFileExclusive(filePath, `${content.trim()}\n`);
+    } catch (error: any) {
+      if (error?.code !== "EEXIST") throw error;
+      enforcePrivatePath(filePath, { kind: "file" });
+      if (!(await readPrivateFile(filePath)).trim()) {
+        await writePrivateFileAtomic(filePath, `${content.trim()}\n`);
+      }
+    }
   };
 
   await ensureFile(join(learningsDir, "LEARNINGS.md"), DEFAULT_LEARNINGS_TEMPLATE);
@@ -109,32 +127,36 @@ export async function appendSelfImprovementEntry(params: AppendSelfImprovementEn
   const id = await withFileWriteQueue(filePath, async () => {
     const entryId = await nextLearningId(filePath, idPrefix);
     const nowIso = new Date().toISOString();
-    const titleSuffix = type === "learning" ? ` ${category}` : "";
+    const safeCategory = normalizeSelfImprovementLabel(category, "learning category", "best_practice");
+    const safeArea = normalizeSelfImprovementLabel(area, "learning area", "config");
+    const safePriority = normalizeSelfImprovementLabel(priority, "learning priority", "medium");
+    const safeStatus = normalizeSelfImprovementLabel(status, "learning status", "pending");
+    const titleSuffix = type === "learning" ? ` ${safeCategory}` : "";
     const entry = [
       `## [${entryId}]${titleSuffix}`,
       "",
       `**Logged**: ${nowIso}`,
-      `**Priority**: ${priority}`,
-      `**Status**: ${status}`,
-      `**Area**: ${area}`,
+      `**Priority**: ${safePriority}`,
+      `**Status**: ${safeStatus}`,
+      `**Area**: ${safeArea}`,
       "",
       "### Summary",
-      summary.trim(),
+      normalizeSelfImprovementSummary(summary),
       "",
       "### Details",
-      details.trim() || "-",
+      normalizeSelfImprovementBody(details, "learning details", 16_000),
       "",
       "### Suggested Action",
-      suggestedAction.trim() || "-",
+      normalizeSelfImprovementBody(suggestedAction, "learning suggested action", 8_000),
       "",
       "### Metadata",
-      `- Source: ${source}`,
+      `- Source: ${normalizeSelfImprovementLabel(source, "learning source", "clawlore/self_improvement_log")}`,
       "---",
       "",
     ].join("\n");
-    const prev = await readFile(filePath, "utf-8").catch(() => "");
+    const prev = await readPrivateFile(filePath);
     const separator = prev.trimEnd().length > 0 ? "\n\n" : "";
-    await appendFile(filePath, `${separator}${entry}`, "utf-8");
+    await appendPrivateFile(filePath, `${separator}${entry}`);
     return entryId;
   });
 

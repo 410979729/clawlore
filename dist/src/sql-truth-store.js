@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { existsSync, rmSync } from "node:fs";
 import { parseSmartMetadata, isMemoryActiveAt } from "./smart-metadata.js";
+import { deleteLifecycleProjection, ensureLifecycleProjection, openLifecycleProjectionReadAccess, upsertLifecycleProjection } from "./sql-lifecycle-projection.js";
 import { enforcePrivatePath, ensurePrivateDirectory } from "./file-privacy.js";
 const require = createRequire(import.meta.url);
 function runSql(db, statement) {
@@ -693,6 +694,8 @@ export class SqlTruthStore {
         const db = this.requireDb();
         const metadata = entry.metadata || "{}";
         const metadataText = metadataSearchText(metadata);
+        const storedCategory = entry.category || "other", storedScope = entry.scope || "global";
+        const storedTimestamp = Number(entry.timestamp) || Date.now(), updatedAt = Date.now();
         db.prepare(`
       INSERT INTO memory_truth (
         id, text, category, scope, importance, timestamp, metadata, metadata_text, updated_at
@@ -706,7 +709,9 @@ export class SqlTruthStore {
         metadata = excluded.metadata,
         metadata_text = excluded.metadata_text,
         updated_at = excluded.updated_at
-      `).run(entry.id, entry.text || "", entry.category || "other", entry.scope || "global", Number(entry.importance) || 0, Number(entry.timestamp) || Date.now(), metadata, metadataText, Date.now());
+      `).run(entry.id, entry.text || "", storedCategory, storedScope, Number(entry.importance) || 0, storedTimestamp, metadata, metadataText, updatedAt);
+        upsertLifecycleProjection(db, { ...entry, text: entry.text || "", category: storedCategory,
+            scope: storedScope, timestamp: storedTimestamp, metadata }, updatedAt);
         this.injectFault("truth_after_upsert");
         this.replaceFts(entry.id, entry.text || "", metadataText);
     }
@@ -729,6 +734,7 @@ export class SqlTruthStore {
         this.injectFault("fts_before_delete");
         db.prepare("DELETE FROM memory_truth_fts WHERE memory_id = ?").run(id);
         db.prepare("DELETE FROM memory_truth WHERE id = ?").run(id);
+        deleteLifecycleProjection(db, id);
     }
     /**
      * Persist a temporal revision and invalidate its predecessor in one SQL
@@ -893,7 +899,8 @@ export class SqlTruthStore {
     stats(scopeFilter) {
         const db = this.requireDb();
         const scope = this.scopeClause("m", scopeFilter);
-        const total = db.prepare(`SELECT COUNT(*) AS count FROM memory_truth m WHERE ${scope.sql}`).get(...scope.params);
+        const total = db.prepare(`SELECT COUNT(*) AS count FROM memory_truth m WHERE ${scope.sql}`)
+            .get(...scope.params);
         const scopeRows = db.prepare(`
       SELECT COALESCE(m.scope, 'global') AS scope, COUNT(*) AS count
       FROM memory_truth m
@@ -906,10 +913,16 @@ export class SqlTruthStore {
       WHERE ${scope.sql}
       GROUP BY m.category
       `).all(...scope.params);
+        const lifecycleAccess = openLifecycleProjectionReadAccess(db);
+        const lifecycle = lifecycleAccess.readScopeCounts
+            ? lifecycleAccess.readScopeCounts({ scopeSql: scope.sql, scopeParams: scope.params })
+            : { totalCount: 0, counts: {} };
         return {
             totalCount: Number(total?.count || 0),
             scopeCounts: Object.fromEntries(scopeRows.map((row) => [row.scope, Number(row.count)])),
             categoryCounts: Object.fromEntries(categoryRows.map((row) => [row.category, Number(row.count)])),
+            lifecycleScopeCounts: lifecycle.counts,
+            lifecycleProjection: lifecycleAccess.health,
         };
     }
     bulkDelete(scopeFilter, beforeTimestamp) {
@@ -1074,6 +1087,9 @@ export class SqlTruthStore {
         this.withTransaction(() => {
             runSql(db, `${EXPECTED_SCHEMA_OBJECTS.map(([, , sql]) => sql).join(";\n")};`);
             this.injectFault("schema_after_ddl");
+            // Existing authorities require explicit repair; only creation/migration may initialize.
+            if (marker)
+                ensureLifecycleProjection(db, { force: marker.origin === "legacy-upgrade" });
             this.reconcileFts();
             this.injectFault("schema_after_fts_reconcile");
             if (!marker)

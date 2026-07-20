@@ -5,6 +5,7 @@ import type {
   MemorySearchResult,
   MemoryStoreDiagnostics,
   MemoryStorePorts,
+  MemoryTruthStats,
   MetadataPatch,
   VectorCompanionDriftReport,
   VectorCompanionEmbedder,
@@ -71,11 +72,7 @@ export class MemoryStoreFacade implements MemoryStorePorts {
   ): Promise<MemoryEntry[]> {
     return this.ports.list(scopeFilter, category, limit, offset);
   }
-  stats(scopeFilter?: string[]): Promise<{
-    totalCount: number;
-    scopeCounts: Record<string, number>;
-    categoryCounts: Record<string, number>;
-  }> {
+  stats(scopeFilter?: string[]): Promise<MemoryTruthStats> {
     return this.ports.stats(scopeFilter);
   }
   update(

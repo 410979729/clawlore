@@ -1,6 +1,9 @@
-import { evaluateCaptureSafety } from "./capture-safety.js";
+import { evaluateCaptureSafety, sanitizeCaptureText } from "./capture-safety.js";
 import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
+import { redactKnownSecrets } from "./secret-redaction.js";
 import { buildSmartMetadata, parseSmartMetadata, stringifySmartMetadata, } from "./smart-metadata.js";
+import { agentEndEventAllowsTaskExperience, finalAssistantClaimsVerifiedSuccess, finalAssistantLooksUnsuccessful, summarizeStructuredToolOutcomes, } from "./task-outcome-evidence.js";
+export { agentEndEventAllowsTaskExperience, finalAssistantClaimsVerifiedSuccess, finalAssistantLooksUnsuccessful, } from "./task-outcome-evidence.js";
 export const DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG = {
     enabled: false,
     minMessages: 4,
@@ -12,20 +15,6 @@ export const DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG = {
 };
 const MAX_LIST_ITEMS = 8;
 const MAX_ITEM_CHARS = 260;
-export function agentEndEventAllowsTaskExperience(event) {
-    if (!event || typeof event !== "object")
-        return true;
-    const obj = event;
-    if (obj.success === false)
-        return false;
-    const status = typeof obj.status === "string" ? obj.status.toLowerCase() : "";
-    if (["failed", "failure", "error", "cancelled", "canceled"].includes(status))
-        return false;
-    const outcome = typeof obj.outcome === "string" ? obj.outcome.toLowerCase() : "";
-    if (["failed", "failure", "error", "cancelled", "canceled"].includes(outcome))
-        return false;
-    return true;
-}
 function clampNumber(value, fallback, min, max) {
     const n = typeof value === "number" ? value : Number(value);
     if (!Number.isFinite(n))
@@ -148,27 +137,7 @@ function pushUnique(list, value, limit) {
         list.splice(0, list.length - limit);
 }
 function redactSensitiveText(value) {
-    return value
-        .replace(/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/gi, "[REDACTED_PRIVATE_KEY]")
-        .replace(/\bAuthorization\s*:\s*Bearer\s+[A-Za-z0-9._~+/=-]{12,}(?=$|\s|[,;])/gi, "Authorization: Bearer [REDACTED]")
-        .replace(/\b(?:api[_-]?key|apikey|secret|token|password|passwd|private[_-]?key|client[_-]?secret|access[_-]?key|refresh[_-]?token)\b\s*[:=]\s*["'`]?[A-Za-z0-9_./+=:@-]{16,}/gi, "$1=[REDACTED]")
-        .replace(/(?:密码|口令|登录密码|远程密码)\s*(?:是|为|[:：=])\s*["'`]?[^\s"'`，。；;,)}\]]{6,}/giu, "密码=[REDACTED]")
-        .replace(/(?:api\s*key|apikey|密钥|令牌|访问令牌|secret|token|凭证)\s*(?:是|为|[:：=])\s*["'`]?[A-Za-z0-9_./+=:@-]{12,}/giu, "密钥=[REDACTED]")
-        .replace(/\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b/g, "[REDACTED_OPENAI_KEY]")
-        .replace(/\bAIza[0-9A-Za-z_-]{20,}\b/g, "[REDACTED_GOOGLE_API_KEY]")
-        .replace(/\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{20,}\b/g, "[REDACTED_GITHUB_TOKEN]")
-        .replace(/\bxox[baprs]-[A-Za-z0-9-]{20,}\b/g, "[REDACTED_SLACK_TOKEN]")
-        .replace(/\bAKIA[0-9A-Z]{16}\b/g, "[REDACTED_AWS_KEY]")
-        .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "[REDACTED_JWT]");
-}
-export function finalAssistantLooksUnsuccessful(text) {
-    const final = compactWhitespace(text).toLowerCase();
-    if (!final)
-        return false;
-    if (/\b(cannot|can't|unable|blocked|failed|failure|not able|not completed|not verified|unverified)\b/.test(final)) {
-        return true;
-    }
-    return /(失败|无法|不能|未能|未完成|没完成|没有完成|未验证|没验证|没有验证|无法验证|不能验证|无法确认|不能确认|阻塞|报错)/u.test(final);
+    return sanitizeCaptureText(redactKnownSecrets(value));
 }
 export function extractTaskExperienceTranscript(messages, maxInputChars = DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG.maxInputChars) {
     const lines = [];
@@ -212,11 +181,27 @@ export function extractTaskExperienceTranscript(messages, maxInputChars = DEFAUL
     if (text.length > maxInputChars) {
         text = text.slice(-maxInputChars);
     }
-    return { text, messageCount, toolLikeCount, finalAssistantText, userGoal, toolNames, evidence };
+    const structured = summarizeStructuredToolOutcomes(messages);
+    return {
+        text,
+        messageCount,
+        toolLikeCount,
+        finalAssistantText,
+        userGoal,
+        toolNames,
+        evidence,
+        structuredToolResultCount: structured.resultCount,
+        successfulToolResultCount: structured.successCount,
+        failedToolResultCount: structured.failureCount,
+        lastStructuredToolOutcome: structured.lastOutcome,
+    };
 }
-export function shouldAttemptTaskExperienceCapture(transcript, config) {
+export function shouldAttemptTaskExperienceCapture(transcript, config, agentEndEvent) {
     if (!config.enabled)
         return { ok: false, reason: "disabled" };
+    if (agentEndEvent !== undefined && !agentEndEventAllowsTaskExperience(agentEndEvent)) {
+        return { ok: false, reason: "agent_end_not_successful" };
+    }
     if (finalAssistantLooksUnsuccessful(transcript.finalAssistantText)) {
         return { ok: false, reason: "final_answer_not_successful" };
     }
@@ -224,6 +209,21 @@ export function shouldAttemptTaskExperienceCapture(transcript, config) {
         return { ok: false, reason: "too_few_messages" };
     if (transcript.toolLikeCount < config.minToolCalls)
         return { ok: false, reason: "too_few_tool_signals" };
+    if (transcript.structuredToolResultCount < config.minToolCalls) {
+        return { ok: false, reason: "structured_tool_outcome_missing" };
+    }
+    if (transcript.lastStructuredToolOutcome !== "success") {
+        return { ok: false, reason: "tool_outcome_not_successful" };
+    }
+    if (transcript.failedToolResultCount > 0) {
+        // Task Experience is optional and must fail closed. Without a reliable
+        // operation/call correlation model, a later unrelated success cannot be
+        // assumed to resolve an earlier structured failure.
+        return { ok: false, reason: "structured_tool_failure_present" };
+    }
+    if (!finalAssistantClaimsVerifiedSuccess(transcript.finalAssistantText)) {
+        return { ok: false, reason: "verified_success_not_established" };
+    }
     if (transcript.text.length < 400)
         return { ok: false, reason: "transcript_too_short" };
     return { ok: true };
@@ -260,7 +260,15 @@ function classifyTaskExperienceEpisode(goal) {
     return "agent_verified_task";
 }
 function taskExperienceEpisodeOutcome(result) {
-    if (result.action === "skipped" && result.reason === "final_answer_not_successful") {
+    const incompleteOutcomeReasons = new Set([
+        "agent_end_not_successful",
+        "final_answer_not_successful",
+        "structured_tool_outcome_missing",
+        "tool_outcome_not_successful",
+        "structured_tool_failure_present",
+        "verified_success_not_established",
+    ]);
+    if (result.action === "skipped" && incompleteOutcomeReasons.has(result.reason)) {
         return { status: "completed", outcome: "partial" };
     }
     return { status: "completed", outcome: "success" };
@@ -297,6 +305,7 @@ export function buildTaskExperienceEpisodeDraft(params) {
         : [];
     const evidence = [...transcript.evidence.slice(-5), ...finalEvidence].slice(-6);
     const reason = resultReason(result);
+    const reviewerPassed = result.action === "created" || result.action === "duplicate";
     return {
         task_class: taskClass,
         task_goal: truncate(compactWhitespace(taskGoal), 320),
@@ -312,7 +321,13 @@ export function buildTaskExperienceEpisodeDraft(params) {
             auto_created: true,
             capture_action: result.action,
             capture_reason: reason,
-            reviewer_passed: result.action === "created" || result.action === "duplicate",
+            reviewer_passed: reviewerPassed,
+            promotion_eligible: reviewerPassed,
+            promotion_review: {
+                source: "task-experience-reviewer",
+                decision: reviewerPassed ? "approved" : "rejected",
+                reason: reviewerPassed ? "reviewer_accepted_reusable_experience" : (reason || "reviewer_not_approved"),
+            },
             memory_id: result.action === "created" ? result.id : "",
             existing_memory_id: result.action === "duplicate" ? result.existingId : "",
             similarity: result.action === "duplicate" ? result.similarity : 0,
@@ -456,7 +471,7 @@ function hasReusableTaskExperienceMetadata(result) {
 }
 export async function captureTaskExperience(params) {
     const transcript = extractTaskExperienceTranscript(params.messages, params.config.maxInputChars);
-    const gate = shouldAttemptTaskExperienceCapture(transcript, params.config);
+    const gate = shouldAttemptTaskExperienceCapture(transcript, params.config, params.agentEndEvent);
     if (gate.ok !== true)
         return { action: "skipped", reason: gate.reason };
     const reviewRaw = await params.llmClient.completeJson(buildTaskExperiencePrompt(transcript.text), "task-experience");
@@ -466,11 +481,14 @@ export async function captureTaskExperience(params) {
     if (!review.should_store) {
         return { action: "skipped", reason: review.do_not_store_reason || "review_declined" };
     }
-    const text = formatTaskExperienceMemoryText(review, { maxChars: params.config.maxCapsuleChars });
-    const safety = evaluateCaptureSafety(text);
+    const untrustedText = formatTaskExperienceMemoryText(review, { maxChars: params.config.maxCapsuleChars });
+    const safety = evaluateCaptureSafety(untrustedText);
     if (!safety.allowed) {
         return { action: "skipped", reason: `capture_safety_${safety.reason}` };
     }
+    const text = sanitizeCaptureText(untrustedText);
+    if (!text)
+        return { action: "skipped", reason: "capture_safety_empty" };
     const vector = await params.embedder.embedPassage(text);
     let existing = [];
     try {

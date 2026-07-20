@@ -1,5 +1,10 @@
 export interface AutoRecallQueryInput {
   cachedUserMessage?: unknown;
+  /**
+   * Deprecated unsafe compatibility input. Assembled prompts can contain
+   * system instructions, history, and prior memory injection, so automatic
+   * recall must never embed them.
+   */
   eventPrompt?: unknown;
   maxChars?: number;
 }
@@ -23,13 +28,8 @@ export function cleanUserRecallQuery(value: unknown): string {
 export function selectAutoRecallQuery(input: AutoRecallQueryInput): AutoRecallQuerySelection {
   const maxChars = Math.max(1, Math.trunc(input.maxChars ?? 1_000));
   const cached = cleanUserRecallQuery(input.cachedUserMessage);
-  const prompt = cleanUserRecallQuery(input.eventPrompt);
-  const source = cached
-    ? "cached-user-message"
-    : prompt
-      ? "event-prompt"
-      : "empty";
-  const rawQuery = source === "cached-user-message" ? cached : source === "event-prompt" ? prompt : "";
+  const source = cached ? "cached-user-message" : "empty";
+  const rawQuery = cached;
   const originalLength = rawQuery.length;
   const truncated = originalLength > maxChars;
   return {

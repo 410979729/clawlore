@@ -11,6 +11,7 @@ const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: fa
 const {
   findPreviousReflectionSessionFile,
   readSessionConversationWithResetFallback,
+  redactReflectionText,
   summarizeRecentConversationMessages,
 } = jiti("../src/reflection-transcript.ts");
 
@@ -26,8 +27,19 @@ test("reflection transcript keeps recent human turns and removes injected or pri
 
   assert.equal(
     summary,
-    "user: contact [REDACTED] with [REDACTED]\nassistant: done from [REDACTED]",
+    "user: contact [REDACTED] with token=[REDACTED_STRUCTURED_SECRET_ASSIGNMENT]\nassistant: done from [REDACTED]",
   );
+});
+
+test("reflection transcript delegates nested and provider credentials to the central secret policy", () => {
+  const providerSecret = `npm_${"A".repeat(36)}`;
+  const nested = JSON.stringify({
+    l0_abstract: `serviceToken: ${providerSecret}`,
+  });
+  const redacted = redactReflectionText(nested);
+
+  assert.equal(redacted.includes(providerSecret), false);
+  assert.match(redacted, /REDACTED/u);
 });
 
 test("reflection transcript falls back to the newest usable reset snapshot", async () => {

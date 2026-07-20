@@ -12,6 +12,7 @@
  * 5. Auto-promote low-risk playbooks; flag high-risk for review
  */
 import { createHash } from "node:crypto";
+import { containsSecret } from "./secret-redaction.js";
 import { PLAYBOOK_SCHEMA_VERSION, } from "./experience-models.js";
 import { createPlaybook, updatePlaybookStatus, listEpisodes, } from "./experience-store.js";
 // ============================================================================
@@ -29,11 +30,6 @@ const HIGH_RISK_TOKENS = [
     "push", "commit", "tag", "restart", "delete", "rm -",
     "token", "password", "secret", "api key",
     "密钥", "密码", "凭据", "重启", "删除", "推送", "提交仓库",
-];
-const SECRET_LIKE_TOKENS = [
-    "api_key", "apikey", "api-key", "secret_key", "secret-key",
-    "password", "passwd", "token", "bearer", "private_key",
-    "cookie", "session_id", "auth_token",
 ];
 const TOOL_HINTS = [
     "pytest", "ruff", "doctor", "release gate", "terminal",
@@ -54,7 +50,7 @@ function containsAny(text, tokens) {
     return tokens.some((token) => lowered.includes(token.toLowerCase()));
 }
 function containsSecretLikeText(text) {
-    return containsAny(text, SECRET_LIKE_TOKENS);
+    return containsSecret(text);
 }
 function hashId(prefix, ...parts) {
     const digest = createHash("sha1")
@@ -233,6 +229,25 @@ function buildPlaybookPayload(params) {
         confidence: isHighRisk ? 0.78 : 0.86,
     };
 }
+function promotionReviewIssue(episode) {
+    const metadata = episode?.metadata && typeof episode.metadata === "object"
+        ? episode.metadata
+        : {};
+    const review = metadata.promotion_review && typeof metadata.promotion_review === "object"
+        ? metadata.promotion_review
+        : undefined;
+    if (!review && metadata.promotion_eligible === undefined && metadata.reviewer_passed === undefined) {
+        return "legacy_episode_historical";
+    }
+    if (metadata.promotion_eligible !== true)
+        return "promotion_not_eligible";
+    if (metadata.reviewer_passed !== true)
+        return "promotion_reviewer_not_passed";
+    if (!review || review.decision !== "approved" || typeof review.source !== "string" || !review.source.trim()) {
+        return "promotion_review_provenance_missing";
+    }
+    return undefined;
+}
 export function promoteExperiences(db, options = {}) {
     const config = { ...DEFAULT_PROMOTION_CONFIG, ...options.config };
     const dryRun = options.dry_run ?? true;
@@ -244,6 +259,7 @@ export function promoteExperiences(db, options = {}) {
         playbooks_promoted: 0,
         playbooks_needing_review: 0,
         duplicates_skipped: 0,
+        historical_episodes_frozen: 0,
         skipped: 0,
         items: [],
     };
@@ -258,6 +274,19 @@ export function promoteExperiences(db, options = {}) {
         // Skip if outcome is not success
         if (episode.outcome !== "success") {
             result.skipped++;
+            continue;
+        }
+        // Task completion and experience governance are separate truths. A
+        // successful episode is never promotion authority by itself: automatic
+        // extraction requires an explicit positive reviewer decision and its
+        // provenance. Pre-gate episodes remain explicit historical records; this
+        // release does not silently approve or mutate them into promotion inputs.
+        const reviewIssue = promotionReviewIssue(episode);
+        if (reviewIssue) {
+            result.skipped++;
+            if (reviewIssue === "legacy_episode_historical")
+                result.historical_episodes_frozen++;
+            result.items.push({ action: "skip", reason: reviewIssue, episode_id: episode.id });
             continue;
         }
         // Skip if not enough evidence

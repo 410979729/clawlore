@@ -43,6 +43,7 @@ export function registerTaskExperienceHooks(params) {
                     store,
                     mdMirror: params.mdMirror,
                     logger: api.logger,
+                    agentEndEvent: event,
                 });
                 const taskSessionId = sessionKey || (typeof ctx?.sessionId === "string" ? ctx.sessionId : "unknown");
                 let episodeId = "";

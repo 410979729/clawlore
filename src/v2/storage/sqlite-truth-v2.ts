@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
+import { enforcePrivatePath, ensurePrivateDirectory } from "../../file-privacy.js";
 import type {
   CorrectMemoryV2Input,
   ForgetMemoryV2Input,
@@ -18,6 +19,16 @@ import type {
 } from "../application/ports/memory-center-read.js";
 import type { MemoryAddressV2 } from "../domain/memory-address.js";
 import { validateMemoryAddress } from "../domain/memory-address.js";
+import {
+  assertMemoryAddressIdentifiersSafe,
+  normalizeInitialLifecycle,
+  normalizeIsoTimestamp,
+  normalizeMemorySource,
+  normalizeOptionalIsoTimestamp,
+  normalizeTruthIdentifier,
+  normalizeTruthSemanticText,
+  normalizeVerification,
+} from "../domain/truth-write-policy.js";
 import type {
   MemoryLifecycleV2,
   MemoryMutationReceiptV2,
@@ -27,6 +38,12 @@ import type {
 } from "../domain/memory-record.js";
 
 const PROJECTIONS = ["fts", "vector", "relations"] as const;
+
+function enforcePrivateSqliteFamily(path: string): void {
+  for (const candidate of [path, `${path}-wal`, `${path}-shm`]) {
+    if (existsSync(candidate)) enforcePrivatePath(candidate, { kind: "file" });
+  }
+}
 
 export const TRUTH_V2_SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS clawlore_schema (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -153,25 +170,38 @@ export class SqliteTruthStoreV2 implements TruthStoreV2Port, MemoryCenterReadPor
   open(): void {
     if (this.db) return;
     const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: new (path: string) => DatabaseSync };
-    mkdirSync(dirname(this.sqlitePath), { recursive: true });
+    ensurePrivateDirectory(dirname(this.sqlitePath));
+    enforcePrivateSqliteFamily(this.sqlitePath);
     this.db = new DatabaseSync(this.sqlitePath);
     this.db.exec("PRAGMA foreign_keys = ON");
     this.db.exec("PRAGMA busy_timeout = 10000");
     this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec("PRAGMA synchronous = FULL");
     this.ensureSchema();
+    enforcePrivateSqliteFamily(this.sqlitePath);
   }
 
   close(): void {
     this.db?.close?.();
     this.db = null;
+    enforcePrivateSqliteFamily(this.sqlitePath);
   }
 
   remember(input: RememberMemoryV2Input): MemoryMutationReceiptV2 {
-    this.assertWriteInput(input.content, input.address, input.actor, input.reason);
+    this.assertAddress(input.address);
+    const content = normalizeTruthSemanticText(input.content, "memory content", 64_000, { collapseWhitespace: false });
+    const category = normalizeTruthIdentifier(input.category, "memory category", 256);
+    const actor = normalizeTruthIdentifier(input.actor, "memory actor", 512);
+    const reason = normalizeTruthSemanticText(input.reason, "memory reason", 4_000);
+    const lifecycle = normalizeInitialLifecycle(input.lifecycle);
+    const verification = normalizeVerification(input.verification);
+    const validUntil = normalizeOptionalIsoTimestamp(input.validUntil, "memory validUntil");
+    const source = normalizeMemorySource(input.source);
     const db = this.requireDb();
     const now = this.clock.now().toISOString();
-    const itemId = input.itemId ?? this.clock.id();
+    const itemId = input.itemId == null
+      ? this.clock.id()
+      : normalizeTruthIdentifier(input.itemId, "memory item id", 512);
     const revisionId = this.clock.id();
     const eventId = this.clock.id();
     const outboxIds = [this.clock.id(), this.clock.id(), this.clock.id()];
@@ -179,25 +209,25 @@ export class SqliteTruthStoreV2 implements TruthStoreV2Port, MemoryCenterReadPor
       db.prepare(`INSERT INTO memory_revisions
         (revision_id,item_id,revision_no,content,lifecycle,verification,valid_until,created_at)
         VALUES (?,?,?,?,?,?,?,?)`).run(
-        revisionId, itemId, 1, input.content.trim(), input.lifecycle ?? "active",
-        input.verification ?? "unverified", input.validUntil ?? null, now,
+        revisionId, itemId, 1, content, lifecycle,
+        verification, validUntil ?? null, now,
       );
       db.prepare(`INSERT INTO memory_items
         (item_id,current_revision_id,revision_no,content,category,address_json,tenant_id,principal_id,agent_id,
          visibility,retention,workspace_id,project_id,conversation_id,thread_id,customer_id,task_id,
          lifecycle,verification,valid_until,created_at,updated_at)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-        itemId, revisionId, 1, input.content.trim(), input.category.trim(), json(input.address),
+        itemId, revisionId, 1, content, category, json(input.address),
         input.address.tenantId, input.address.principalId, input.address.agentId,
         input.address.visibility, input.address.retention, input.address.workspaceId ?? null,
         input.address.projectId ?? null, input.address.conversationId ?? null,
         input.address.threadId ?? null, input.address.customerId ?? null, input.address.taskId ?? null,
-        input.lifecycle ?? "active", input.verification ?? "unverified", input.validUntil ?? null, now, now,
+        lifecycle, verification, validUntil ?? null, now, now,
       );
-      this.insertSource(revisionId, input.source);
+      this.insertSource(revisionId, source);
       db.prepare(`INSERT INTO memory_acl (acl_id,item_id,owner_principal_id,visibility,policy_json,created_at)
         VALUES (?,?,?,?,?,?)`).run(this.clock.id(), itemId, input.address.principalId, input.address.visibility, "{}", now);
-      this.insertEvent(eventId, itemId, revisionId, "remembered", input.actor, input.reason, now);
+      this.insertEvent(eventId, itemId, revisionId, "remembered", actor, reason, now);
       this.insertOutbox(outboxIds, itemId, revisionId, "upsert", now);
     });
     return {
@@ -208,15 +238,22 @@ export class SqliteTruthStoreV2 implements TruthStoreV2Port, MemoryCenterReadPor
   }
 
   correct(input: CorrectMemoryV2Input): MemoryMutationReceiptV2 {
-    if (!input.content.trim()) throw new Error("content is required");
-    if (!input.actor.trim() || !input.reason.trim()) throw new Error("actor and reason are required");
+    const itemId = normalizeTruthIdentifier(input.itemId, "memory item id", 512);
+    const content = normalizeTruthSemanticText(input.content, "memory content", 64_000, { collapseWhitespace: false });
+    const actor = normalizeTruthIdentifier(input.actor, "memory actor", 512);
+    const reason = normalizeTruthSemanticText(input.reason, "memory reason", 4_000);
+    const source = normalizeMemorySource(input.source);
     const db = this.requireDb();
-    const current = this.get(input.itemId);
+    const current = this.get(itemId);
     if (!current) throw new Error("memory item not found");
     if (["archived", "superseded", "purged"].includes(current.lifecycle)) {
       throw new Error(`memory correction requires an explicit restore from lifecycle ${current.lifecycle}`);
     }
     const nextLifecycle = current.lifecycle;
+    const verification = normalizeVerification(input.verification, current.verification);
+    const validUntil = input.validUntil == null
+      ? current.validUntil
+      : normalizeOptionalIsoTimestamp(input.validUntil, "memory validUntil");
     const now = this.clock.now().toISOString();
     const revisionId = this.clock.id();
     const eventId = this.clock.id();
@@ -227,19 +264,19 @@ export class SqliteTruthStoreV2 implements TruthStoreV2Port, MemoryCenterReadPor
       db.prepare(`INSERT INTO memory_revisions
         (revision_id,item_id,revision_no,content,lifecycle,verification,valid_until,created_at)
         VALUES (?,?,?,?,?,?,?,?)`).run(
-        revisionId, current.itemId, current.revision + 1, input.content.trim(), nextLifecycle,
-        input.verification ?? current.verification, input.validUntil ?? current.validUntil ?? null, now,
+        revisionId, current.itemId, current.revision + 1, content, nextLifecycle,
+        verification, validUntil ?? null, now,
       );
       db.prepare(`UPDATE memory_items SET current_revision_id=?,revision_no=?,content=?,lifecycle=?,
         verification=?,valid_until=?,updated_at=? WHERE item_id=?`).run(
-        revisionId, current.revision + 1, input.content.trim(), nextLifecycle, input.verification ?? current.verification,
-        input.validUntil ?? current.validUntil ?? null, now, current.itemId,
+        revisionId, current.revision + 1, content, nextLifecycle, verification,
+        validUntil ?? null, now, current.itemId,
       );
-      this.insertSource(revisionId, input.source);
+      this.insertSource(revisionId, source);
       db.prepare(`INSERT INTO memory_relations
         (relation_id,from_revision_id,to_revision_id,relation_type,created_at)
         VALUES (?,?,?,?,?)`).run(this.clock.id(), revisionId, current.revisionId, "supersedes", now);
-      this.insertEvent(eventId, current.itemId, revisionId, "corrected", input.actor, input.reason, now);
+      this.insertEvent(eventId, current.itemId, revisionId, "corrected", actor, reason, now);
       this.insertOutbox(outboxIds, current.itemId, revisionId, "upsert", now);
     });
     return {
@@ -251,10 +288,18 @@ export class SqliteTruthStoreV2 implements TruthStoreV2Port, MemoryCenterReadPor
   }
 
   forget(input: ForgetMemoryV2Input): MemoryMutationReceiptV2 {
-    if (!input.actor.trim() || !input.reason.trim()) throw new Error("actor and reason are required");
+    const itemId = normalizeTruthIdentifier(input.itemId, "memory item id", 512);
+    const actor = normalizeTruthIdentifier(input.actor, "memory actor", 512);
+    const reason = normalizeTruthSemanticText(input.reason, "memory reason", 4_000);
+    if (input.hardDelete != null && typeof input.hardDelete !== "boolean") {
+      throw new Error("hard delete flag must be boolean");
+    }
+    if (input.approved != null && typeof input.approved !== "boolean") {
+      throw new Error("hard delete approval flag must be boolean");
+    }
     if (input.hardDelete && input.approved !== true) throw new Error("hard delete requires explicit approval");
     const db = this.requireDb();
-    const current = this.get(input.itemId);
+    const current = this.get(itemId);
     if (!current) throw new Error("memory item not found");
     const now = this.clock.now().toISOString();
     const eventId = this.clock.id();
@@ -281,7 +326,7 @@ export class SqliteTruthStoreV2 implements TruthStoreV2Port, MemoryCenterReadPor
         db.prepare(`UPDATE memory_items SET current_revision_id=?,revision_no=?,lifecycle='archived',updated_at=?
           WHERE item_id=?`).run(revisionId, current.revision + 1, now, current.itemId);
       }
-      this.insertEvent(eventId, current.itemId, revisionId, input.hardDelete ? "purged" : "archived", input.actor, input.reason, now);
+      this.insertEvent(eventId, current.itemId, revisionId, input.hardDelete ? "purged" : "archived", actor, reason, now);
       this.insertOutbox(outboxIds, current.itemId, revisionId, operation, now);
     });
     return {
@@ -421,14 +466,20 @@ export class SqliteTruthStoreV2 implements TruthStoreV2Port, MemoryCenterReadPor
   }
 
   markOutboxProcessed(outboxId: string): void {
+    const normalizedId = normalizeTruthIdentifier(outboxId, "outbox id", 512);
     this.requireDb().prepare("UPDATE projection_outbox SET processed_at=? WHERE outbox_id=?")
-      .run(this.clock.now().toISOString(), outboxId);
+      .run(this.clock.now().toISOString(), normalizedId);
   }
 
   recordOutboxFailure(outboxId: string, errorCode: string, retryAt?: string): void {
+    const normalizedId = normalizeTruthIdentifier(outboxId, "outbox id", 512);
+    const normalizedCode = normalizeTruthIdentifier(errorCode, "outbox error code", 160);
+    const normalizedRetryAt = retryAt == null
+      ? this.clock.now().toISOString()
+      : normalizeIsoTimestamp(retryAt, "outbox retryAt");
     this.requireDb().prepare(`UPDATE projection_outbox
       SET attempts=attempts+1,last_error=?,available_at=? WHERE outbox_id=?`)
-      .run(errorCode.slice(0, 160), retryAt ?? this.clock.now().toISOString(), outboxId);
+      .run(normalizedCode, normalizedRetryAt, normalizedId);
   }
 
   count(table: string): number {
@@ -437,11 +488,10 @@ export class SqliteTruthStoreV2 implements TruthStoreV2Port, MemoryCenterReadPor
     return Number(this.requireDb().prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count);
   }
 
-  private assertWriteInput(content: string, address: MemoryAddressV2, actor: string, reason: string): void {
-    if (!content.trim()) throw new Error("content is required");
+  private assertAddress(address: MemoryAddressV2): void {
     const validation = validateMemoryAddress(address);
     if (!validation.valid) throw new Error(`invalid memory address: ${validation.errors.map((item) => item.code).join(",")}`);
-    if (!actor.trim() || !reason.trim()) throw new Error("actor and reason are required");
+    assertMemoryAddressIdentifiersSafe(address);
   }
 
   private transaction<T>(action: () => T): T {
@@ -452,7 +502,7 @@ export class SqliteTruthStoreV2 implements TruthStoreV2Port, MemoryCenterReadPor
       db.exec("COMMIT");
       return result;
     } catch (error) {
-      db.exec("ROLLBACK");
+      try { db.exec("ROLLBACK"); } catch { /* preserve the original transaction failure */ }
       throw error;
     }
   }

@@ -15,10 +15,8 @@ Thank you for improving `clawlore`.
 Run the focused checks before opening a pull request:
 
 ```bash
-npm install
-npm test
-npm run smoke:vector-repair
-npm run release:gate
+npm ci --include=dev
+npm run release:prepush
 ```
 
 For live OpenClaw validation, use the target instance's own OpenClaw binary and home directory:
@@ -31,7 +29,8 @@ OPENCLAW_HOME=/path/to/state /path/to/openclaw clawlore doctor --json --quiet
 
 - Package and manifest versions match.
 - `npm test` passes.
-- `npm run release:gate` passes.
+- `npm run release:prepush` passes on the clean candidate commit.
+- After push, `npm run release:gate:source -- --release-ref <exact-ref>` passes.
 - `npm pack --dry-run --json` contains only public plugin files.
 - New capture, recall, repair, or migration behavior has a focused test or smoke check.
 - Documentation is updated when behavior or operator commands change.

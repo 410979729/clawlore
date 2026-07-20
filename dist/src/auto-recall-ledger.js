@@ -6,13 +6,9 @@
  * decisions, hashed memory references, and filter reasons without memory text.
  */
 import { createHash, randomUUID } from "node:crypto";
+import { redactSupportBundle } from "./application/support-bundle.js";
+import { redactKnownSecrets } from "./secret-redaction.js";
 const TRACE_TABLE = "auto_recall_trace_events";
-const SECRET_LIKE_PATTERNS = [
-    /\bsk-[A-Za-z0-9_-]{8,}\b/g,
-    /\bAIza[A-Za-z0-9_-]{8,}\b/g,
-    /\b(?:api[_-]?key|token|password|passwd|secret|private[_-]?key)\b\s*[:=]\s*["']?[^"'\s,;]{4,}/gi,
-    /\bBearer\s+[A-Za-z0-9._-]{8,}\b/gi,
-];
 const WRAPPER_PATTERNS = [
     /<relevant-memories>[\s\S]*?<\/relevant-memories>/gi,
     /\[UNTRUSTED DATA[\s\S]*?\[END UNTRUSTED DATA\]/gi,
@@ -29,15 +25,12 @@ function clampInt(value, fallback, min, max) {
     return Math.max(min, Math.min(max, Math.trunc(n)));
 }
 function redactText(value, maxChars = 220) {
-    let text = String(value ?? "").replace(/\s+/g, " ").trim();
+    let text = String(value ?? "");
     for (const pattern of WRAPPER_PATTERNS) {
         pattern.lastIndex = 0;
         text = text.replace(pattern, "[redacted: wrapper]");
     }
-    for (const pattern of SECRET_LIKE_PATTERNS) {
-        pattern.lastIndex = 0;
-        text = text.replace(pattern, "[redacted: secret-like content]");
-    }
+    text = redactKnownSecrets(text).replace(/\s+/g, " ").trim();
     if (text.length <= maxChars)
         return text;
     return `${text.slice(0, Math.max(0, maxChars - 3))}...`;
@@ -48,6 +41,13 @@ function memoryRef(value) {
         return "mem_unknown";
     const digest = createHash("sha256").update(raw).digest("hex").slice(0, 16);
     return `mem_${digest}`;
+}
+function querySummary(value) {
+    const raw = String(value ?? "");
+    if (!raw)
+        return "";
+    const digest = createHash("sha256").update(raw).digest("hex").slice(0, 16);
+    return `sha256:${digest};length=${raw.length}`;
 }
 function normalizeScore(value) {
     const n = typeof value === "number" ? value : Number(value);
@@ -139,7 +139,9 @@ export function recordAutoRecallTrace(db, params) {
       decision, reason, result_count, injected_count, suppressed_count,
       crossed_scope_count, filter_reasons, memory_refs, metadata, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, params.scope_id, params.session_id ?? "", params.agent_id ?? "", params.channel ?? "", params.query_source ?? "", redactText(params.query ?? "", 260), params.decision, normalizeReason(params.reason ?? ""), clampInt(params.result_count, memoryRefs.length, 0, 10_000), clampInt(params.injected_count, memoryRefs.filter((ref) => ref.filter_status === "injected").length, 0, 10_000), clampInt(params.suppressed_count, memoryRefs.filter((ref) => ref.filter_status !== "injected").length, 0, 10_000), crossedScopeCount, JSON.stringify(filterReasons), JSON.stringify(memoryRefs), JSON.stringify(params.metadata ?? {}), createdAt);
+  `).run(id, params.scope_id, params.session_id ?? "", params.agent_id ?? "", params.channel ?? "", redactText(params.query_source ?? "", 80), params.include_query_preview === true
+        ? redactText(params.query ?? "", 260)
+        : querySummary(params.query), params.decision, normalizeReason(params.reason ?? ""), clampInt(params.result_count, memoryRefs.length, 0, 10_000), clampInt(params.injected_count, memoryRefs.filter((ref) => ref.filter_status === "injected").length, 0, 10_000), clampInt(params.suppressed_count, memoryRefs.filter((ref) => ref.filter_status !== "injected").length, 0, 10_000), crossedScopeCount, JSON.stringify(filterReasons), JSON.stringify(memoryRefs), JSON.stringify(redactSupportBundle(params.metadata ?? {})), createdAt);
     return id;
 }
 export function listAutoRecallTraces(db, options = {}) {

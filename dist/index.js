@@ -1,7 +1,3 @@
-/**
- * ClawLore memory plugin for OpenClaw.
- * SQLite-backed long-term memory with hybrid retrieval and multi-scope isolation.
- */
 import { dirname, join } from "node:path";
 import { mkdir, appendFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
@@ -38,6 +34,7 @@ import { registerMarkdownCompatibility } from "./src/markdown-compat.js";
 import { createMdMirrorWriter } from "./src/markdown-mirror.js";
 import { createConfiguredLlmRuntime, createCoreMemoryRuntime, getDefaultWorkspaceDir, resolveCliPluginConfig, } from "./src/core-memory-runtime.js";
 import { registerClawLoreShadowRuntime } from "./src/runtime-shadow-registration.js";
+import { resolveRuntimeDiagnosticFile } from "./src/runtime-diagnostic-receipt.js";
 import { ReflectionRuntimeState } from "./src/reflection-runtime-state.js";
 import { registerAutoRecallHooks } from "./src/auto-recall-hooks.js";
 import { registerAutoCaptureHooks } from "./src/auto-capture-hooks.js";
@@ -115,6 +112,7 @@ function registerCliMetadata(api) {
         llmClient: undefined,
         pluginId: CLAWLORE_PLUGIN_ID,
         pluginConfig: (api.pluginConfig ?? {}),
+        runtimeDiagnosticFile: undefined,
         beforeAction: async (commandPath) => {
             const root = commandPath[0];
             if (root === "version" || root === "auth" || root === "authority" || initialized)
@@ -127,6 +125,7 @@ function registerCliMetadata(api) {
             context.embedder = runtime.embedder;
             context.llmClient = runtime.cliLlmClient;
             context.pluginConfig = runtime.config;
+            context.runtimeDiagnosticFile = resolveRuntimeDiagnosticFile(runtime.resolvedDbPath);
             initialized = true;
         },
     };
@@ -158,6 +157,8 @@ const clawLorePlugin = {
             migrator,
             embedder,
             llmClient: cliLlmClient,
+            pluginConfig: config,
+            runtimeDiagnosticFile: resolveRuntimeDiagnosticFile(resolvedDbPath),
         }), { commands: [CLAWLORE_CLI_PRIMARY, ...CLAWLORE_CLI_ALIASES] });
         registerMarkdownCompatibility({
             api,
@@ -203,7 +204,7 @@ const clawLorePlugin = {
         const extractionRateLimiter = createExtractionRateLimiter({
             maxExtractionsPerHour: config.extractionThrottle?.maxExtractionsPerHour,
         });
-        registerClawLoreShadowRuntime({
+        const runtimeDiagnostic = registerClawLoreShadowRuntime({
             api,
             config,
             resolvedDbPath,
@@ -244,8 +245,11 @@ const clawLorePlugin = {
             const { access } = runtimeMemoryAccessFor(event, ctx);
             if (!access.denied) {
                 autoCaptureSessionState.recordIngress({
-                    channelId: ctx.channelId,
-                    conversationId: ctx.conversationId,
+                    channelId: ctx.channelId ?? event.channelId,
+                    accountId: ctx.accountId ?? event.accountId,
+                    conversationId: ctx.conversationId ?? event.conversationId ?? event.chatId,
+                    chatType: ctx.chatType ?? event.chatType,
+                    sessionKey: ctx.sessionKey ?? event.sessionKey,
                     content: event.content,
                     shouldSkipMessage: shouldSkipReflectionMessage,
                 });
@@ -373,6 +377,7 @@ const clawLorePlugin = {
         api.registerService({
             id: CLAWLORE_PLUGIN_ID,
             start: async () => {
+                await runtimeDiagnostic.start();
                 api.logger.info(`clawlore: service start (db=${diagnosticIdentifier(resolvedDbPath)})`);
                 // IMPORTANT: Do not block gateway startup on external network calls.
                 // If embedding/retrieval tests hang (bad network / slow provider), the gateway
@@ -443,6 +448,7 @@ const clawLorePlugin = {
                     clearTimeout(legacyScanTimer);
                     legacyScanTimer = null;
                 }
+                await runtimeDiagnostic.stop();
                 api.logger.info("clawlore: stopped");
             },
         });

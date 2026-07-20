@@ -1,3 +1,5 @@
+import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
+
 type RetryClassifierInput = {
   inReflectionScope: boolean;
   retryCount: number;
@@ -98,12 +100,6 @@ function toErrorMessage(error: unknown): string {
   }
 }
 
-function clipSingleLine(text: string, maxLen = 260): string {
-  const oneLine = text.replace(/\s+/g, " ").trim();
-  if (oneLine.length <= maxLen) return oneLine;
-  return `${oneLine.slice(0, maxLen - 3)}...`;
-}
-
 export function isTransientReflectionUpstreamError(error: unknown): boolean {
   const msg = toErrorMessage(error);
   return REFLECTION_TRANSIENT_PATTERNS.some((pattern) => pattern.test(msg));
@@ -115,7 +111,7 @@ export function isReflectionNonRetryError(error: unknown): boolean {
 }
 
 export function classifyReflectionRetry(input: RetryClassifierInput): RetryClassifierResult {
-  const normalizedError = clipSingleLine(toErrorMessage(input.error), 260);
+  const normalizedError = diagnosticErrorSummary(input.error);
 
   if (!input.inReflectionScope) {
     return { retryable: false, reason: "not_reflection_scope", normalizedError };
@@ -172,7 +168,7 @@ export async function runWithReflectionTransientRetryOnce<T>(
       params.onLog?.(
         "warn",
         `memory-${params.scope}: retry exhausted (${params.runner}). ` +
-        `error=${clipSingleLine(toErrorMessage(retryError), 260)}`
+        `error=${diagnosticErrorSummary(retryError)}`
       );
       throw retryError;
     }

@@ -105,3 +105,117 @@ test("support bundle redacts credentials, authorization, private keys, and local
   assert.equal(serialized.includes("/home/example"), false);
   assert.equal(bundle.diagnostics.nested.safe, "fts-only");
 });
+
+test("support bundle shares capture redaction for provider-specific secrets", () => {
+  const values = [
+    `${"sk"}_live_${"A".repeat(24)}`,
+    `${"glpat"}-${"b".repeat(24)}`,
+    `${"ya29"}.${"c".repeat(24)}`,
+    `${"SG"}.${"d".repeat(20)}.${"e".repeat(24)}`,
+  ];
+  const bundle = buildSupportBundleV1({
+    pluginVersion: "1.2.0",
+    runtimeMode: "shadow",
+    diagnostics: { values },
+  });
+  const serialized = JSON.stringify(bundle);
+  for (const value of values) assert.equal(serialized.includes(value), false);
+});
+
+test("support bundle redacts later real secrets after placeholders in nested values", () => {
+  const realPassword = "RealSecret123";
+  const realToken = `${"glpat"}-${"z".repeat(24)}`;
+  const bundle = buildSupportBundleV1({
+    pluginVersion: "1.2.0",
+    runtimeMode: "shadow",
+    diagnostics: {
+      values: [
+        `password=changeme password=${realPassword}`,
+        { nested: `token=placeholder token=${realToken}` },
+        "password=MyExamplePass123",
+      ],
+    },
+  });
+  const serialized = JSON.stringify(bundle);
+  for (const value of [realPassword, realToken, "MyExamplePass123"]) {
+    assert.equal(serialized.includes(value), false);
+  }
+});
+
+test("support bundle redacts env credentials and HTTP headers stored under ordinary keys", () => {
+  const secrets = [
+    "CorrectHorse77!",
+    "service-token-value-123",
+    "dXNlcjpwYXNzd29yZA==",
+    "session-value-123",
+    "session-value-456",
+  ];
+  const bundle = buildSupportBundleV1({
+    pluginVersion: "1.2.0",
+    runtimeMode: "shadow",
+    diagnostics: {
+      status: "DB_PASSWORD=CorrectHorse77!",
+      summary: "SERVICE_TOKEN=service-token-value-123",
+      request: "Authorization: Basic dXNlcjpwYXNzd29yZA==",
+      requestHeaders: "Cookie: session_id=session-value-123; theme=dark",
+      responseHeaders: "Set-Cookie: session_id=session-value-456; Secure; HttpOnly",
+    },
+  });
+  const serialized = JSON.stringify(bundle);
+  for (const secret of secrets) assert.equal(serialized.includes(secret), false, secret);
+});
+
+test("support bundle redacts namespaced YAML and JSON credentials under ordinary keys", () => {
+  const secrets = ["CorrectHorse77!", "service-token-value-123"];
+  const bundle = buildSupportBundleV1({
+    pluginVersion: "1.2.0",
+    runtimeMode: "shadow",
+    diagnostics: {
+      yamlConfig: "DB_PASSWORD: CorrectHorse77!",
+      jsonPayload: '{"DB_PASSWORD":"CorrectHorse77!"}',
+      inlineConfig: "config: { SERVICE_TOKEN: service-token-value-123 }",
+    },
+  });
+  const serialized = JSON.stringify(bundle);
+  for (const secret of secrets) assert.equal(serialized.includes(secret), false, secret);
+});
+
+test("support bundle shares camelCase and YAML block-scalar secret parsing", () => {
+  const secrets = [
+    "Synthetic Value With Spaces 123",
+    "synthetic-token-value-123",
+    "synthetic block value line one",
+    "line two",
+  ];
+  const bundle = buildSupportBundleV1({
+    pluginVersion: "1.2.0",
+    runtimeMode: "shadow",
+    diagnostics: {
+      ordinaryJsonText: '{"databasePassword":"Synthetic Value With Spaces 123","serviceToken":"synthetic-token-value-123"}',
+      ordinaryYamlText: "DB_PASSWORD: >-\n  synthetic block value line one\n  line two\nsafe: ok",
+      safePolicyText: 'passwordPolicy: "minimum 12 characters"',
+    },
+  });
+  const serialized = JSON.stringify(bundle);
+  for (const secret of secrets) assert.equal(serialized.includes(secret), false, secret);
+  assert.equal(serialized.includes("minimum 12 characters"), true);
+});
+
+test("support bundle uses normalized secret keys and bounds cyclic diagnostics", () => {
+  const cyclic = {
+    encryptionKey: "synthetic-encryption-key-material",
+    publicKey: "safe-public-key-label",
+    nested: {},
+  };
+  cyclic.nested.parent = cyclic;
+  const bundle = buildSupportBundleV1({
+    pluginVersion: "1.2.1",
+    runtimeMode: "shadow",
+    diagnostics: cyclic,
+    generatedAt: "2026-07-20T00:00:00.000Z",
+  });
+  assert.equal(bundle.diagnostics.encryptionKey, "<redacted-secret>");
+  assert.equal(bundle.diagnostics.publicKey, "safe-public-key-label");
+  assert.equal(bundle.diagnostics.nested.parent, "<redacted-circular-reference>");
+  assert.doesNotThrow(() => JSON.stringify(bundle));
+});

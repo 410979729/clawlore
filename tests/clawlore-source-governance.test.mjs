@@ -34,13 +34,14 @@ const ROOT_MODULES_BY_LAYER = {
     "runtime-shadow-registration.ts",
   ],
   domain: [
-    "auto-capture-policy.ts", "auto-recall-query.ts", "auto-recall-session-boundary.ts", "capture-safety.ts",
+    "auto-capture-policy.ts", "auto-recall-query.ts", "auto-recall-session-boundary.ts", "bounded-ttl-map.ts", "capture-safety.ts",
     "decay-engine.ts", "experience-models.ts", "experience-schemas.ts",
-    "extraction-prompts.ts", "memory-categories.ts", "noise-filter.ts",
-    "noise-prototypes.ts", "preference-slots.ts", "product-identity.ts",
+    "extraction-prompts.ts", "lifecycle-metadata.ts", "memory-categories.ts", "memory-egress-policy.ts", "memory-entry-write-policy.ts", "memory-merge-policy.ts", "memory-metadata-policy.ts", "noise-filter.ts",
+    "noise-prototypes.ts", "preference-slots.ts", "product-identity.ts", "self-improvement-content-policy.ts",
     "reflection-contracts.ts", "reflection-mapped-metadata.ts", "reflection-metadata.ts", "reflection-ranking.ts",
-    "reflection-slices.ts", "runtime-memory-boundary.ts", "runtime-scope-metadata.ts",
-    "scope-policy.ts", "smart-metadata.ts",
+    "reflection-slices.ts", "runtime-accessibility-diagnostic.ts", "runtime-memory-boundary.ts", "runtime-scope-metadata.ts",
+    "diagnostic-redaction.ts", "provider-output-policy.ts", "scope-policy.ts", "secret-redaction.ts", "secret-structured-text.ts", "smart-metadata.ts",
+    "task-outcome-evidence.ts",
   ],
   application: [
     "application/context-composer.ts", "application/identity-resolver.ts",
@@ -50,15 +51,15 @@ const ROOT_MODULES_BY_LAYER = {
     "admission-stats.ts", "auto-capture-cleanup.ts", "auto-capture-governance.ts",
     "auto-capture-session-state.ts",
     "auto-recall-ledger.ts", "batch-dedup.ts", "candidate-promotion.ts",
-    "chunker.ts", "conflict-governance.ts", "digest-pipeline.ts",
-    "experience-governance.ts", "experience-promotion-batch.ts", "experience-promotion.ts",
+    "chunker.ts", "conflict-governance.ts", "digest-pipeline.ts", "embedding-noise-filter.ts",
+    "digest-boundary-policy.ts", "experience-governance.ts", "experience-promotion-batch.ts", "experience-promotion.ts",
     "experience-replay.ts", "forgetting.ts", "governance-cleanup.ts",
     "graph-hygiene.ts", "identity-addressing.ts", "intent-analyzer.ts",
-    "knowledge-skill-bridge.ts", "memory-compactor.ts", "memory-upgrader.ts",
+    "knowledge-skill-bridge.ts", "memory-upgrader.ts",
     "memory-store-facade.ts", "memory-store-ports.ts",
     "reflection-retry.ts", "retrieval-stats.ts", "retrieval-trace.ts",
     "retriever.ts", "session-compressor.ts", "smart-extractor.ts",
-    "task-experience.ts", "tier-manager.ts",
+    "sql-lifecycle-projection.ts", "task-experience.ts", "tier-manager.ts",
   ],
   adapters: [
     "adapters/openclaw/compatibility-context-adapter.ts", "adapters/openclaw/context-engine-skeleton.ts",
@@ -76,7 +77,7 @@ const ROOT_MODULES_BY_LAYER = {
   infrastructure: [
     "artifacts.ts", "embedder.ts", "experience-store.ts", "file-privacy.ts",
     "journal-recovery.ts", "llm-client.ts", "llm-oauth.ts", "oauth-session-storage.ts",
-    "proper-lockfile.d.ts", "reflection-event-store.ts", "reflection-item-store.ts",
+    "private-lock-file.ts", "proper-lockfile.d.ts", "reflection-event-store.ts", "reflection-item-store.ts",
     "reflection-store.ts", "secret-index.ts",
     "sql-authority-migration.ts", "sql-truth-store.ts", "sqlite-vector-store.ts",
     "store.ts", "workspace-boundary.ts", "markdown-mirror.ts",
@@ -86,8 +87,8 @@ const ROOT_MODULES_BY_LAYER = {
     "cli/auth-commands.ts", "cli/auth-config-transaction.ts", "cli/cli-runtime-policy.ts",
     "cli/diagnostic-commands.ts",
     "cli/experience-commands.ts", "cli/governance-commands.ts", "cli/memory-commands.ts",
-    "cli/migration-commands.ts", "diagnostic-redaction.ts", "diagnostics-redaction.ts", "migrate.ts",
-    "operator-dashboard.ts", "release-provenance.ts", "self-improvement-files.ts",
+    "cli/migration-commands.ts", "diagnostics-redaction.ts", "migrate.ts",
+    "memory-compactor.ts", "operator-dashboard.ts", "release-provenance.ts", "runtime-diagnostic-receipt.ts", "self-improvement-files.ts",
   ],
   compat: ["adapters/openclaw/runtime-shadow.ts", "clawteam-scope.ts", "markdown-compat.ts"],
 };
@@ -120,42 +121,27 @@ const ROOT_REVERSE_DEPENDENCY_DEBT = new Set([
   "src/admission-control.ts -> src/llm-client.ts",
   "src/admission-control.ts -> src/store.ts",
   "src/conflict-governance.ts -> src/store.ts",
-  "src/digest-pipeline.ts -> src/diagnostic-redaction.ts",
   "src/digest-pipeline.ts -> src/llm-client.ts",
   "src/digest-pipeline.ts -> src/store.ts",
-  "src/embedder.ts -> src/diagnostic-redaction.ts",
   "src/experience-promotion-batch.ts -> src/experience-store.ts",
   "src/experience-replay.ts -> src/experience-store.ts",
-  "src/experience-tools.ts -> src/diagnostic-redaction.ts",
   "src/experience-tools.ts -> src/embedder.ts",
   "src/experience-tools.ts -> src/journal-recovery.ts",
   "src/experience-tools.ts -> src/operator-dashboard.ts",
   "src/experience-tools.ts -> src/store.ts",
   "src/experience-tools.ts -> src/workspace-boundary.ts",
-  "src/forgetting.ts -> src/diagnostic-redaction.ts",
-  "src/llm-client.ts -> src/diagnostic-redaction.ts",
-  "src/llm-oauth.ts -> src/diagnostic-redaction.ts",
-  "src/memory-compactor.ts -> src/diagnostic-redaction.ts",
-  "src/memory-compactor.ts -> src/store.ts",
-  "src/memory-upgrader.ts -> src/diagnostic-redaction.ts",
   "src/memory-upgrader.ts -> src/llm-client.ts",
   "src/memory-upgrader.ts -> src/store.ts",
   "src/noise-prototypes.ts -> src/embedder.ts",
-  "src/retriever.ts -> src/diagnostic-redaction.ts",
   "src/retriever.ts -> src/embedder.ts",
   "src/retriever.ts -> src/store.ts",
-  "src/smart-extractor.ts -> src/diagnostic-redaction.ts",
   "src/smart-extractor.ts -> src/embedder.ts",
   "src/smart-extractor.ts -> src/llm-client.ts",
   "src/smart-extractor.ts -> src/store.ts",
-  "src/sql-authority-migration.ts -> src/diagnostic-redaction.ts",
-  "src/store.ts -> src/diagnostic-redaction.ts",
-  "src/task-experience.ts -> src/diagnostic-redaction.ts",
   "src/task-experience.ts -> src/embedder.ts",
   "src/task-experience.ts -> src/llm-client.ts",
   "src/task-experience.ts -> src/store.ts",
   "src/tools.ts -> src/artifacts.ts",
-  "src/tools.ts -> src/diagnostic-redaction.ts",
   "src/tools.ts -> src/embedder.ts",
   "src/tools.ts -> src/secret-index.ts",
   "src/tools.ts -> src/self-improvement-files.ts",
@@ -279,6 +265,33 @@ test("migration-era root reverse dependencies match the shrink-only debt ledger"
   }
 
   assert.deepEqual([...observedDebt].sort(), [...ROOT_REVERSE_DEPENDENCY_DEBT].sort());
+});
+
+test("memory_truth DML is confined to the mutation allowlist and synchronizes lifecycle projection", async () => {
+  const allowed = new Set([
+    "src/candidate-promotion.ts",
+    "src/forgetting.ts",
+    "src/governance-cleanup.ts",
+    "src/sql-truth-store.ts",
+  ]);
+  const dml = /\b(?:UPDATE\s+memory_truth|DELETE\s+FROM\s+memory_truth|INSERT\s+(?:OR\s+\w+\s+)?INTO\s+memory_truth)\b/i;
+  const observed = [];
+  for (const path of await filesUnder(srcRoot, ".ts")) {
+    const source = await readFile(path, "utf8");
+    if (!dml.test(source)) continue;
+    const key = relative(root, path).replaceAll("\\", "/");
+    observed.push(key);
+    assert.equal(allowed.has(key), true, `memory_truth DML outside mutation allowlist: ${key}`);
+    if (key !== "src/sql-truth-store.ts") {
+      assert.match(source, /syncLifecycleProjectionFromTruth/,
+        `raw mutation path must synchronize lifecycle projection: ${key}`);
+    }
+  }
+  assert.deepEqual(observed.sort(), [...allowed].sort());
+
+  const migration = await readFile(resolve("scripts/migrate-legacy-hygiene.mjs"), "utf8");
+  assert.match(migration, dml);
+  assert.match(migration, /syncLifecycleProjectionFromTruth/);
 });
 
 test("existing TypeScript hotspots cannot grow and new modules stay below 800 lines", async () => {

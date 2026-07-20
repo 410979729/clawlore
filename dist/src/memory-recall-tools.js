@@ -4,6 +4,7 @@
  */
 import { Type } from "@sinclair/typebox";
 import { getDisplayCategoryTag } from "./reflection-metadata.js";
+import { redactMemoryTextForOutput } from "./memory-egress-policy.js";
 import { parseSmartMetadata } from "./smart-metadata.js";
 import { filterUserMdExclusiveRecallResults } from "./workspace-boundary.js";
 import { clampInt, MEMORY_CATEGORIES, normalizeInlineText, requireRuntimeAgentId, requireRuntimeMemoryAccess, resolveToolContext, retrieveWithRetry, safeToolFailure, sanitizeMemoryForSerialization, stringEnum, truncateText } from "./tool-runtime-policy.js";
@@ -75,7 +76,7 @@ export function registerMemoryRecallTool(api, context) {
                     if (results.length === 0) {
                         return {
                             content: [{ type: "text", text: "No relevant memories found." }],
-                            details: { count: 0, query, scopes: scopeFilter },
+                            details: { count: 0, query: redactMemoryTextForOutput(query), scopes: scopeFilter },
                         };
                     }
                     const now = Date.now();
@@ -108,7 +109,7 @@ export function registerMemoryRecallTool(api, context) {
                         for (let i = 0; i < results.length; i++) {
                             const metadata = parseSmartMetadata(results[i].entry.metadata, results[i].entry);
                             serializedMemories[i].fullText =
-                                metadata.l2_content || metadata.l1_overview || results[i].entry.text;
+                                redactMemoryTextForOutput(metadata.l2_content || metadata.l1_overview || results[i].entry.text);
                         }
                     }
                     return {
@@ -121,7 +122,7 @@ export function registerMemoryRecallTool(api, context) {
                         details: {
                             count: results.length,
                             memories: serializedMemories,
-                            query,
+                            query: redactMemoryTextForOutput(query),
                             scopes: scopeFilter,
                             retrievalMode: runtimeContext.retriever.getConfig().mode,
                         },

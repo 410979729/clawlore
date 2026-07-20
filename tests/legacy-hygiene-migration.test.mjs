@@ -106,6 +106,12 @@ test("legacy hygiene migration is dry-run first and backup-backed on apply", () 
     const scratch = JSON.parse(db.prepare("SELECT metadata FROM memory_truth WHERE id = ?").get("scratch-1").metadata);
     const durable = JSON.parse(db.prepare("SELECT metadata FROM memory_truth WHERE id = ?").get("durable-1").metadata);
     const ftsRows = db.prepare("SELECT COUNT(*) AS count FROM memory_truth_fts").get().count;
+    const projectionRows = db.prepare(
+      "SELECT memory_id, static_lifecycle FROM memory_lifecycle_projection ORDER BY memory_id",
+    ).all();
+    const projectionState = db.prepare(
+      "SELECT schema_version, projected_rows FROM memory_lifecycle_projection_state WHERE singleton = 1",
+    ).get();
     db.close();
 
     assert.equal(scratch.state, "archived");
@@ -117,6 +123,9 @@ test("legacy hygiene migration is dry-run first and backup-backed on apply", () 
     assert.notEqual(durable.memory_layer.length, 0);
     assert.equal(durable.legacy_hygiene.action, "normalize_durable_metadata");
     assert.equal(ftsRows, 2);
+    assert.equal(projectionRows.length, 3);
+    assert.equal(projectionRows.find((row) => row.memory_id === "scratch-1").static_lifecycle, "archived");
+    assert.deepEqual({ ...projectionState }, { schema_version: 4, projected_rows: 3 });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

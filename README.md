@@ -20,7 +20,7 @@ Public installs default to conservative behavior:
 
 - `autoCapture` is off until an operator explicitly enables it.
 - `smartExtraction` is off until an operator opts in to LLM-based extraction.
-- `autoBackup` is off; daily JSONL memory exports are plaintext and should only be enabled deliberately.
+- `autoBackup` is a deprecated no-op retained for configuration compatibility. Keep it `false`; `true` makes `clawlore doctor` report an issue and never creates a backup. Use the encrypted snapshot/export operator flow instead.
 - Hosted embeddings and reranking can send text to configured providers. Use `local-hash`, local endpoints, or disabled reranking for sensitive deployments.
 - `memory_forget` requires `confirm: true` for deletion; query mode returns candidates first.
 - External memory access is principal-bound by default. Private chats use a
@@ -79,9 +79,11 @@ openclaw clawlore stats --json --quiet
 openclaw clawlore doctor
 openclaw clawlore doctor --json
 openclaw clawlore doctor --json --quiet
+openclaw clawlore repair-lifecycle-projection --json
+openclaw clawlore repair-lifecycle-projection --apply --json
 ```
 
-The stats command reports SQL truth availability, SQLite row count, FTS integrity, and whether the vector companion needs repair. The doctor command is read-only and adds scope distribution checks, SQL-vs-vector scope comparison, configured vector dimensions, missing/stale vector row counts, and a repair hint. Use `--json --quiet` when automation needs JSON written directly to stdout through the OpenClaw CLI wrapper.
+The stats command reports SQL truth availability, SQLite row count, FTS integrity, and whether the vector companion needs repair. The doctor command is read-only and adds scope distribution checks, SQL-vs-vector scope comparison, configured vector dimensions, missing/stale vector row counts, lifecycle-projection freshness, and repair hints. It reports projection drift without changing the database. `repair-lifecycle-projection` is also dry-run by default; only the explicit `--apply` form rebuilds the auxiliary projection from `memory_truth`. Use `--json --quiet` when automation needs JSON written directly to stdout through the OpenClaw CLI wrapper.
 
 ## Runtime isolation and release readiness
 
@@ -145,14 +147,14 @@ do not break during the product rename.
 ```bash
 npm run smoke:vector-repair
 node scripts/golden-benchmark.mjs
-npm run release:gate:source
+npm run release:prepush
 ```
 
 The smoke test creates a temporary database, writes two SQL-truth memories, dry-runs vector repair, rebuilds the vector companion with a fake embedder through the explicit apply path, verifies diagnostics, and deletes the temp database.
 
 The golden benchmark runs repository-owned recall assertions against a temporary SQLite truth/FTS fixture.
 
-The source release gate checks package/manifest version consistency, changelog
+The non-authorizing pre-push gate checks package/manifest version consistency, changelog
 coverage, schema/UI config exposure, compiled output, vector repair, the golden
 benchmark, Experience replay fixtures, and public npm pack contents. The default
 `npm run release:gate` additionally requires an exact live `extensions/clawlore`
@@ -160,6 +162,27 @@ artifact and canonical OpenClaw inspect/doctor smoke; it must fail before audite
 deployment. The pack scan rejects runtime or sensitive artifacts such as databases,
 logs, backups, `node_modules`, temporary/archive directories, and credential-shaped
 paths.
+
+`npm run release:prepush` requires a clean commit and canonical repository
+identity but deliberately does not claim that commit is already published. It
+does not accept or rewrite canonical release evidence. After pushing, run
+`npm run release:gate:source` against the exact remote branch or tag; that strict
+gate proves publication and checks the canonical evidence before any live gate.
+
+The gate also proves that local `HEAD` is published at the exact target remote
+ref (default `refs/heads/main`). Use `--release-ref refs/tags/<tag>` when a tag
+is the release truth. For an exact legacy principal allowlist, pass the trusted
+adapter-derived canonical key explicitly:
+
+```bash
+npm run release:gate -- \
+  --principal 'telegram:default:<numeric-user-id>' \
+  --release-ref refs/heads/main
+```
+
+The equivalent automation inputs are `CLAWLORE_RUNTIME_PRINCIPAL` and
+`CLAWLORE_RELEASE_REF`; display names, wildcards, and group identifiers are not
+valid substitutes for a direct user's canonical principal.
 
 After all gates pass on a clean commit, `npm run release:readiness` can create
 the immutable build-provenance sidecar and expiring shadow receipt. The command

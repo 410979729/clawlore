@@ -5,7 +5,7 @@
 import { Type } from "@sinclair/typebox";
 import { getDisplayCategoryTag } from "./reflection-metadata.js";
 import { parseSmartMetadata } from "./smart-metadata.js";
-import { clampInt, MEMORY_CATEGORIES, memoryMetadataMatches, renderMemoryEntry, requireRuntimeAgentId, requireRuntimeMemoryAccess, resolveMemoryId, resolveToolContext, retrieveWithRetry, safeToolFailure, sanitizeMemoryForSerialization, serializeMemoryEntry, stringEnum } from "./tool-runtime-policy.js";
+import { clampInt, MEMORY_CATEGORIES, memoryMetadataMatches, normalizeInlineText, renderMemoryEntry, requireRuntimeAgentId, requireRuntimeMemoryAccess, resolveMemoryId, resolveToolContext, retrieveWithRetry, safeToolFailure, sanitizeMemoryForSerialization, serializeMemoryEntry, stringEnum, truncateText } from "./tool-runtime-policy.js";
 export function registerMemoryStatsTool(api, context) {
     api.registerTool((toolCtx) => {
         const runtimeContext = resolveToolContext(context, toolCtx);
@@ -162,7 +162,7 @@ export function registerMemoryDebugTool(api, context) {
                         traceLines.push(``, `No results survived the pipeline.`);
                         return {
                             content: [{ type: "text", text: traceLines.join("\n") }],
-                            details: { count: 0, query, trace },
+                            details: { count: 0, query: normalizeInlineText(query), trace },
                         };
                     }
                     const resultLines = results.map((r, i) => {
@@ -174,7 +174,7 @@ export function registerMemoryDebugTool(api, context) {
                         if (r.sources.reranked)
                             sources.push("reranked");
                         const categoryTag = getDisplayCategoryTag(r.entry);
-                        return `${i + 1}. [${r.entry.id}] [${categoryTag}] ${r.entry.text.slice(0, 120)}${r.entry.text.length > 120 ? "..." : ""} (${(r.score * 100).toFixed(1)}%${sources.length > 0 ? `, ${sources.join("+")}` : ""})`;
+                        return `${i + 1}. [${r.entry.id}] [${categoryTag}] ${truncateText(normalizeInlineText(r.entry.text), 120)} (${(r.score * 100).toFixed(1)}%${sources.length > 0 ? `, ${sources.join("+")}` : ""})`;
                     });
                     const text = [...traceLines, ``, `Results (${results.length}):`, ...resultLines].join("\n");
                     return {
@@ -182,7 +182,7 @@ export function registerMemoryDebugTool(api, context) {
                         details: {
                             count: results.length,
                             memories: sanitizeMemoryForSerialization(results),
-                            query,
+                            query: normalizeInlineText(query),
                             trace,
                         },
                     };
@@ -262,7 +262,7 @@ export function registerMemoryListTool(api, context) {
                             .toISOString()
                             .split("T")[0];
                         const categoryTag = getDisplayCategoryTag(entry);
-                        return `${safeOffset + i + 1}. [${entry.id}] [${categoryTag}] ${entry.text.slice(0, 100)}${entry.text.length > 100 ? "..." : ""} (${date})`;
+                        return `${safeOffset + i + 1}. [${entry.id}] [${categoryTag}] ${truncateText(normalizeInlineText(entry.text), 100)} (${date})`;
                     })
                         .join("\n");
                     return {
@@ -276,7 +276,7 @@ export function registerMemoryListTool(api, context) {
                             count: entries.length,
                             memories: entries.map((e) => ({
                                 id: e.id,
-                                text: e.text,
+                                text: normalizeInlineText(e.text),
                                 category: getDisplayCategoryTag(e),
                                 rawCategory: e.category,
                                 scope: e.scope,
@@ -382,7 +382,7 @@ export function registerMemoryContextTool(api, context) {
                             details: {
                                 action: "context",
                                 count: 0,
-                                query,
+                                query: query ? normalizeInlineText(query) : query,
                                 filters: { scope, category, source, state, layer, limit: safeLimit, offset: safeOffset },
                                 scopes: scopeFilter,
                             },
@@ -397,7 +397,7 @@ export function registerMemoryContextTool(api, context) {
                         details: {
                             action: "context",
                             count: entries.length,
-                            query,
+                            query: query ? normalizeInlineText(query) : query,
                             filters: { scope, category, source, state, layer, limit: safeLimit, offset: safeOffset },
                             scopes: scopeFilter,
                             memories: entries.map((entry) => serializeMemoryEntry(entry, includeFullText)),

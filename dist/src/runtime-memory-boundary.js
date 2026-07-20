@@ -15,7 +15,7 @@ function text(value) {
  */
 export function isCanonicalPrincipalKey(value) {
     const principal = text(value);
-    if (!principal || principal !== value || principal.length > 512 || /[\s\u0000-\u001f\u007f]/.test(principal)) {
+    if (!principal || principal !== value || principal.length > 512 || principal.includes("*") || /[\s\u0000-\u001f\u007f]/.test(principal)) {
         return false;
     }
     const firstSeparator = principal.indexOf(":");
@@ -43,6 +43,15 @@ function pick(contexts, keys) {
 }
 function shortHash(value, length = 32) {
     return createHash("sha256").update(value).digest("hex").slice(0, length);
+}
+export function runtimePrincipalIdentity(principalKey) {
+    if (!isCanonicalPrincipalKey(principalKey)) {
+        throw new Error("principalKey must be an exact canonical platform:account:principal key");
+    }
+    return {
+        principalHash: shortHash(principalKey, 16),
+        scope: `user:${shortHash(principalKey)}`,
+    };
 }
 function parseSessionBoundary(sessionKey) {
     if (!sessionKey)
@@ -111,14 +120,13 @@ export function resolveRuntimeMemoryBoundary(input) {
         if (!principalId || !platform)
             return { kind: "unknown", platform, accountId };
         const principalKey = `${platform}:${accountId}:${principalId}`;
-        const principalHash = shortHash(principalKey, 16);
+        const principalIdentity = runtimePrincipalIdentity(principalKey);
         return {
             kind: "private",
             platform,
             accountId,
             principalKey,
-            principalHash,
-            scope: `user:${shortHash(principalKey)}`,
+            ...principalIdentity,
         };
     }
     if (chatType === "group" || chatType === "channel") {
