@@ -10,8 +10,8 @@ restart, recall/V2 cutover, live secret review, and the deferred SATA/SSD item
 
 ## 1. Conclusion
 
-The current **source bytes are pre-push-gate ready**, but the current checkout
-is **not yet publishable**.
+The current **source bytes and local candidate commit are pre-push-gate ready**,
+but the current remote identity is **not yet publishable**.
 
 Both Linux and Windows passed the complete `release:prepush` gate from a clean,
 isolated Git checkout whose synthetic `origin` matched the declared canonical
@@ -24,13 +24,17 @@ The real checkout still intentionally fails before running the gate because:
 - package metadata names `github.com/410979729/clawlore`;
 - the actual `origin` still names
   `github.com/410979729/scope-recall-openclaw`;
-- the declared canonical repository is not reachable yet; and
-- the accumulated candidate remains an uncommitted dirty worktree on the old
-  baseline.
+- the declared canonical repository is not reachable yet.
+
+The complete candidate was committed locally as
+`977e20375fec7cbc6be76b566c12d1ca0ffb5d77` on
+`feature/clawlore-identity`. It contains source, tracked dist, tests, release
+contracts, and formal project documentation as one exact candidate. No remote
+or external ref was changed.
 
 Therefore the honest boundary is:
 
-- **code/test/package candidate: GO for forming a clean commit**;
+- **code/test/package candidate: GO for push after canonical remote setup**;
 - **actual push/tag/release: NO-GO until repository identity is resolved**;
 - **live deployment/cutover: outside this source-only authorization and still
   NO-GO**.
@@ -220,17 +224,16 @@ only by platform dependency resolution, which the evidence contract permits.
 
 ## 5. Remaining boundaries
 
-Only these actions are required before an actual repository update can be
-claimed:
+Only these actions remain before an actual repository update can be claimed:
 
 1. Joy chooses either to create the private canonical `clawlore` repository or
    rename the existing `scope-recall-openclaw` repository.
 2. Update `origin` to that reachable canonical repository without weakening
    the identity gate.
-3. Form one clean source plus tracked-dist commit from this candidate.
-4. Run the real pre-push gate from that clean commit, push an exact branch,
+3. Run the real pre-push gate from clean candidate commit `977e203`, push its
+   exact branch,
    then run the strict post-push evidence gate against the reachable ref.
-5. Obtain a fresh independent read-only review of that exact commit before tag
+4. Obtain a fresh independent read-only review of that exact commit before tag
    or release publication.
 
 Operational observations from the eighteenth review remain separate:

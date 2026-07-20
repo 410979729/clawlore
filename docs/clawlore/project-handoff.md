@@ -451,14 +451,16 @@ leakage. Release-input, runtime, and lock identities matched Linux exactly.
 There were no residual audit-root Node processes. The Windows root and local
 transfer root were removed and independently verified absent.
 
-The source bytes are ready to form a clean commit, but the real checkout is not
-yet publishable. Package metadata names `410979729/clawlore`; actual `origin`
-still names `410979729/scope-recall-openclaw`; the canonical repository is not
-reachable; and the candidate is not committed. The real gate rejects this as
-designed. Joy must choose repository creation versus rename, after which the
-exact sequence is: update origin, form one clean source+tracked-dist commit,
-run real pre-push, push an exact branch, run strict post-push evidence, and
-obtain a fresh independent review before tag/release.
+The complete source+tracked-dist candidate is now local commit
+`977e20375fec7cbc6be76b566c12d1ca0ffb5d77` on
+`feature/clawlore-identity`; the worktree was clean immediately afterward.
+The real remote is not yet publishable. Package metadata names
+`410979729/clawlore`; actual `origin` still names
+`410979729/scope-recall-openclaw`; and the canonical repository is not
+reachable. The real gate rejects this as designed. Joy must choose repository
+creation versus rename, after which the exact sequence is: update origin, run
+real pre-push on `977e203`, push the exact branch, run strict post-push
+evidence, and obtain a fresh independent review before tag/release.
 
 Live recall/Experience effectiveness, V2/data governance, and the
 low-confidence live secret candidate remain separate operational work. No

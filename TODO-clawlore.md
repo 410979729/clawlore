@@ -296,11 +296,15 @@ Detailed evidence:
       vulnerabilities, 260-file pack, and matching Linux release/runtime/lock
       identities. Remove both owned Windows and local transfer roots and verify
       them absent.
-- [ ] Create or rename the canonical private `410979729/clawlore` repository,
-      update `origin`, and form one clean source+tracked-dist commit. The real
-      gate intentionally rejects the current legacy origin; the clean isolated
-      pass proves the candidate rather than bypassing provenance.
-- [ ] Run the real clean-commit pre-push gate, push an exact branch, run the
+- [x] Form one clean local source+tracked-dist candidate commit:
+      `977e20375fec7cbc6be76b566c12d1ca0ffb5d77`. It includes the complete
+      1.2.1 source, generated dist, tests, release contracts, and formal
+      project documentation; the worktree was clean immediately afterward.
+- [ ] Create or rename the canonical private `410979729/clawlore` repository
+      and update `origin`. The real gate intentionally rejects the current
+      legacy origin; the clean isolated pass proves the candidate rather than
+      bypassing provenance.
+- [ ] Run the real pre-push gate on `977e203`, push that exact branch, run the
       strict post-push evidence gate, and obtain one fresh independent review
       of that exact ref before tag/release publication.
 - [ ] Keep live deployment, recall/Experience cutover, V2/data governance, and
