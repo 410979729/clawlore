@@ -65,6 +65,11 @@ export const TRUTH_V2_SCHEMA_SQL = `
     FOREIGN KEY(item_id) REFERENCES memory_item_identities(item_id) ON DELETE RESTRICT,
     FOREIGN KEY(revision_id) REFERENCES memory_revisions(revision_id) ON DELETE SET NULL
   );
+  CREATE TABLE IF NOT EXISTS projection_outbox_claims (
+    outbox_id TEXT PRIMARY KEY,claim_token TEXT NOT NULL UNIQUE,claim_owner TEXT NOT NULL,
+    claimed_at TEXT NOT NULL,lease_expires_at TEXT NOT NULL,
+    FOREIGN KEY(outbox_id) REFERENCES projection_outbox(outbox_id) ON DELETE CASCADE
+  );
   CREATE TRIGGER IF NOT EXISTS memory_items_identity_before_insert
   BEFORE INSERT ON memory_items
   BEGIN
@@ -79,6 +84,8 @@ export const TRUTH_V2_SCHEMA_SQL = `
     (tenant_id,project_id,customer_id,lifecycle);
   CREATE INDEX IF NOT EXISTS idx_outbox_pending ON projection_outbox
     (processed_at,available_at,projection);
+  CREATE INDEX IF NOT EXISTS idx_outbox_claim_expiry ON projection_outbox_claims
+    (lease_expires_at,outbox_id);
   INSERT OR IGNORE INTO clawlore_schema(version,applied_at) VALUES (3,datetime('now'));
 `;
 const require = createRequire(import.meta.url);
@@ -308,6 +315,52 @@ export class SqliteTruthStoreV2 {
             .all(...unique)
             .map((row) => this.toOutboxRow(row));
     }
+    claimNextOutbox(input) {
+        const owner = normalizeTruthIdentifier(input.owner, "outbox claim owner", 512);
+        const leaseDurationMs = this.normalizeLeaseDuration(input.leaseDurationMs);
+        const excluded = [...new Set((input.excludeOutboxIds ?? []).map((value) => normalizeTruthIdentifier(value, "excluded outbox id", 512)))];
+        if (excluded.length > 1000)
+            throw new Error("outbox claim exclusion is limited to 1000 ids");
+        const db = this.requireDb();
+        const now = this.clock.now();
+        const claimedAt = now.toISOString();
+        const leaseExpiresAt = new Date(now.getTime() + leaseDurationMs).toISOString();
+        return this.transaction(() => {
+            db.prepare(`DELETE FROM projection_outbox_claims
+        WHERE lease_expires_at <= ? OR outbox_id IN
+          (SELECT outbox_id FROM projection_outbox WHERE processed_at IS NOT NULL)`)
+                .run(claimedAt);
+            const exclusionSql = excluded.length > 0
+                ? `AND o.outbox_id NOT IN (${excluded.map(() => "?").join(",")})`
+                : "";
+            const row = db.prepare(`SELECT o.* FROM projection_outbox o
+        LEFT JOIN projection_outbox_claims c ON c.outbox_id=o.outbox_id
+        WHERE o.processed_at IS NULL AND o.available_at <= ? AND c.outbox_id IS NULL
+        ${exclusionSql}
+        ORDER BY o.created_at,o.outbox_id LIMIT 1`).get(claimedAt, ...excluded);
+            if (!row)
+                return null;
+            const token = randomUUID();
+            db.prepare(`INSERT INTO projection_outbox_claims
+        (outbox_id,claim_token,claim_owner,claimed_at,lease_expires_at)
+        VALUES (?,?,?,?,?)`).run(String(row.outbox_id), token, owner, claimedAt, leaseExpiresAt);
+            return { row: this.toOutboxRow(row), owner, token, leaseExpiresAt };
+        });
+    }
+    renewOutboxClaim(claim, leaseDurationMs) {
+        const normalized = this.normalizeOutboxClaim(claim);
+        const duration = this.normalizeLeaseDuration(leaseDurationMs);
+        const now = this.clock.now();
+        const nowIso = now.toISOString();
+        const leaseExpiresAt = new Date(now.getTime() + duration).toISOString();
+        const result = this.requireDb().prepare(`UPDATE projection_outbox_claims
+      SET lease_expires_at=?
+      WHERE outbox_id=? AND claim_token=? AND claim_owner=? AND lease_expires_at > ?
+        AND EXISTS (SELECT 1 FROM projection_outbox o
+          WHERE o.outbox_id=projection_outbox_claims.outbox_id AND o.processed_at IS NULL)`)
+            .run(leaseExpiresAt, normalized.outboxId, normalized.token, normalized.owner, nowIso);
+        return Number(result.changes ?? 0) === 1;
+    }
     listMemoryCenterRows(actor, limit = 200) {
         const validation = validateMemoryAddress(actor);
         if (!validation.valid)
@@ -390,20 +443,48 @@ export class SqliteTruthStoreV2 {
             processed: Number(row.processed ?? 0),
         };
     }
-    markOutboxProcessed(outboxId) {
-        const normalizedId = normalizeTruthIdentifier(outboxId, "outbox id", 512);
-        this.requireDb().prepare("UPDATE projection_outbox SET processed_at=? WHERE outbox_id=?")
-            .run(this.clock.now().toISOString(), normalizedId);
+    markOutboxProcessed(claim) {
+        const normalized = this.normalizeOutboxClaim(claim);
+        const db = this.requireDb();
+        const now = this.clock.now().toISOString();
+        return this.transaction(() => {
+            const result = db.prepare(`UPDATE projection_outbox SET processed_at=?
+        WHERE outbox_id=? AND processed_at IS NULL AND EXISTS (
+          SELECT 1 FROM projection_outbox_claims c
+          WHERE c.outbox_id=projection_outbox.outbox_id
+            AND c.claim_token=? AND c.claim_owner=? AND c.lease_expires_at > ?
+        )`).run(now, normalized.outboxId, normalized.token, normalized.owner, now);
+            if (Number(result.changes ?? 0) !== 1)
+                return false;
+            db.prepare(`DELETE FROM projection_outbox_claims
+        WHERE outbox_id=? AND claim_token=? AND claim_owner=?`)
+                .run(normalized.outboxId, normalized.token, normalized.owner);
+            return true;
+        });
     }
-    recordOutboxFailure(outboxId, errorCode, retryAt) {
-        const normalizedId = normalizeTruthIdentifier(outboxId, "outbox id", 512);
+    recordOutboxFailure(claim, errorCode, retryAt) {
+        const normalized = this.normalizeOutboxClaim(claim);
         const normalizedCode = normalizeTruthIdentifier(errorCode, "outbox error code", 160);
         const normalizedRetryAt = retryAt == null
             ? this.clock.now().toISOString()
             : normalizeIsoTimestamp(retryAt, "outbox retryAt");
-        this.requireDb().prepare(`UPDATE projection_outbox
-      SET attempts=attempts+1,last_error=?,available_at=? WHERE outbox_id=?`)
-            .run(normalizedCode, normalizedRetryAt, normalizedId);
+        const db = this.requireDb();
+        const now = this.clock.now().toISOString();
+        return this.transaction(() => {
+            const result = db.prepare(`UPDATE projection_outbox
+        SET attempts=attempts+1,last_error=?,available_at=?
+        WHERE outbox_id=? AND processed_at IS NULL AND EXISTS (
+          SELECT 1 FROM projection_outbox_claims c
+          WHERE c.outbox_id=projection_outbox.outbox_id
+            AND c.claim_token=? AND c.claim_owner=? AND c.lease_expires_at > ?
+        )`).run(normalizedCode, normalizedRetryAt, normalized.outboxId, normalized.token, normalized.owner, now);
+            if (Number(result.changes ?? 0) !== 1)
+                return false;
+            db.prepare(`DELETE FROM projection_outbox_claims
+        WHERE outbox_id=? AND claim_token=? AND claim_owner=?`)
+                .run(normalized.outboxId, normalized.token, normalized.owner);
+            return true;
+        });
     }
     count(table) {
         const allowed = new Set(["memory_item_identities", "memory_items", "memory_revisions", "memory_sources", "memory_acl", "memory_relations", "memory_events", "projection_outbox"]);
@@ -416,6 +497,21 @@ export class SqliteTruthStoreV2 {
         if (!validation.valid)
             throw new Error(`invalid memory address: ${validation.errors.map((item) => item.code).join(",")}`);
         assertMemoryAddressIdentifiersSafe(address);
+    }
+    normalizeLeaseDuration(value) {
+        if (!Number.isSafeInteger(value) || value < 100 || value > 3_600_000) {
+            throw new Error("outbox lease duration must be an integer between 100 and 3600000 milliseconds");
+        }
+        return value;
+    }
+    normalizeOutboxClaim(claim) {
+        if (!claim || typeof claim !== "object" || !claim.row)
+            throw new Error("outbox claim is required");
+        return {
+            outboxId: normalizeTruthIdentifier(claim.row.outboxId, "outbox id", 512),
+            token: normalizeTruthIdentifier(claim.token, "outbox claim token", 512),
+            owner: normalizeTruthIdentifier(claim.owner, "outbox claim owner", 512),
+        };
     }
     transaction(action) {
         const db = this.requireDb();

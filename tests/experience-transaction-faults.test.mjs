@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
@@ -53,7 +56,7 @@ test("playbook create and review roll back when version receipts fail", () => {
     evidence_anchors: ["receipt:one"],
     related_skills: ["release-gate"],
     environment_constraints: { platform: "linux", risk: "high" },
-    metadata: { safe: "visible", api_key: "redact-this", nested: { token: "redact-this-too" } },
+    metadata: { safe: "visible", nested: { review: "complete" } },
   });
   const initial = getPlaybookVersions(db, playbook.id, ["user:a"])[0].snapshot;
   assert.deepEqual(initial.evidence_anchors, ["receipt:one"]);
@@ -64,8 +67,7 @@ test("playbook create and review roll back when version receipts fail", () => {
   assert.equal(initial.failure_count, 0);
   assert.equal(initial.stale_count, 0);
   assert.equal(initial.metadata.safe, "visible");
-  assert.equal(initial.metadata.api_key, "<redacted-secret>");
-  assert.equal(initial.metadata.nested.token, "<redacted-secret>");
+  assert.equal(initial.metadata.nested.review, "complete");
   assert.equal(typeof initial.created_at, "string");
   assert.equal(typeof initial.updated_at, "string");
   db.exec(`
@@ -109,6 +111,11 @@ test("playbook create and review roll back when version receipts fail", () => {
   assert.deepEqual(latest.related_skills, durable.related_skills);
   assert.deepEqual(latest.environment_constraints, durable.environment_constraints);
   assert.equal(latest.metadata.safe, durable.metadata.safe);
+  assert.throws(() => createPlaybook(db, {
+    scope_id: "user:a",
+    payload: payload(),
+    metadata: { nested: { password: "SyntheticPlaybookSecret2468" } },
+  }), /persistence safety policy/);
   db.close();
 });
 
@@ -133,4 +140,59 @@ test("feedback run, finish, and counter update commit or roll back together", ()
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM experience_runs").get().n, 0);
   assert.equal(db.prepare("SELECT success_count FROM procedural_playbooks WHERE id = ?").get(playbook.id).success_count, 0);
   db.close();
+});
+
+test("failed savepoint rollback performs a full rollback without releasing partial playbook state", () => {
+  const root = mkdtempSync(join(tmpdir(), "clawlore-experience-secondary-rollback-"));
+  const path = join(root, "experience.sqlite");
+  const db = new DatabaseSync(path);
+  try {
+    ensureExperienceSchema(db);
+    db.exec("DROP TABLE procedural_playbooks_fts");
+    let rollbackToAttempts = 0;
+    let releasesAfterFailure = 0;
+    let rollbackToFailed = false;
+    const wrapped = new Proxy(db, {
+      get(target, property) {
+        if (property === "exec") {
+          return (sql) => {
+            const statement = String(sql);
+            if (statement.startsWith("ROLLBACK TO SAVEPOINT")) {
+              rollbackToAttempts += 1;
+              rollbackToFailed = true;
+              throw new Error("synthetic secondary rollback failure");
+            }
+            if (rollbackToFailed && statement.startsWith("RELEASE SAVEPOINT")) {
+              releasesAfterFailure += 1;
+            }
+            return target.exec(statement);
+          };
+        }
+        const value = target[property];
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+    assert.throws(
+      () => createPlaybook(wrapped, { scope_id: "user:a", payload: payload() }),
+      (error) => {
+        assert.equal(error.name, "SqliteSavepointCleanupError");
+        assert.match(error.message, /no such table: procedural_playbooks_fts/);
+        assert.equal(error.connectionPoisoned, false);
+        assert.equal(error.errors.some((item) => /synthetic secondary rollback failure/.test(String(item))), true);
+        return true;
+      },
+    );
+    assert.equal(rollbackToAttempts, 1);
+    assert.equal(releasesAfterFailure, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM procedural_playbooks").get().n, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM playbook_versions").get().n, 0);
+
+    ensureExperienceSchema(db);
+    const recovered = createPlaybook(db, { scope_id: "user:a", payload: payload() });
+    assert.equal(getPlaybook(db, recovered.id, ["user:a"]).id, recovered.id);
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });

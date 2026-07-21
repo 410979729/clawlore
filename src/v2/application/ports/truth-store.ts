@@ -52,6 +52,19 @@ export interface ProjectionOutboxRowV2 {
   lastError?: string;
 }
 
+export interface ProjectionOutboxClaimV2 {
+  row: ProjectionOutboxRowV2;
+  owner: string;
+  token: string;
+  leaseExpiresAt: string;
+}
+
+export interface ClaimProjectionOutboxV2Input {
+  owner: string;
+  leaseDurationMs: number;
+  excludeOutboxIds?: string[];
+}
+
 export interface TruthStoreV2Port {
   remember(input: RememberMemoryV2Input): MemoryMutationReceiptV2;
   correct(input: CorrectMemoryV2Input): MemoryMutationReceiptV2;
@@ -60,6 +73,8 @@ export interface TruthStoreV2Port {
   queryAccessible(actor: MemoryAddressV2, query: string, limit?: number): MemoryRecordV2[];
   listPendingOutbox(limit?: number): ProjectionOutboxRowV2[];
   inspectOutbox(outboxIds: string[]): ProjectionOutboxRowV2[];
-  markOutboxProcessed(outboxId: string): void;
-  recordOutboxFailure(outboxId: string, errorCode: string, retryAt?: string): void;
+  claimNextOutbox(input: ClaimProjectionOutboxV2Input): ProjectionOutboxClaimV2 | null;
+  renewOutboxClaim(claim: ProjectionOutboxClaimV2, leaseDurationMs: number): boolean;
+  markOutboxProcessed(claim: ProjectionOutboxClaimV2): boolean;
+  recordOutboxFailure(claim: ProjectionOutboxClaimV2, errorCode: string, retryAt?: string): boolean;
 }

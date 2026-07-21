@@ -7,6 +7,8 @@
 
 import { randomUUID } from "node:crypto";
 import { redactSupportBundle } from "./application/support-bundle.js";
+import { assertExperiencePersistenceSafe } from "./experience-persistence-policy.js";
+import { withSqliteSavepoint } from "./sqlite-savepoint.js";
 
 // Use any to avoid TypeScript issues with experimental node:sqlite
 type DatabaseSync = any;
@@ -14,16 +16,7 @@ let experienceTransactionSequence = 0;
 
 function withExperienceTransaction<T>(db: DatabaseSync, operation: () => T): T {
   const savepoint = `clawlore_experience_${++experienceTransactionSequence}`;
-  db.exec(`SAVEPOINT ${savepoint}`);
-  try {
-    const result = operation();
-    db.exec(`RELEASE SAVEPOINT ${savepoint}`);
-    return result;
-  } catch (err) {
-    try { db.exec(`ROLLBACK TO SAVEPOINT ${savepoint}`); } catch {}
-    try { db.exec(`RELEASE SAVEPOINT ${savepoint}`); } catch {}
-    throw err;
-  }
+  return withSqliteSavepoint(db, savepoint, operation);
 }
 
 interface ScopeClause {
@@ -232,6 +225,7 @@ export interface CreateEpisodeParams {
 }
 
 export function createTaskEpisode(db: DatabaseSync, params: CreateEpisodeParams): TaskEpisode {
+  assertExperiencePersistenceSafe(params, "task episode");
   const now = new Date().toISOString();
   const episode: TaskEpisode = {
     id: randomUUID(),
@@ -301,6 +295,7 @@ export function recordTaskExperienceCaptureEvent(
   db: DatabaseSync,
   params: RecordTaskExperienceCaptureEventParams,
 ): string {
+  assertExperiencePersistenceSafe(params, "task experience capture event");
   const id = randomUUID();
   const now = new Date().toISOString();
   db.prepare(`
@@ -334,6 +329,7 @@ export function updateEpisodeOutcome(
   status?: TaskEpisode["status"],
   scopeIds?: string[],
 ): boolean {
+  assertExperiencePersistenceSafe({ episodeId, outcome, status, scopeIds }, "task episode outcome update");
   const now = new Date().toISOString();
   const newStatus = status ?? (outcome === "success" ? "completed" : outcome === "failure" ? "failed" : "open");
   const scope = experienceScopeClause(scopeIds, "scope_id", "shared_scope_id");
@@ -443,6 +439,7 @@ export interface DurablePlaybookSnapshot extends ProceduralPlaybook {
 }
 
 export function createPlaybook(db: DatabaseSync, params: CreatePlaybookParams): DurablePlaybookSnapshot {
+  assertExperiencePersistenceSafe(params, "procedural playbook");
   const validated = validateProceduralPlaybook(params.payload);
   const now = new Date().toISOString();
   const id = randomUUID();
@@ -581,6 +578,10 @@ export function updatePlaybookStatus(
   reason?: string,
   scopeIds?: string[],
 ): void {
+  assertExperiencePersistenceSafe(
+    { playbookId, status, reason, scopeIds },
+    "procedural playbook status update",
+  );
   const playbook = getPlaybook(db, playbookId, scopeIds);
   if (!playbook) {
     throw new ExperienceValidationError(`Playbook ${playbookId} not found`);
@@ -649,6 +650,7 @@ export function reviewPlaybook(
   db: DatabaseSync,
   params: ReviewPlaybookParams,
 ): ReviewPlaybookResult {
+  assertExperiencePersistenceSafe(params, "procedural playbook review");
   const { playbookId, action, reason = "", supersededBy = "", scopeIds } = params;
 
   const actionToStatus: Record<string, string> = {
@@ -769,6 +771,10 @@ function createPlaybookVersion(
   changeReason: string,
   snapshot: Record<string, unknown> | ProceduralPlaybook | (ProceduralPlaybook & { id: string }),
 ): void {
+  assertExperiencePersistenceSafe(
+    { playbookId, version, changeType, changeReason, snapshot },
+    "procedural playbook version",
+  );
   const now = new Date().toISOString();
   const id = randomUUID();
 
@@ -839,6 +845,7 @@ export interface CreateRunParams {
 }
 
 export function createExperienceRun(db: DatabaseSync, params: CreateRunParams): ExperienceRun {
+  assertExperiencePersistenceSafe(params, "experience run");
   const now = new Date().toISOString();
   const run: ExperienceRun = {
     id: randomUUID(),
@@ -895,6 +902,7 @@ export function finishExperienceRun(
   outcome: ExperienceRun["outcome"],
   outcomeReason?: string,
 ): void {
+  assertExperiencePersistenceSafe({ runId, outcome, outcomeReason }, "experience run outcome update");
   const now = new Date().toISOString();
   db.prepare(`
     UPDATE experience_runs

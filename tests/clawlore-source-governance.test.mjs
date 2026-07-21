@@ -35,7 +35,7 @@ const ROOT_MODULES_BY_LAYER = {
   ],
   domain: [
     "auto-capture-policy.ts", "auto-recall-query.ts", "auto-recall-session-boundary.ts", "bounded-ttl-map.ts", "capture-safety.ts",
-    "decay-engine.ts", "experience-models.ts", "experience-schemas.ts",
+    "decay-engine.ts", "experience-models.ts", "experience-persistence-policy.ts", "experience-schemas.ts",
     "extraction-prompts.ts", "lifecycle-metadata.ts", "memory-categories.ts", "memory-egress-policy.ts", "memory-entry-write-policy.ts", "memory-merge-policy.ts", "memory-metadata-policy.ts", "noise-filter.ts",
     "noise-prototypes.ts", "preference-slots.ts", "product-identity.ts", "self-improvement-content-policy.ts",
     "reflection-contracts.ts", "reflection-mapped-metadata.ts", "reflection-metadata.ts", "reflection-ranking.ts",
@@ -59,7 +59,7 @@ const ROOT_MODULES_BY_LAYER = {
     "memory-store-facade.ts", "memory-store-ports.ts",
     "reflection-retry.ts", "retrieval-stats.ts", "retrieval-trace.ts",
     "retriever.ts", "session-compressor.ts", "smart-extractor.ts",
-    "sql-lifecycle-projection.ts", "task-experience.ts", "tier-manager.ts",
+    "sql-lifecycle-projection.ts", "sqlite-savepoint.ts", "task-experience.ts", "tier-manager.ts",
   ],
   adapters: [
     "adapters/openclaw/compatibility-context-adapter.ts", "adapters/openclaw/context-engine-skeleton.ts",

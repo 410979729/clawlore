@@ -221,7 +221,9 @@ test("one runtime service object can recover through start stop start", async ()
   const baseReceipt = buildRuntimeDiagnosticReceipt({
     configDigest,
     binding: artifactBinding(),
-    readiness: readiness(),
+    // This test exercises controller restart semantics, not readiness expiry.
+    // Keep its fixture valid independently of the wall-clock test date.
+    readiness: readiness("2099-01-01T00:00:00.000Z"),
     readinessErrors: [],
     runtime: registeredRuntime(),
   });

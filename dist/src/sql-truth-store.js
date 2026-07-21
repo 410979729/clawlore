@@ -5,6 +5,7 @@ import { existsSync, rmSync } from "node:fs";
 import { parseSmartMetadata, isMemoryActiveAt } from "./smart-metadata.js";
 import { deleteLifecycleProjection, ensureLifecycleProjection, openLifecycleProjectionReadAccess, upsertLifecycleProjection } from "./sql-lifecycle-projection.js";
 import { enforcePrivatePath, ensurePrivateDirectory } from "./file-privacy.js";
+import { withSqliteSavepoint } from "./sqlite-savepoint.js";
 const require = createRequire(import.meta.url);
 function runSql(db, statement) {
     db["exec"](statement);
@@ -1186,8 +1187,7 @@ export class SqlTruthStore {
             this.enforcePrivateFiles();
         }
         const savepoint = `clawlore_truth_${++this.savepointSequence}`;
-        runSql(db, `SAVEPOINT ${savepoint}`);
-        try {
+        return withSqliteSavepoint(db, savepoint, () => {
             const result = operation();
             // File privacy is part of the durable write contract. Validate it before
             // releasing the savepoint so an enforcement failure rolls SQL/FTS/outbox
@@ -1195,20 +1195,19 @@ export class SqlTruthStore {
             if (process.platform !== "win32") {
                 this.enforcePrivateFiles();
             }
-            runSql(db, `RELEASE SAVEPOINT ${savepoint}`);
             return result;
-        }
-        catch (err) {
-            try {
-                runSql(db, `ROLLBACK TO SAVEPOINT ${savepoint}`);
-            }
-            catch { }
-            try {
-                runSql(db, `RELEASE SAVEPOINT ${savepoint}`);
-            }
-            catch { }
-            throw err;
-        }
+        }, {
+            onPoisoned: () => {
+                try {
+                    db.close?.();
+                }
+                finally {
+                    if (this.db === db)
+                        this.db = null;
+                    this.privacyEstablished = false;
+                }
+            },
+        });
     }
     enforcePrivateFiles() {
         this.injectFault("permissions_before_enforce");

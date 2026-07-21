@@ -6,6 +6,7 @@
  * mutation runs.
  */
 import { randomUUID } from "node:crypto";
+import { assertExperiencePersistenceSafe } from "./experience-persistence-policy.js";
 import { promoteExperiences } from "./experience-promotion.js";
 import { ensureExperienceSchema } from "./experience-store.js";
 const BACKUP_HINT = "Before --apply on a live store, back up the SQLite truth DB plus matching -wal/-shm files, then rerun doctor after the batch.";
@@ -62,6 +63,23 @@ function compactPromotionSummary(promotion) {
     };
 }
 function insertBatch(db, params) {
+    assertExperiencePersistenceSafe({
+        batchId: params.batchId,
+        scopeId: params.scopeId,
+        status: params.status,
+        dryRun: params.dryRun,
+        reviewerNote: params.reviewerNote,
+        requestedBy: params.requestedBy,
+        promotionSummary: compactPromotionSummary(params.promotion),
+        items: params.promotion.items.map((item) => ({
+            action: item.action,
+            episodeId: item.episode_id,
+            playbookId: item.playbook_id,
+            riskLevel: item.risk_level,
+            status: item.status,
+            reason: item.reason,
+        })),
+    }, "experience promotion batch record");
     const now = new Date().toISOString();
     db.prepare(`
     INSERT INTO experience_promotion_batches (
@@ -79,6 +97,7 @@ function insertBatch(db, params) {
     }
 }
 export function runPromotionBatch(db, options = {}) {
+    assertExperiencePersistenceSafe(options, "experience promotion batch request");
     ensureExperienceSchema(db);
     const dryRun = options.dry_run ?? true;
     const batchId = randomUUID();

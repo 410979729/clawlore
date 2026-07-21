@@ -1,4 +1,5 @@
 import { parseLifecycleMetadata, staticLifecycleForMetadata, } from "./smart-metadata.js";
+import { withSqliteSavepoint } from "./sqlite-savepoint.js";
 const PROJECTION_SCHEMA_VERSION = 4;
 const LIFECYCLE_FIELD_FUNCTION = "clawlore_expected_lifecycle_field_v1";
 const PROJECTION_COLUMNS = [
@@ -310,26 +311,13 @@ export function inspectLifecycleProjection(db) {
     };
 }
 export function repairLifecycleProjection(db) {
-    db.exec("SAVEPOINT clawlore_lifecycle_projection_rebuild");
-    try {
+    withSqliteSavepoint(db, "clawlore_lifecycle_projection_rebuild", () => {
         dropObjectIfPresent(db, "idx_memory_lifecycle_projection_scope");
         dropObjectIfPresent(db, "memory_lifecycle_projection_state");
         dropObjectIfPresent(db, "memory_lifecycle_projection");
         db.exec(`${PROJECTION_TABLE_SQL}; ${PROJECTION_INDEX_SQL}; ${PROJECTION_STATE_SQL};`);
         rebuildProjection(db);
-        db.exec("RELEASE SAVEPOINT clawlore_lifecycle_projection_rebuild");
-    }
-    catch (error) {
-        try {
-            db.exec("ROLLBACK TO SAVEPOINT clawlore_lifecycle_projection_rebuild");
-        }
-        catch { }
-        try {
-            db.exec("RELEASE SAVEPOINT clawlore_lifecycle_projection_rebuild");
-        }
-        catch { }
-        throw error;
-    }
+    });
     const health = inspectLifecycleProjection(db);
     if (!health.ok) {
         throw new Error(`CLAWLORE_LIFECYCLE_PROJECTION_REPAIR_FAILED: ${health.reason}`);

@@ -22,6 +22,7 @@ const ROLLOUT_TABLES = [
   "memory_relations",
   "memory_events",
   "projection_outbox",
+  "projection_outbox_claims",
   "memory_fts_v2",
   "memory_vector_projection_v2",
   "memory_relation_projection_v2",

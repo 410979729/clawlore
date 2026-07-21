@@ -6,26 +6,12 @@
  */
 import { randomUUID } from "node:crypto";
 import { redactSupportBundle } from "./application/support-bundle.js";
+import { assertExperiencePersistenceSafe } from "./experience-persistence-policy.js";
+import { withSqliteSavepoint } from "./sqlite-savepoint.js";
 let experienceTransactionSequence = 0;
 function withExperienceTransaction(db, operation) {
     const savepoint = `clawlore_experience_${++experienceTransactionSequence}`;
-    db.exec(`SAVEPOINT ${savepoint}`);
-    try {
-        const result = operation();
-        db.exec(`RELEASE SAVEPOINT ${savepoint}`);
-        return result;
-    }
-    catch (err) {
-        try {
-            db.exec(`ROLLBACK TO SAVEPOINT ${savepoint}`);
-        }
-        catch { }
-        try {
-            db.exec(`RELEASE SAVEPOINT ${savepoint}`);
-        }
-        catch { }
-        throw err;
-    }
+    return withSqliteSavepoint(db, savepoint, operation);
 }
 function experienceScopeClause(scopeIds, scopeColumn = "scope_id", sharedScopeColumn) {
     if (scopeIds === undefined)
@@ -194,6 +180,7 @@ export function ensureExperienceSchema(db) {
   `);
 }
 export function createTaskEpisode(db, params) {
+    assertExperiencePersistenceSafe(params, "task episode");
     const now = new Date().toISOString();
     const episode = {
         id: randomUUID(),
@@ -225,6 +212,7 @@ export function createTaskEpisode(db, params) {
     return episode;
 }
 export function recordTaskExperienceCaptureEvent(db, params) {
+    assertExperiencePersistenceSafe(params, "task experience capture event");
     const id = randomUUID();
     const now = new Date().toISOString();
     db.prepare(`
@@ -238,6 +226,7 @@ export function recordTaskExperienceCaptureEvent(db, params) {
     return id;
 }
 export function updateEpisodeOutcome(db, episodeId, outcome, status, scopeIds) {
+    assertExperiencePersistenceSafe({ episodeId, outcome, status, scopeIds }, "task episode outcome update");
     const now = new Date().toISOString();
     const newStatus = status ?? (outcome === "success" ? "completed" : outcome === "failure" ? "failed" : "open");
     const scope = experienceScopeClause(scopeIds, "scope_id", "shared_scope_id");
@@ -300,6 +289,7 @@ function rowToEpisode(row) {
     };
 }
 export function createPlaybook(db, params) {
+    assertExperiencePersistenceSafe(params, "procedural playbook");
     const validated = validateProceduralPlaybook(params.payload);
     const now = new Date().toISOString();
     const id = randomUUID();
@@ -383,6 +373,7 @@ function buildSafeFtsQuery(query) {
     return unique.map((token) => `"${token.replaceAll('"', '""')}"`).join(" OR ");
 }
 export function updatePlaybookStatus(db, playbookId, status, reason, scopeIds) {
+    assertExperiencePersistenceSafe({ playbookId, status, reason, scopeIds }, "procedural playbook status update");
     const playbook = getPlaybook(db, playbookId, scopeIds);
     if (!playbook) {
         throw new ExperienceValidationError(`Playbook ${playbookId} not found`);
@@ -417,6 +408,7 @@ export function incrementPlaybookCounters(db, playbookId, outcome, scopeIds) {
     return Number(result?.changes || 0) === 1;
 }
 export function reviewPlaybook(db, params) {
+    assertExperiencePersistenceSafe(params, "procedural playbook review");
     const { playbookId, action, reason = "", supersededBy = "", scopeIds } = params;
     const actionToStatus = {
         review: "reviewed",
@@ -509,6 +501,7 @@ function getLatestVersion(db, playbookId) {
     return row?.max_version ?? 0;
 }
 function createPlaybookVersion(db, playbookId, version, changeType, changeReason, snapshot) {
+    assertExperiencePersistenceSafe({ playbookId, version, changeType, changeReason, snapshot }, "procedural playbook version");
     const now = new Date().toISOString();
     const id = randomUUID();
     db.prepare(`
@@ -536,6 +529,7 @@ export function getPlaybookVersions(db, playbookId, scopeIds) {
     }));
 }
 export function createExperienceRun(db, params) {
+    assertExperiencePersistenceSafe(params, "experience run");
     const now = new Date().toISOString();
     const run = {
         id: randomUUID(),
@@ -566,6 +560,7 @@ export function createExperienceRun(db, params) {
     return run;
 }
 export function finishExperienceRun(db, runId, outcome, outcomeReason) {
+    assertExperiencePersistenceSafe({ runId, outcome, outcomeReason }, "experience run outcome update");
     const now = new Date().toISOString();
     db.prepare(`
     UPDATE experience_runs

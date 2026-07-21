@@ -91,10 +91,14 @@ test("Memory Center is ACL-filtered and explains knowledge, use, review, correct
       actor: "principal:user-1",
       reason: "obsolete conflict endpoint superseded",
     });
-    current.outboxIds.forEach((id) => truth.markOutboxProcessed(id));
-    truth.recordOutboxFailure(corrected.outboxIds[1], "projection_timeout");
-
     const fixtureDb = new DatabaseSync(path);
+    const markProcessed = fixtureDb.prepare(
+      "UPDATE projection_outbox SET processed_at=? WHERE outbox_id=?",
+    );
+    current.outboxIds.forEach((id) => markProcessed.run("2026-07-11T17:00:00Z", id));
+    fixtureDb.prepare(`UPDATE projection_outbox
+      SET attempts=attempts+1,last_error='projection_timeout'
+      WHERE outbox_id=?`).run(corrected.outboxIds[1]);
     fixtureDb.prepare(`INSERT INTO memory_relations
       (relation_id,from_revision_id,to_revision_id,relation_type,created_at)
       VALUES (?,?,?,?,?)`).run("fixture-conflict", conflictA.revisionId, conflictB.revisionId, "contradicts", "2026-07-11T17:00:00Z");

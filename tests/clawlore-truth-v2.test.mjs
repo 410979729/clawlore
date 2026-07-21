@@ -225,12 +225,14 @@ test("Truth V2 repository rejects unsafe or malformed writes before persistence"
       reason: "unsafe correction",
     }), /safety policy/);
     assert.equal(store.get("policy-memory").revision, 1);
+    const outboxClaim = store.claimNextOutbox({ owner: "truth-policy-test", leaseDurationMs: 30_000 });
+    assert.ok(outboxClaim);
     assert.throws(() => store.recordOutboxFailure(
-      receipt.outboxIds[0],
+      outboxClaim,
       "token=synthetic-outbox-secret",
     ), /safety policy/);
     assert.throws(() => store.recordOutboxFailure(
-      receipt.outboxIds[0],
+      outboxClaim,
       "projection_timeout",
       "tomorrow",
     ), /ISO-8601/);

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import test from "node:test";
+import { insertLegacyUnsafeTaskEpisode } from "./helpers/legacy-experience-fixture.mjs";
 
 const require = createRequire(import.meta.url);
 const { createJiti } = require("jiti");
@@ -664,7 +665,7 @@ test("Experience governance debt surfaces skipped task-experience captures", () 
 test("Experience governance debt redacts secret-like task previews", () => {
   const db = new DatabaseSync(":memory:");
   ensureExperienceSchema(db);
-  createTaskEpisode(db, {
+  insertLegacyUnsafeTaskEpisode(db, {
     scope_id: "agent:main",
     session_id: "session-secret",
     task_class: "credential_adjacent",
@@ -686,7 +687,7 @@ test("Experience governance reuses the canonical structured-secret policy", () =
   const db = new DatabaseSync(":memory:");
   ensureExperienceSchema(db);
   const synthetic = "SyntheticGovernanceAliasSecret123";
-  createTaskEpisode(db, {
+  insertLegacyUnsafeTaskEpisode(db, {
     scope_id: "agent:main",
     session_id: "session-structured-secret",
     task_class: "credential_adjacent",

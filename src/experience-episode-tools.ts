@@ -69,7 +69,7 @@ export function registerEpisodeCreateTool(api: OpenClawPluginApi, context: Exper
             content: [
               {
                 type: "text",
-                text: `Episode created: ${episode.id}\nTask: ${episode.task_goal}\nStatus: ${episode.status}`,
+                text: `Episode created: ${episode.id}\nStatus: ${episode.status}`,
               },
             ],
             details: { episode_id: episode.id, status: episode.status },
@@ -145,7 +145,13 @@ export function registerEpisodeCompleteTool(api: OpenClawPluginApi, context: Exp
                 text: `Episode ${episode_id} completed with outcome: ${outcome}`,
               },
             ],
-            details: { episode_id, outcome, evidence, verification, tool_names },
+            details: {
+              episode_id,
+              outcome,
+              evidence_count: evidence?.length ?? 0,
+              verification_count: verification?.length ?? 0,
+              tool_count: tool_names?.length ?? 0,
+            },
           };
         } catch (error) {
           return safeExperienceToolFailure("episode_complete_failed", "Error completing episode", error);

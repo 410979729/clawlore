@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import test from "node:test";
+import { insertLegacyUnsafeTaskEpisode } from "./helpers/legacy-experience-fixture.mjs";
 
 const require = createRequire(import.meta.url);
 const { createJiti } = require("jiti");
@@ -157,6 +158,14 @@ test("promotion batch dry-run is zero-write and apply records batch items", () =
     },
   });
 
+  assert.throws(() => runPromotionBatch(db, {
+    scope_id: "agent:main",
+    dry_run: false,
+    reviewer_note: "password=SyntheticPromotionBatchSecret2468",
+  }), /persistence safety policy/);
+  assert.equal(tableExists(db, "experience_promotion_batches"), false);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM procedural_playbooks").get().count, 0);
+
   const preview = runPromotionBatch(db, { scope_id: "agent:main", dry_run: true });
   assert.equal(preview.dry_run, true);
   assert.equal(preview.recorded, false);
@@ -267,7 +276,7 @@ test("automatic promotion requires explicit positive reviewer provenance", () =>
 test("automatic promotion reuses the canonical secret policy", () => {
   const db = new DatabaseSync(":memory:");
   ensureExperienceSchema(db);
-  createTaskEpisode(db, {
+  insertLegacyUnsafeTaskEpisode(db, {
     scope_id: "agent:main",
     session_id: "session-secret-policy",
     task_class: "clawlore_quality_check",
