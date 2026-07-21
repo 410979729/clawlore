@@ -79,7 +79,12 @@ export function registerTaskExperienceHooks(params) {
                             memory_id: result.action === "created" ? result.id : "",
                             existing_memory_id: result.action === "duplicate" ? result.existingId : "",
                             similarity: result.action === "duplicate" ? result.similarity : 0,
-                            metadata: { source: "task-experience", auto_recorded: true, episode_id: episodeId },
+                            metadata: {
+                                source: "task-experience",
+                                auto_recorded: true,
+                                episode_id: episodeId,
+                                mirror_status: result.action === "created" ? result.mirrorStatus : "not_applicable",
+                            },
                         });
                     }
                     else {

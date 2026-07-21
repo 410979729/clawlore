@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
-import { createReadStream, existsSync, mkdirSync } from "node:fs";
+import { createReadStream, existsSync } from "node:fs";
 import { rm, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
+import { ensurePrivateDirectory } from "../../file-privacy.js";
 const require = createRequire(import.meta.url);
 const TRUTH_TABLES = [
     "memory_item_identities",
@@ -66,7 +67,7 @@ export async function inspectSqliteSnapshotV2(path, createdAt = new Date().toISO
 export async function createOnlineSqliteBackupV2(sourcePath, destinationPath) {
     if (existsSync(destinationPath))
         throw new Error("backup destination already exists");
-    mkdirSync(dirname(destinationPath), { recursive: true });
+    ensurePrivateDirectory(dirname(destinationPath));
     const { backup } = require("node:sqlite");
     const source = openReadOnly(sourcePath);
     try {

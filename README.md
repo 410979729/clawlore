@@ -147,16 +147,21 @@ do not break during the product rename.
 ```bash
 npm run smoke:vector-repair
 node scripts/golden-benchmark.mjs
+npm run benchmark:production -- --summary
 npm run release:prepush
 ```
 
 The smoke test creates a temporary database, writes two SQL-truth memories, dry-runs vector repair, rebuilds the vector companion with a fake embedder through the explicit apply path, verifies diagnostics, and deletes the temp database.
 
-The golden benchmark runs repository-owned recall assertions against a temporary SQLite truth/FTS fixture.
+The golden benchmark keeps a small SQLite truth/FTS compatibility smoke. The
+production benchmark replays the same annotated corpus through the real
+`MemoryStore` and hybrid `MemoryRetriever` with deterministic offline vectors,
+and reports Recall@K, Precision@K, MRR, nDCG@K, bad recall, scope leakage,
+prompt budget, latency, and exercised retrieval stages.
 
 The non-authorizing pre-push gate checks package/manifest version consistency, changelog
-coverage, schema/UI config exposure, compiled output, vector repair, the golden
-benchmark, Experience replay fixtures, and public npm pack contents. The default
+coverage, schema/UI config exposure, compiled output, vector repair, both recall
+benchmarks, Experience replay fixtures, and public npm pack contents. The default
 `npm run release:gate` additionally requires an exact live `extensions/clawlore`
 artifact and canonical OpenClaw inspect/doctor smoke; it must fail before audited
 deployment. The pack scan rejects runtime or sensitive artifacts such as databases,

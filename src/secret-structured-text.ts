@@ -240,6 +240,68 @@ function readFallbackValue(text: string, start: number, keyOffset: number): numb
   return cursor;
 }
 
+function collectXmlAttributeSpans(text: string): StructuredSecretSpan[] {
+  const spans: StructuredSecretSpan[] = [];
+  const tag = /<([A-Za-z][A-Za-z0-9_.:-]*)\b([^<>]*?)\/?\s*>/g;
+  let tagMatch: RegExpExecArray | null;
+  while ((tagMatch = tag.exec(text)) !== null) {
+    const attributesText = tagMatch[2] ?? "";
+    const attributesOffset = tagMatch.index + tagMatch[0].indexOf(attributesText);
+    const attributes: Array<{ name: string; value: string; start: number; end: number }> = [];
+    const attribute = /([A-Za-z_:][A-Za-z0-9_.:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g;
+    let attributeMatch: RegExpExecArray | null;
+    while ((attributeMatch = attribute.exec(attributesText)) !== null) {
+      const value = attributeMatch[2] ?? attributeMatch[3] ?? attributeMatch[4] ?? "";
+      const raw = attributeMatch[0];
+      const valueOffset = raw.lastIndexOf(value);
+      const start = attributesOffset + attributeMatch.index + valueOffset;
+      attributes.push({
+        name: attributeMatch[1] ?? "",
+        value,
+        start,
+        end: start + value.length,
+      });
+      if (attributeMatch[0].length === 0) attribute.lastIndex += 1;
+    }
+
+    for (const candidate of attributes) {
+      if (isStructuredSecretKey(candidate.name) && candidate.value) {
+        spans.push({ key: candidate.name, start: candidate.start, end: candidate.end, value: candidate.value });
+      }
+    }
+
+    const semanticKey = attributes.find((candidate) =>
+      ["key", "name"].includes(normalizeStructuredSecretKey(candidate.name))
+      && isStructuredSecretKey(candidate.value));
+    if (semanticKey) {
+      for (const candidate of attributes) {
+        if (normalizeStructuredSecretKey(candidate.name) === "value" && candidate.value) {
+          spans.push({ key: semanticKey.value, start: candidate.start, end: candidate.end, value: candidate.value });
+        }
+      }
+    }
+  }
+  return spans;
+}
+
+function collectNpmrcSpans(text: string): StructuredSecretSpan[] {
+  const spans: StructuredSecretSpan[] = [];
+  const assignment = /(?:^|\r?\n)[\t ]*(?:\/\/[^\r\n=]*\/:)?([_A-Za-z][A-Za-z0-9_.-]*)[\t ]*=[\t ]*/gm;
+  let match: RegExpExecArray | null;
+  while ((match = assignment.exec(text)) !== null) {
+    const key = match[1] ?? "";
+    const normalizedKey = normalizeStructuredSecretKey(key);
+    if (!isStructuredSecretKey(key) && normalizedKey !== "auth") continue;
+    const start = match.index + match[0].length;
+    const lineEnd = text.indexOf("\n", start);
+    let end = lineEnd < 0 ? text.length : lineEnd;
+    if (end > start && text[end - 1] === "\r") end -= 1;
+    while (end > start && /\s/.test(text[end - 1] ?? "")) end -= 1;
+    if (end > start) spans.push({ key, start, end, value: text.slice(start, end) });
+  }
+  return spans;
+}
+
 /**
  * Parse valid YAML/JSON first, then scan embedded config fragments that cannot
  * form a standalone document (for example prose containing `serviceToken=...`).
@@ -247,7 +309,11 @@ function readFallbackValue(text: string, start: number, keyOffset: number): numb
  * so every consumer can redact the original bytes rather than merely flagging.
  */
 export function findStructuredSecretSpans(text: string): StructuredSecretSpan[] {
-  const spans = collectYamlSpans(text);
+  const spans = [
+    ...collectYamlSpans(text),
+    ...collectXmlAttributeSpans(text),
+    ...collectNpmrcSpans(text),
+  ];
   const assignment = /(?:^|[\s,;{[(])(["'`]?(?:[A-Za-z][A-Za-z0-9_.-]*|凭证|口令|密码|密钥|登录密码|访问令牌|远程密码|令牌)["'`]?)\s*[:=]\s*/gm;
   let match: RegExpExecArray | null;
   while ((match = assignment.exec(text)) !== null) {

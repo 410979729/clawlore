@@ -10,9 +10,10 @@ import { evaluateRecallScopePolicy } from "./scope-policy.js";
 import { isSystemBypassId } from "./scopes.js";
 import { parseSmartMetadata } from "./smart-metadata.js";
 import { isReusableTaskExperience } from "./task-experience.js";
+import { formatTaskExperienceRecallCapsule } from "./task-experience-capsule.js";
 import { redactMemoryTextForOutput } from "./memory-egress-policy.js";
 import { filterUserMdExclusiveRecallResults } from "./workspace-boundary.js";
-function sanitizeForContext(text) {
+function sanitizeForContext(text, maxChars = 300) {
     return redactMemoryTextForOutput(text)
         .replace(/[\r\n]+/g, " ")
         .replace(/<\/?[a-zA-Z][^>]*>/g, "")
@@ -20,7 +21,7 @@ function sanitizeForContext(text) {
         .replace(/>/g, "\uFF1E")
         .replace(/\s+/g, " ")
         .trim()
-        .slice(0, 300);
+        .slice(0, Math.max(0, Math.floor(maxChars)));
 }
 async function sleep(ms) {
     await new Promise((resolve) => setTimeout(resolve, ms));
@@ -277,17 +278,17 @@ export function registerAutoRecallHooks(params) {
                 const displayTier = metadata.tier || "";
                 const tierPrefix = displayTier ? `[${displayTier.charAt(0).toUpperCase()}]` : "";
                 const reusable = isReusableTaskExperience(result.entry);
+                const itemMaxChars = reusable
+                    ? Math.min(1_600, autoRecallMaxChars, Math.max(effectivePerItemMaxChars, 1_200))
+                    : effectivePerItemMaxChars;
                 const contentText = reusable
-                    ? (metadata.l2_content || result.entry.text)
+                    ? formatTaskExperienceRecallCapsule(metadata, metadata.l2_content || result.entry.text, itemMaxChars)
                     : recallMode === "summary"
                         ? (metadata.l0_abstract || result.entry.text)
                         : intent?.depth === "full"
                             ? result.entry.text
                             : (metadata.l0_abstract || result.entry.text);
-                const itemMaxChars = reusable
-                    ? Math.min(1_600, autoRecallMaxChars, Math.max(effectivePerItemMaxChars, 1_200))
-                    : effectivePerItemMaxChars;
-                const summary = sanitizeForContext(contentText).slice(0, itemMaxChars);
+                const summary = sanitizeForContext(contentText, itemMaxChars);
                 return {
                     id: result.entry.id,
                     prefix: `${tierPrefix}[${displayCategory}:${result.entry.scope}]`,

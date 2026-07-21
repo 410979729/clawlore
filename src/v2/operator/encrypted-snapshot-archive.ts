@@ -5,9 +5,9 @@ import {
   randomBytes,
   timingSafeEqual,
 } from "node:crypto";
-import { enforcePrivatePath, preparePrivateFileForRead } from "../../file-privacy.js";
+import { enforcePrivatePath, ensurePrivateDirectory, preparePrivateFileForRead } from "../../file-privacy.js";
 import { createReadStream, createWriteStream } from "node:fs";
-import { appendFile, mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { pipeline } from "node:stream/promises";
 import {
@@ -182,7 +182,7 @@ export async function createEncryptedSnapshotArchiveV2(input: {
 }): Promise<EncryptedSnapshotArchiveManifestV2> {
   const createdAt = (input.now?.() ?? new Date()).toISOString();
   const plaintextPath = `${input.archivePath}.plaintext-${process.pid}-${randomBytes(8).toString("hex")}.sqlite`;
-  await mkdir(dirname(input.archivePath), { recursive: true });
+  ensurePrivateDirectory(dirname(input.archivePath));
   try {
     const snapshot = await createVerifiedSqliteSnapshotV2({
       sourcePath: input.sourcePath,
@@ -237,7 +237,7 @@ export async function createEncryptedLegacySnapshotArchiveV2(input: {
 }): Promise<EncryptedLegacySnapshotArchiveManifestV2> {
   const createdAt = (input.now?.() ?? new Date()).toISOString();
   const plaintextPath = `${input.archivePath}.plaintext-${process.pid}-${randomBytes(8).toString("hex")}.sqlite`;
-  await mkdir(dirname(input.archivePath), { recursive: true });
+  ensurePrivateDirectory(dirname(input.archivePath));
   try {
     const snapshot = await createVerifiedLegacySqliteSnapshotV2({
       sourcePath: input.sourcePath,
@@ -308,7 +308,7 @@ export async function restoreEncryptedSnapshotArchiveV2(input: {
   const iv = Buffer.from(parsed.header.iv, "base64");
   if (iv.length !== 12) throw new Error("invalid snapshot archive IV");
   const plaintextPath = `${input.destinationPath}.decrypt-${process.pid}-${randomBytes(8).toString("hex")}.sqlite`;
-  await mkdir(dirname(input.destinationPath), { recursive: true });
+  ensurePrivateDirectory(dirname(input.destinationPath));
   try {
     const decipher = createDecipheriv("aes-256-gcm", key, iv, { authTagLength: AUTH_TAG_BYTES });
     decipher.setAuthTag(parsed.authTag);
@@ -361,7 +361,7 @@ export async function restoreEncryptedLegacySnapshotArchiveV2(input: {
   const iv = Buffer.from(parsed.header.iv, "base64");
   if (iv.length !== 12) throw new Error("invalid snapshot archive IV");
   const plaintextPath = `${input.destinationPath}.decrypt-${process.pid}-${randomBytes(8).toString("hex")}.sqlite`;
-  await mkdir(dirname(input.destinationPath), { recursive: true });
+  ensurePrivateDirectory(dirname(input.destinationPath));
   try {
     const decipher = createDecipheriv("aes-256-gcm", key, iv, { authTagLength: AUTH_TAG_BYTES });
     decipher.setAuthTag(parsed.authTag);

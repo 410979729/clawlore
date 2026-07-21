@@ -124,3 +124,74 @@ test("operator inspection reports a missing or mismatched outbox row without cla
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("same-millisecond mutations stay ordered across two workers and converge on purge", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clawlore-projection-order-"));
+  const path = join(root, "truth.sqlite");
+  const sharedClock = clock();
+  const firstTruth = new SqliteTruthStoreV2(path, sharedClock);
+  const secondTruth = new SqliteTruthStoreV2(path, sharedClock);
+  try {
+    firstTruth.open();
+    secondTruth.open();
+    const receipts = [];
+    receipts.push(firstTruth.remember({
+      itemId: "same-millisecond-item",
+      content: "initial value",
+      category: "fact",
+      address: address(),
+      source: { sourceType: "user_message", observedAt: "2026-07-11T15:00:00Z" },
+      actor: "principal:user-1",
+      reason: "same millisecond remember",
+    }));
+    receipts.push(firstTruth.correct({
+      itemId: "same-millisecond-item",
+      content: "corrected value",
+      source: { sourceType: "user_message", observedAt: "2026-07-11T15:00:00Z" },
+      actor: "principal:user-1",
+      reason: "same millisecond correction",
+    }));
+    receipts.push(firstTruth.forget({
+      itemId: "same-millisecond-item",
+      actor: "principal:user-1",
+      reason: "same millisecond archive",
+    }));
+    receipts.push(firstTruth.forget({
+      itemId: "same-millisecond-item",
+      hardDelete: true,
+      approved: true,
+      actor: "principal:user-1",
+      reason: "same millisecond purge",
+    }));
+
+    const projectionState = new Map();
+    const adapters = ["fts", "vector", "relations"].map((projection) => ({
+      projection,
+      async apply(row) { projectionState.set(projection, row.operation); },
+    }));
+    const firstWorker = new ProjectionWorkerV2(firstTruth, adapters, { owner: "order-worker-a" });
+    const secondWorker = new ProjectionWorkerV2(secondTruth, adapters, { owner: "order-worker-b" });
+    for (let round = 0; round < 8 && firstTruth.listPendingOutbox().length > 0; round++) {
+      const runs = await Promise.all([firstWorker.run(12), secondWorker.run(12)]);
+      assert.equal(runs.reduce((sum, run) => sum + run.failed, 0), 0);
+      assert.ok(runs.some((run) => run.processed > 0), "workers must make progress");
+    }
+
+    assert.equal(firstTruth.listPendingOutbox().length, 0);
+    assert.deepEqual(Object.fromEntries(projectionState), {
+      fts: "purge",
+      vector: "purge",
+      relations: "purge",
+    });
+    for (let projectionIndex = 0; projectionIndex < 3; projectionIndex++) {
+      const ids = receipts.map((receipt) => receipt.outboxIds[projectionIndex]);
+      const byId = new Map(firstTruth.inspectOutbox(ids).map((row) => [row.outboxId, row]));
+      const order = ids.map((id) => byId.get(id).mutationOrder);
+      assert.deepEqual(order, [...order].sort((a, b) => a - b));
+    }
+  } finally {
+    secondTruth.close();
+    firstTruth.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});

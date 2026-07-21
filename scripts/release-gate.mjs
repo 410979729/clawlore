@@ -309,6 +309,7 @@ const requiredFiles = [
   "benchmarks/golden-recall-cases.json",
   "benchmarks/experience-replay-cases.json",
   "scripts/golden-benchmark.mjs",
+  "scripts/production-retrieval-benchmark.mjs",
   "scripts/packed-runtime-smoke.mjs",
   "scripts/packed-lancedb-smoke.mjs",
   "scripts/packed-legacy-identity-smoke.mjs",
@@ -538,6 +539,12 @@ for (const marker of ["knownAnswerRecall", "topKAccuracy", "mrr", "ndcgAtK", "ba
     throw new Error(`release gate failed: golden benchmark missing metric ${marker}`);
   }
 }
+const productionBenchmarkSource = await readFile("scripts/production-retrieval-benchmark.mjs", "utf8");
+for (const marker of ["MemoryStore", "MemoryRetriever", "retrieveWithTrace", "RecallAtK", "PrecisionAtK", "MRR", "nDCGAtK", "stageCoverage"]) {
+  if (!productionBenchmarkSource.includes(marker)) {
+    throw new Error(`release gate failed: production recall benchmark missing marker ${marker}`);
+  }
+}
 const scalabilityBenchmarkSource = await readFile("scripts/scalability-benchmark.mjs", "utf8");
 for (const marker of ["200_000", "knownAnswerRecall", "crossScopeLeakage", "p95"]) {
   if (!scalabilityBenchmarkSource.includes(marker)) {
@@ -613,6 +620,7 @@ run("npm", ["run", "typecheck"]);
 run("npm", ["run", "smoke:vector-repair"]);
 run("npm", ["run", "build"]);
 run("node", ["scripts/golden-benchmark.mjs", "--summary"]);
+run("node", ["scripts/production-retrieval-benchmark.mjs", "--summary"]);
 run("node", ["scripts/scalability-benchmark.mjs", "--rows", "200000", "--queries", "64"]);
 
 const candidateIdentity = await runtimeArtifactIdentity(sourceRoot);

@@ -12,10 +12,10 @@ export interface ExperienceStoreV2Port {
   saveScratch(scratch: ChildScratchV2): void;
   finalizeSnapshot(snapshot: SubagentSnapshotV2, episode: ExperienceEpisodeV2): void;
   getEpisode(episodeId: string): ExperienceEpisodeV2 | null;
-  updateEpisode(episode: ExperienceEpisodeV2): void;
+  updateEpisode(episode: ExperienceEpisodeV2, expected: ExperienceEpisodeV2): void;
   listEpisodes(episodeIds: string[]): ExperienceEpisodeV2[];
   savePlaybook(playbook: ProceduralPlaybookV2): void;
   getPlaybook(playbookId: string): ProceduralPlaybookV2 | null;
-  updatePlaybook(playbook: ProceduralPlaybookV2): void;
+  updatePlaybook(playbook: ProceduralPlaybookV2, expected: ProceduralPlaybookV2): void;
   appendEvent(event: ExperienceEventV2): void;
 }

@@ -8,7 +8,7 @@ const { createJiti } = require("jiti");
 const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: false });
 const { registerAutoRecallHooks } = jiti("../src/auto-recall-hooks.ts");
 
-function fixture() {
+function fixture(options = {}) {
   const hooks = new Map();
   const db = new DatabaseSync(":memory:");
   const retrievals = [];
@@ -39,12 +39,13 @@ function fixture() {
       autoRecallMaxChars: 300,
       autoRecallPerItemMaxChars: 120,
       maxRecallPerTurn: 1,
+      ...options.config,
     },
     retriever: {
       async retrieve(input) {
         retrievals.push(input);
         return [{
-          entry: {
+          entry: options.entry ?? {
             id: "memory-1",
             text: "Use the verified rollback path.",
             category: "fact",
@@ -128,5 +129,58 @@ test("missing ingress message skips auto-recall instead of embedding assembled p
   assert.equal(retrievals.length, 0);
   const schema = db.prepare("SELECT name FROM sqlite_master WHERE name = 'auto_recall_trace_events'").get();
   assert.equal(schema, undefined);
+  db.close();
+});
+
+test("reusable experience recall rebuilds a bounded capsule from structured metadata", async () => {
+  const scope = "user:principal-hash";
+  const { hooks, db } = fixture({
+    config: {
+      autoRecallMaxChars: 1_600,
+      autoRecallPerItemMaxChars: 1_600,
+    },
+    entry: {
+      id: "reusable-memory",
+      text: `Reusable Task Experience: recovery\n${"long trigger text ".repeat(300)}`,
+      category: "other",
+      scope,
+      timestamp: 1,
+      metadata: JSON.stringify({
+        type: "reusable-task-experience",
+        reusable_task_experience: true,
+        task_type: "Production recovery",
+        trigger_phrases: ["gateway recovery"],
+        applicability: ["the production gateway is unhealthy"],
+        preconditions: ["confirm the active unit"],
+        procedure_steps: ["inspect state", "apply the bounded repair"],
+        verification_gate: ["VERIFY_SENTINEL health and durable state pass"],
+        failure_signals: ["FAILURE_SENTINEL stop on unhealthy status"],
+        safety_boundaries: ["SAFETY_SENTINEL do not claim success early"],
+        cleanup: ["CLEANUP_SENTINEL remove owned probes"],
+        evidence_required: ["EVIDENCE_SENTINEL retain the health receipt"],
+        l2_content: `trigger-only fallback ${"noise ".repeat(400)}`,
+        state: "confirmed",
+        confidence: 1,
+      }),
+    },
+  });
+
+  await hooks.get("message_received")(
+    { content: "repair the production gateway", messageId: "recall-safety" },
+    { channelId: "telegram", accountId: "default", conversationId: "8176453077", senderId: "8176453077" },
+  );
+  const result = await hooks.get("before_prompt_build")(
+    { prompt: "repair" },
+    { sessionKey: "agent:main:telegram:default:direct:8176453077", sessionId: "recall-safe", runId: "run-safe" },
+  );
+
+  for (const marker of [
+    "VERIFY_SENTINEL",
+    "FAILURE_SENTINEL",
+    "SAFETY_SENTINEL",
+    "CLEANUP_SENTINEL",
+    "EVIDENCE_SENTINEL",
+  ]) assert.match(result.prependContext, new RegExp(marker), marker);
+  assert.ok(result.prependContext.length < 1_900);
   db.close();
 });

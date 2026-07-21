@@ -3,6 +3,7 @@ import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
 import { redactKnownSecrets } from "./secret-redaction.js";
 import { buildSmartMetadata, parseSmartMetadata, stringifySmartMetadata, } from "./smart-metadata.js";
 import { agentEndEventAllowsTaskExperience, finalAssistantClaimsVerifiedSuccess, finalAssistantLooksUnsuccessful, summarizeStructuredToolOutcomes, } from "./task-outcome-evidence.js";
+import { formatTaskExperienceCapsule } from "./task-experience-capsule.js";
 export { agentEndEventAllowsTaskExperience, finalAssistantClaimsVerifiedSuccess, finalAssistantLooksUnsuccessful, } from "./task-outcome-evidence.js";
 export const DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG = {
     enabled: false,
@@ -331,6 +332,8 @@ export function buildTaskExperienceEpisodeDraft(params) {
             memory_id: result.action === "created" ? result.id : "",
             existing_memory_id: result.action === "duplicate" ? result.existingId : "",
             similarity: result.action === "duplicate" ? result.similarity : 0,
+            mirror_status: result.action === "created" ? result.mirrorStatus : "not_applicable",
+            mirror_repair_required: result.action === "created" && result.mirrorStatus === "repair_pending",
         },
     };
 }
@@ -421,41 +424,19 @@ export function normalizeTaskExperienceReview(raw, minConfidence = DEFAULT_TASK_
 function formatBullets(items) {
     return items.length > 0 ? items.map((item) => `- ${item}`) : ["- (none)"];
 }
-function formatNumbered(items) {
-    return items.length > 0 ? items.map((item, index) => `${index + 1}. ${item}`) : ["1. (none)"];
-}
 export function formatTaskExperienceMemoryText(review, options = {}) {
-    const body = [
-        `Reusable Task Experience: ${review.task_type}`,
-        "",
-        "Trigger Phrases:",
-        ...formatBullets(review.trigger_phrases),
-        "",
-        "When To Apply:",
-        ...formatBullets(review.applicability),
-        "",
-        "Preconditions:",
-        ...formatBullets(review.preconditions),
-        "",
-        "Procedure:",
-        ...formatNumbered(review.steps),
-        "",
-        "Verification Gate:",
-        ...formatBullets(review.verification),
-        "",
-        "Failure Signals:",
-        ...formatBullets(review.failure_signals),
-        "",
-        "Safety Boundaries:",
-        ...formatBullets(review.safety_boundaries),
-        "",
-        "Cleanup:",
-        ...formatBullets(review.cleanup),
-        "",
-        "Evidence Required Before Reporting Success:",
-        ...formatBullets(review.evidence_required),
-    ].join("\n");
-    return truncate(body, options.maxChars ?? DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG.maxCapsuleChars);
+    return formatTaskExperienceCapsule({
+        taskType: review.task_type,
+        triggerPhrases: review.trigger_phrases,
+        applicability: review.applicability,
+        preconditions: review.preconditions,
+        steps: review.steps,
+        verification: review.verification,
+        failureSignals: review.failure_signals,
+        safetyBoundaries: review.safety_boundaries,
+        cleanup: review.cleanup,
+        evidenceRequired: review.evidence_required,
+    }, options.maxChars ?? DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG.maxCapsuleChars);
 }
 export function isReusableTaskExperience(entry) {
     try {
@@ -558,8 +539,16 @@ export async function captureTaskExperience(params) {
         importance: 0.88,
         metadata,
     });
+    let mirrorStatus = "not_configured";
     if (params.mdMirror) {
-        await params.mdMirror({ text, category, scope: params.scope, timestamp: entry.timestamp }, { source: "task-experience", agentId: params.agentId });
+        try {
+            await params.mdMirror({ text, category, scope: params.scope, timestamp: entry.timestamp }, { source: "task-experience", agentId: params.agentId });
+            mirrorStatus = "written";
+        }
+        catch (error) {
+            mirrorStatus = "repair_pending";
+            params.logger?.warn?.(`task-experience: markdown mirror projection requires repair: ${diagnosticErrorSummary(error)}`);
+        }
     }
-    return { action: "created", id: entry.id, taskType: review.task_type };
+    return { action: "created", id: entry.id, taskType: review.task_type, mirrorStatus };
 }

@@ -42,6 +42,8 @@ export interface ForgetMemoryV2Input {
 export interface ProjectionOutboxRowV2 {
   outboxId: string;
   itemId: string;
+  /** Monotonic SQLite insertion order used as the per-item commit fence. */
+  mutationOrder: number;
   revisionId?: string;
   operation: "upsert" | "delete" | "purge";
   projection: MemoryProjectionV2;

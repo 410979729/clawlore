@@ -4,6 +4,15 @@ function errorCode(error) {
     const name = error instanceof Error ? error.name : "Error";
     return `projection_${name.replace(/[^A-Za-z0-9]+/g, "_").toLowerCase()}`;
 }
+function isCurrentProjectionMutation(row, memory) {
+    if (row.operation === "purge")
+        return memory === null;
+    if (!memory || !row.revisionId || memory.revisionId !== row.revisionId)
+        return false;
+    if (row.operation === "delete")
+        return memory.lifecycle === "archived";
+    return memory.lifecycle !== "archived" && memory.lifecycle !== "purged";
+}
 export class ProjectionWorkerV2 {
     truth;
     adapters;
@@ -53,7 +62,12 @@ export class ProjectionWorkerV2 {
             }, Math.max(50, Math.floor(this.leaseDurationMs / 3)));
             renewalTimer.unref?.();
             try {
-                await adapter.apply(row, this.truth.get(row.itemId));
+                const memory = this.truth.get(row.itemId);
+                // A newer truth mutation may commit while an older lease is in flight.
+                // Obsolete rows complete without projection so late upserts cannot
+                // cross a correction/archive/purge tombstone.
+                if (isCurrentProjectionMutation(row, memory))
+                    await adapter.apply(row, memory);
                 if (!leaseLost && this.truth.markOutboxProcessed(claim)) {
                     processed += 1;
                 }

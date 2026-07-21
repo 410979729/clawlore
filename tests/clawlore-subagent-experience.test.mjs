@@ -195,7 +195,7 @@ test("subagent snapshots and child writes preserve isolated/fork and candidate-o
     assert.equal(rejected.lifecycle, "quarantined");
     assert.throws(() => store.updateEpisode({
       ...rejected, taskGoal: "Changed immutable goal", updatedAt: "2026-07-12T01:31:00.000Z",
-    }), /immutable fields/);
+    }, rejected), /immutable fields/);
     assert.throws(() => store.appendEvent({
       eventId: "direct-unsafe-event", entityType: "episode", entityId: rejected.episodeId,
       eventType: "unsafe_event", actor: "operator",
@@ -244,7 +244,7 @@ test("parent verification, repeated evidence, replay, feedback, and supersede pr
     assert.throws(() => store.updatePlaybook({
       ...single, title: "Changed immutable title", lifecycle: "promoted", operatorReviewed: true,
       updatedAt: "2026-07-12T01:31:00.000Z",
-    }), /immutable fields/);
+    }, single), /immutable fields/);
     assert.throws(() => service.createPlaybookCandidate({
       ...playbookInput([episodes[0].episodeId]),
       trigger: "databasePassword: |\n  synthetic-playbook-trigger-secret",
@@ -312,6 +312,82 @@ test("parent verification, repeated evidence, replay, feedback, and supersede pr
     assert.equal(quarantined.lifecycle, "quarantined");
   } finally {
     store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("V2 Experience rejects stale multi-connection reviews and scratch after revocation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clawlore-experience-cas-"));
+  const path = join(root, "experience.sqlite");
+  const first = new SqliteExperienceStoreV2(path);
+  const second = new SqliteExperienceStoreV2(path);
+  first.open();
+  second.open();
+  try {
+    const service = new SubagentExperienceServiceV2(first, clock());
+    const snapshot = service.prepareSpawn({
+      mode: "fork",
+      parentSessionId: "parent",
+      childSessionId: "cas-child",
+      runId: "cas-run",
+      taskGoal: "Deploy fixture",
+      actor: actor(),
+      contextPack: pack(),
+    });
+    const episode = service.onSubagentEnded({
+      snapshotId: snapshot.snapshotId,
+      childSessionId: snapshot.childSessionId,
+      taskClass: "deployment",
+      outcome: "success",
+      toolReceiptIds: ["cas-receipt"],
+      evidence: ["cas-health-ok"],
+    });
+    const firstEpisodeView = first.getEpisode(episode.episodeId);
+    const staleEpisodeView = second.getEpisode(episode.episodeId);
+    first.updateEpisode({
+      ...firstEpisodeView,
+      parentVerification: "parent_verified",
+      lifecycle: "candidate",
+      verificationReason: "first reviewer accepted",
+      updatedAt: "2026-07-12T01:31:00.000Z",
+    }, firstEpisodeView);
+    assert.throws(() => second.updateEpisode({
+      ...staleEpisodeView,
+      parentVerification: "disputed",
+      lifecycle: "quarantined",
+      verificationReason: "stale reviewer rejected",
+      updatedAt: "2026-07-12T01:32:00.000Z",
+    }, staleEpisodeView), /expected state is stale/);
+    assert.equal(first.getEpisode(episode.episodeId).parentVerification, "parent_verified");
+
+    const playbook = service.createPlaybookCandidate(playbookInput([episode.episodeId]));
+    const firstPlaybookView = first.getPlaybook(playbook.playbookId);
+    const stalePlaybookView = second.getPlaybook(playbook.playbookId);
+    first.updatePlaybook({
+      ...firstPlaybookView,
+      lifecycle: "promoted",
+      operatorReviewed: true,
+      updatedAt: "2026-07-12T01:33:00.000Z",
+    }, firstPlaybookView);
+    assert.throws(() => second.updatePlaybook({
+      ...stalePlaybookView,
+      lifecycle: "quarantined",
+      updatedAt: "2026-07-12T01:34:00.000Z",
+    }, stalePlaybookView), /expected state is stale/);
+    assert.equal(first.getPlaybook(playbook.playbookId).lifecycle, "promoted");
+
+    assert.throws(() => second.saveScratch({
+      scratchId: "late-cas-scratch",
+      snapshotId: snapshot.snapshotId,
+      childSessionId: snapshot.childSessionId,
+      content: "late candidate observation",
+      retention: "working",
+      lifecycle: "candidate",
+      createdAt: "2026-07-12T01:35:00.000Z",
+    }), /active child-owned snapshot/);
+  } finally {
+    second.close();
+    first.close();
     await rm(root, { recursive: true, force: true });
   }
 });

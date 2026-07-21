@@ -220,6 +220,33 @@ test("secret policy covers XML, TOML multiline values, and command-line credenti
   }
 });
 
+test("secret policy covers XML key/value attributes and npmrc registry credentials", () => {
+  const positives = [
+    ['<add key="ClientSecret" value="SyntheticXmlSecret123" />', "SyntheticXmlSecret123"],
+    ["<add name='apiToken' value='SyntheticXmlToken456' />", "SyntheticXmlToken456"],
+    ["<service clientSecret=SyntheticDirectAttribute789 />", "SyntheticDirectAttribute789"],
+    ["//registry.npmjs.org/:_authToken=SyntheticNpmToken123", "SyntheticNpmToken123"],
+    ["//npm.pkg.github.com/:_auth='SyntheticNpmAuth456'", "SyntheticNpmAuth456"],
+    ["_authToken = SyntheticDefaultRegistry789", "SyntheticDefaultRegistry789"],
+  ];
+  for (const [value, secret] of positives) {
+    assert.equal(containsSecret(value), true, value);
+    const redacted = redactKnownSecrets(value);
+    assert.equal(redacted.includes(secret), false, value);
+    assert.equal(redactKnownSecrets(redacted), redacted, value);
+  }
+
+  for (const value of [
+    '<add key="RetryCount" value="5" />',
+    "@scope:registry=https://registry.npmjs.org/",
+    '<add key="ClientSecret" value="${CLIENT_SECRET}" />',
+    "//registry.npmjs.org/:_authToken=${NPM_TOKEN}",
+  ]) {
+    assert.equal(containsSecret(value), false, value);
+    assert.equal(redactKnownSecrets(value), value, value);
+  }
+});
+
 test("capture safety blocks operational trace wrappers", () => {
   const decision = evaluateCaptureSafety(
     "Command hints:\n- inspect logs\nFiles:\n/tmp/x.log\nResult: Command completed | status=completed",

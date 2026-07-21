@@ -6,6 +6,19 @@ No changes yet.
 
 ## 1.2.1 - 2026-07-20
 
+- Preserved verification, failure, safety, cleanup, and evidence sections under
+  the real Task Experience recall budget by rebuilding bounded capsules from
+  structured metadata instead of truncating one monolithic string.
+- Ordered V2 projection work by per-item commit order with stale-revision
+  fencing, hardened snapshot directory creation under ordinary umasks, and
+  extended the canonical secret policy to XML key/value attributes and npmrc
+  authentication assignments.
+- Made V1 playbook supersession validate a same-scope live successor inside the
+  transaction, made Markdown mirror failure explicit repair debt after truth
+  commit, and added V2 multi-connection compare-and-set protection.
+- Added an offline, deterministic production-path recall benchmark through the
+  real MemoryStore and hybrid MemoryRetriever while retaining the small FTS
+  golden benchmark as a compatibility smoke.
 - Unified capture, support-bundle, Task Experience, governance-debt, and
   promotion secret handling under one structured policy. It now covers
   snake/kebab/camel-case keys, quoted values, YAML block scalars and aliases,

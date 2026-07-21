@@ -95,10 +95,16 @@ test("playbook create and review roll back when version receipts fail", () => {
     scope_ids: ["user:a"],
   });
 
+  const replacement = createPlaybook(db, {
+    scope_id: "user:a",
+    shared_scope_id: "project:release",
+    payload: { ...payload(), title: "Replacement atomic release playbook" },
+  });
+
   const result = reviewPlaybook(db, {
     playbookId: playbook.id,
     action: "supersede",
-    supersededBy: "replacement-playbook",
+    supersededBy: replacement.id,
     scopeIds: ["user:a"],
   });
   assert.equal(result.reviewed, true);
@@ -117,6 +123,63 @@ test("playbook create and review roll back when version receipts fail", () => {
     metadata: { nested: { password: "SyntheticPlaybookSecret2468" } },
   }), /persistence safety policy/);
   db.close();
+});
+
+test("playbook supersede enforces a same-scope live successor and leaves no rejected version", () => {
+  const db = new DatabaseSync(":memory:");
+  ensureExperienceSchema(db);
+  try {
+    const original = createPlaybook(db, {
+      scope_id: "user:a",
+      shared_scope_id: "project:release",
+      payload: payload(),
+    });
+    const successor = createPlaybook(db, {
+      scope_id: "user:a",
+      shared_scope_id: "project:release",
+      payload: { ...payload(), title: "Valid successor" },
+    });
+    const crossScope = createPlaybook(db, {
+      scope_id: "user:b",
+      shared_scope_id: "project:release",
+      payload: { ...payload(), title: "Cross-scope successor" },
+    });
+
+    const reject = (supersededBy, expectedError, scopeIds = ["user:a"]) => {
+      const beforeVersions = getPlaybookVersions(db, original.id, ["user:a"]).length;
+      const result = reviewPlaybook(db, {
+        playbookId: original.id,
+        action: "supersede",
+        supersededBy,
+        scopeIds,
+      });
+      assert.equal(result.reviewed, false, JSON.stringify(result));
+      assert.equal(result.error, expectedError);
+      assert.equal(getPlaybook(db, original.id, ["user:a"]).status, "candidate");
+      assert.equal(getPlaybookVersions(db, original.id, ["user:a"]).length, beforeVersions);
+    };
+
+    reject(undefined, "superseded_by_required");
+    reject("missing-successor", "superseded_by_not_found");
+    reject(original.id, "superseded_by_self");
+    reject(crossScope.id, "superseded_by_scope_mismatch", ["project:release"]);
+
+    db.prepare("UPDATE procedural_playbooks SET superseded_by=? WHERE id=?").run(original.id, successor.id);
+    reject(successor.id, "superseded_by_cycle");
+    db.prepare("UPDATE procedural_playbooks SET superseded_by='' WHERE id=?").run(successor.id);
+
+    const accepted = reviewPlaybook(db, {
+      playbookId: original.id,
+      action: "supersede",
+      supersededBy: successor.id,
+      scopeIds: ["user:a"],
+    });
+    assert.equal(accepted.reviewed, true);
+    assert.equal(getPlaybook(db, original.id, ["user:a"]).superseded_by, successor.id);
+    assert.equal(getPlaybookVersions(db, original.id, ["user:a"]).length, 2);
+  } finally {
+    db.close();
+  }
 });
 
 test("feedback run, finish, and counter update commit or roll back together", () => {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { appendFile, mkdtemp, rm } from "node:fs/promises";
+import { appendFile, mkdtemp, rm, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -33,6 +33,7 @@ function clock() {
 
 test("online snapshot remains consistent while the source store stays open and restores to a new path", async () => {
   const root = await mkdtemp(join(tmpdir(), "clawlore-snapshot-"));
+  const previousUmask = process.umask(0o002);
   const sourcePath = join(root, "source.sqlite");
   const snapshotPath = join(root, "backups", "snapshot.sqlite");
   const restoredPath = join(root, "restore", "truth.sqlite");
@@ -84,7 +85,13 @@ test("online snapshot remains consistent while the source store stays open and r
     restored.open();
     assert.equal(restored.get("before-snapshot").content, "Vector and graph projections rebuild from SQL truth");
     assert.equal(restored.get("after-snapshot"), null);
+    if (process.platform !== "win32") {
+      assert.equal((await stat(join(root, "backups"))).mode & 0o777, 0o700);
+      assert.equal((await stat(join(root, "restore"))).mode & 0o777, 0o700);
+      assert.equal((await stat(restoredPath)).mode & 0o777, 0o600);
+    }
   } finally {
+    process.umask(previousUmask);
     restored?.close();
     source.close();
     await rm(root, { recursive: true, force: true });

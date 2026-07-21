@@ -6,6 +6,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { redactSupportBundle } from "./application/support-bundle.js";
+import { validatePlaybookSuccessor } from "./experience-playbook-successor-policy.js";
 import { assertExperiencePersistenceSafe } from "./experience-persistence-policy.js";
 import { withSqliteSavepoint } from "./sqlite-savepoint.js";
 let experienceTransactionSequence = 0;
@@ -425,11 +426,15 @@ export function reviewPlaybook(db, params) {
     if (!status) {
         return { reviewed: false, id: playbookId, error: "unsupported_review_action" };
     }
-    const playbook = getPlaybook(db, playbookId, scopeIds);
-    if (!playbook) {
-        return { reviewed: false, id: playbookId, error: "not_found" };
-    }
-    const newVersion = withExperienceTransaction(db, () => {
+    return withExperienceTransaction(db, () => {
+        const playbook = getPlaybook(db, playbookId, scopeIds);
+        if (!playbook)
+            return { reviewed: false, id: playbookId, error: "not_found" };
+        if (status === "superseded") {
+            const successorError = validatePlaybookSuccessor(playbook, supersededBy, (id) => getPlaybook(db, id, scopeIds));
+            if (successorError)
+                return { reviewed: false, id: playbookId, error: successorError };
+        }
         const now = new Date().toISOString();
         const currentVersion = getLatestVersion(db, playbookId);
         const nextVersion = currentVersion + 1;
@@ -446,9 +451,8 @@ export function reviewPlaybook(db, params) {
         if (!durable)
             throw new Error("playbook review lost its durable row");
         createPlaybookVersion(db, playbookId, nextVersion, status, reason || `Status changed to ${status}`, durable);
-        return nextVersion;
+        return { reviewed: true, id: playbookId, status, version: nextVersion };
     });
-    return { reviewed: true, id: playbookId, status, version: newVersion };
 }
 function rowToPlaybook(row) {
     return {

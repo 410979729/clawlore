@@ -116,16 +116,20 @@ export class SqliteExperienceStoreV2 implements ExperienceStoreV2Port {
 
   saveScratch(scratch: ChildScratchV2): void {
     assertChildScratchSafeForPersistence(scratch);
-    const snapshot = this.getSnapshot(scratch.snapshotId);
-    if (!snapshot || snapshot.status !== "active" || snapshot.childSessionId !== scratch.childSessionId) {
-      throw new Error("active child-owned snapshot is required for scratch persistence");
-    }
-    this.requireDb().prepare(`INSERT INTO subagent_scratch_v2
-      (scratch_id,snapshot_id,child_session_id,retention,lifecycle,payload_json,created_at)
-      VALUES (?,?,?,?,?,?,?)`).run(
-      scratch.scratchId, scratch.snapshotId, scratch.childSessionId, scratch.retention,
-      scratch.lifecycle, JSON.stringify(scratch), scratch.createdAt,
-    );
+    const db = this.requireDb();
+    this.transaction(() => {
+      const result = db.prepare(`INSERT INTO subagent_scratch_v2
+        (scratch_id,snapshot_id,child_session_id,retention,lifecycle,payload_json,created_at)
+        SELECT ?,snapshot_id,child_session_id,?,?,?,?
+        FROM subagent_snapshots_v2
+        WHERE snapshot_id=? AND child_session_id=? AND status='active'`).run(
+        scratch.scratchId, scratch.retention, scratch.lifecycle, JSON.stringify(scratch),
+        scratch.createdAt, scratch.snapshotId, scratch.childSessionId,
+      );
+      if (Number(result.changes) !== 1) {
+        throw new Error("active child-owned snapshot is required for scratch persistence");
+      }
+    });
   }
 
   finalizeSnapshot(snapshot: SubagentSnapshotV2, episode: ExperienceEpisodeV2): void {
@@ -177,22 +181,31 @@ export class SqliteExperienceStoreV2 implements ExperienceStoreV2Port {
     return row ? parseJson<ExperienceEpisodeV2>(row.payload_json) : null;
   }
 
-  updateEpisode(episode: ExperienceEpisodeV2): void {
+  updateEpisode(episode: ExperienceEpisodeV2, expected: ExperienceEpisodeV2): void {
     assertExperienceEpisodeSafeForPersistence(episode);
-    const current = this.getEpisode(episode.episodeId);
-    if (!current) throw new Error("experience episode update target missing");
-    if (!isDeepStrictEqual(
-      withoutKeys(current as unknown as Record<string, unknown>, ["parentVerification", "lifecycle", "verificationReason", "updatedAt"]),
-      withoutKeys(episode as unknown as Record<string, unknown>, ["parentVerification", "lifecycle", "verificationReason", "updatedAt"]),
-    )) throw new Error("experience episode immutable fields cannot change");
-    if (current.parentVerification !== "pending" || current.lifecycle !== "candidate") {
-      throw new Error("experience episode review is already terminal");
-    }
-    const result = this.requireDb().prepare(`UPDATE experience_episodes_v2 SET
-      parent_verification=?,lifecycle=?,payload_json=?,updated_at=? WHERE episode_id=?`).run(
-      episode.parentVerification, episode.lifecycle, JSON.stringify(episode), episode.updatedAt, episode.episodeId,
-    );
-    if (Number(result.changes) !== 1) throw new Error("experience episode update target missing");
+    assertExperienceEpisodeSafeForPersistence(expected);
+    const db = this.requireDb();
+    this.transaction(() => {
+      const current = this.getEpisode(episode.episodeId);
+      if (!current) throw new Error("experience episode update target missing");
+      if (!isDeepStrictEqual(current, expected)) {
+        throw new Error("experience episode compare-and-set expected state is stale");
+      }
+      if (!isDeepStrictEqual(
+        withoutKeys(expected as unknown as Record<string, unknown>, ["parentVerification", "lifecycle", "verificationReason", "updatedAt"]),
+        withoutKeys(episode as unknown as Record<string, unknown>, ["parentVerification", "lifecycle", "verificationReason", "updatedAt"]),
+      )) throw new Error("experience episode immutable fields cannot change");
+      if (expected.parentVerification !== "pending" || expected.lifecycle !== "candidate") {
+        throw new Error("experience episode review is already terminal");
+      }
+      const result = db.prepare(`UPDATE experience_episodes_v2 SET
+        parent_verification=?,lifecycle=?,payload_json=?,updated_at=?
+        WHERE episode_id=? AND parent_verification=? AND lifecycle=?`).run(
+        episode.parentVerification, episode.lifecycle, JSON.stringify(episode), episode.updatedAt,
+        episode.episodeId, expected.parentVerification, expected.lifecycle,
+      );
+      if (Number(result.changes) !== 1) throw new Error("experience episode compare-and-set failed");
+    });
   }
 
   listEpisodes(episodeIds: string[]): ExperienceEpisodeV2[] {
@@ -209,23 +222,26 @@ export class SqliteExperienceStoreV2 implements ExperienceStoreV2Port {
     if (playbook.lifecycle !== "candidate" || playbook.operatorReviewed || playbook.supersededBy != null) {
       throw new Error("new procedural playbook must begin as an unreviewed candidate");
     }
-    const episodes = this.listEpisodes(playbook.evidenceEpisodeIds);
-    if (episodes.length === 0 || episodes.length !== playbook.evidenceEpisodeIds.length
-      || episodes.some((episode) => episode.outcome !== "success"
-        || episode.parentVerification !== "parent_verified"
-        || episode.lifecycle !== "candidate"
-        || episode.taskClass !== playbook.taskClass
-        || memoryAddressKey(episode.actorAddress) !== memoryAddressKey(playbook.scopeAddress))) {
-      throw new Error("playbook persistence requires matching parent-verified evidence");
-    }
-    this.requireDb().prepare(`INSERT INTO procedural_playbooks_v2
-      (playbook_id,version,task_class,lifecycle,operator_reviewed,predecessor_id,
-       superseded_by,payload_json,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
-      playbook.playbookId, playbook.version, playbook.taskClass, playbook.lifecycle,
-      playbook.operatorReviewed ? 1 : 0, playbook.predecessorId ?? null,
-      playbook.supersededBy ?? null, JSON.stringify(playbook), playbook.createdAt, playbook.updatedAt,
-    );
+    const db = this.requireDb();
+    this.transaction(() => {
+      const episodes = this.listEpisodes(playbook.evidenceEpisodeIds);
+      if (episodes.length === 0 || episodes.length !== playbook.evidenceEpisodeIds.length
+        || episodes.some((episode) => episode.outcome !== "success"
+          || episode.parentVerification !== "parent_verified"
+          || episode.lifecycle !== "candidate"
+          || episode.taskClass !== playbook.taskClass
+          || memoryAddressKey(episode.actorAddress) !== memoryAddressKey(playbook.scopeAddress))) {
+        throw new Error("playbook persistence requires matching parent-verified evidence");
+      }
+      db.prepare(`INSERT INTO procedural_playbooks_v2
+        (playbook_id,version,task_class,lifecycle,operator_reviewed,predecessor_id,
+         superseded_by,payload_json,created_at,updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
+        playbook.playbookId, playbook.version, playbook.taskClass, playbook.lifecycle,
+        playbook.operatorReviewed ? 1 : 0, playbook.predecessorId ?? null,
+        playbook.supersededBy ?? null, JSON.stringify(playbook), playbook.createdAt, playbook.updatedAt,
+      );
+    });
   }
 
   getPlaybook(playbookId: string): ProceduralPlaybookV2 | null {
@@ -234,40 +250,49 @@ export class SqliteExperienceStoreV2 implements ExperienceStoreV2Port {
     return row ? parseJson<ProceduralPlaybookV2>(row.payload_json) : null;
   }
 
-  updatePlaybook(playbook: ProceduralPlaybookV2): void {
+  updatePlaybook(playbook: ProceduralPlaybookV2, expected: ProceduralPlaybookV2): void {
     assertProceduralPlaybookSafeForPersistence(playbook);
-    const current = this.getPlaybook(playbook.playbookId);
-    if (!current) throw new Error("procedural playbook update target missing");
-    if (!isDeepStrictEqual(
-      withoutKeys(current as unknown as Record<string, unknown>, ["lifecycle", "operatorReviewed", "supersededBy", "updatedAt"]),
-      withoutKeys(playbook as unknown as Record<string, unknown>, ["lifecycle", "operatorReviewed", "supersededBy", "updatedAt"]),
-    )) throw new Error("procedural playbook immutable fields cannot change");
-    if (current.operatorReviewed && !playbook.operatorReviewed) {
-      throw new Error("operator review cannot be revoked");
-    }
-    const transition = `${current.lifecycle}->${playbook.lifecycle}`;
-    if (!["candidate->promoted", "candidate->quarantined", "promoted->quarantined", "promoted->superseded"].includes(transition)) {
-      throw new Error("procedural playbook lifecycle transition is unsupported");
-    }
-    if (playbook.lifecycle === "promoted" && !playbook.operatorReviewed) {
-      const episodes = this.listEpisodes(playbook.evidenceEpisodeIds);
-      const verifiedRuns = new Set(episodes
-        .filter((episode) => episode.outcome === "success" && episode.parentVerification === "parent_verified")
-        .map((episode) => episode.runId));
-      if (verifiedRuns.size < 2) throw new Error("playbook promotion requires repeated verified runs");
-    }
-    if (playbook.lifecycle === "superseded") {
-      const successor = playbook.supersededBy ? this.getPlaybook(playbook.supersededBy) : null;
-      if (!successor || successor.predecessorId !== playbook.playbookId) {
-        throw new Error("superseded playbook requires a persisted successor");
+    assertProceduralPlaybookSafeForPersistence(expected);
+    const db = this.requireDb();
+    this.transaction(() => {
+      const current = this.getPlaybook(playbook.playbookId);
+      if (!current) throw new Error("procedural playbook update target missing");
+      if (!isDeepStrictEqual(current, expected)) {
+        throw new Error("procedural playbook compare-and-set expected state is stale");
       }
-    }
-    const result = this.requireDb().prepare(`UPDATE procedural_playbooks_v2 SET
-      lifecycle=?,operator_reviewed=?,superseded_by=?,payload_json=?,updated_at=? WHERE playbook_id=?`).run(
-      playbook.lifecycle, playbook.operatorReviewed ? 1 : 0, playbook.supersededBy ?? null,
-      JSON.stringify(playbook), playbook.updatedAt, playbook.playbookId,
-    );
-    if (Number(result.changes) !== 1) throw new Error("procedural playbook update target missing");
+      if (!isDeepStrictEqual(
+        withoutKeys(expected as unknown as Record<string, unknown>, ["lifecycle", "operatorReviewed", "supersededBy", "updatedAt"]),
+        withoutKeys(playbook as unknown as Record<string, unknown>, ["lifecycle", "operatorReviewed", "supersededBy", "updatedAt"]),
+      )) throw new Error("procedural playbook immutable fields cannot change");
+      if (expected.operatorReviewed && !playbook.operatorReviewed) {
+        throw new Error("operator review cannot be revoked");
+      }
+      const transition = `${expected.lifecycle}->${playbook.lifecycle}`;
+      if (!["candidate->promoted", "candidate->quarantined", "promoted->quarantined", "promoted->superseded"].includes(transition)) {
+        throw new Error("procedural playbook lifecycle transition is unsupported");
+      }
+      if (playbook.lifecycle === "promoted" && !playbook.operatorReviewed) {
+        const episodes = this.listEpisodes(playbook.evidenceEpisodeIds);
+        const verifiedRuns = new Set(episodes
+          .filter((episode) => episode.outcome === "success" && episode.parentVerification === "parent_verified")
+          .map((episode) => episode.runId));
+        if (verifiedRuns.size < 2) throw new Error("playbook promotion requires repeated verified runs");
+      }
+      if (playbook.lifecycle === "superseded") {
+        const successor = playbook.supersededBy ? this.getPlaybook(playbook.supersededBy) : null;
+        if (!successor || successor.predecessorId !== playbook.playbookId) {
+          throw new Error("superseded playbook requires a persisted successor");
+        }
+      }
+      const result = db.prepare(`UPDATE procedural_playbooks_v2 SET
+        version=?,lifecycle=?,operator_reviewed=?,superseded_by=?,payload_json=?,updated_at=?
+        WHERE playbook_id=? AND version=? AND lifecycle=? AND operator_reviewed=? AND payload_json=?`).run(
+        playbook.version, playbook.lifecycle, playbook.operatorReviewed ? 1 : 0, playbook.supersededBy ?? null,
+        JSON.stringify(playbook), playbook.updatedAt, playbook.playbookId,
+        expected.version, expected.lifecycle, expected.operatorReviewed ? 1 : 0, JSON.stringify(expected),
+      );
+      if (Number(result.changes) !== 1) throw new Error("procedural playbook compare-and-set failed");
+    });
   }
 
   appendEvent(event: ExperienceEventV2): void {
@@ -282,6 +307,19 @@ export class SqliteExperienceStoreV2 implements ExperienceStoreV2Port {
 
   private ensureSchema(): void {
     this.requireDb().exec(EXPERIENCE_V2_SCHEMA_SQL);
+  }
+
+  private transaction<T>(action: () => T): T {
+    const db = this.requireDb();
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = action();
+      db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      try { db.exec("ROLLBACK"); } catch { /* preserve the original mutation error */ }
+      throw error;
+    }
   }
 
   private requireDb(): DatabaseSync {

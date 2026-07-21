@@ -482,6 +482,34 @@ test("review normalization requires replayable steps and verification", () => {
   assert.match(text, /Verification Gate:/);
 });
 
+test("long task-experience capsules retain every safety-critical section inside recall budget", () => {
+  const long = (label, index) => `${label} ${index}: ${"bounded operational detail ".repeat(9)}`;
+  const review = {
+    should_store: true,
+    confidence: 0.95,
+    task_type: "Production gateway recovery",
+    trigger_phrases: Array.from({ length: 8 }, (_, index) => long("trigger", index)),
+    applicability: Array.from({ length: 4 }, (_, index) => long("applicability", index)),
+    preconditions: Array.from({ length: 4 }, (_, index) => long("precondition", index)),
+    steps: Array.from({ length: 4 }, (_, index) => long("step", index)),
+    verification: ["VERIFY_SENTINEL health probe and durable state both pass"],
+    failure_signals: ["FAILURE_SENTINEL stop when the service remains unhealthy"],
+    safety_boundaries: ["SAFETY_SENTINEL never claim success without evidence"],
+    cleanup: ["CLEANUP_SENTINEL remove only owned temporary files"],
+    evidence_required: ["EVIDENCE_SENTINEL retain the final health receipt"],
+  };
+  const persisted = formatTaskExperienceMemoryText(review, { maxChars: 2_400 });
+  assert.ok(persisted.length <= 2_400);
+  const recalled = persisted.slice(0, 1_600);
+  for (const marker of [
+    "VERIFY_SENTINEL",
+    "FAILURE_SENTINEL",
+    "SAFETY_SENTINEL",
+    "CLEANUP_SENTINEL",
+    "EVIDENCE_SENTINEL",
+  ]) assert.match(recalled, new RegExp(marker), marker);
+});
+
 test("captureTaskExperience writes a durable reusable capsule through store.store", async () => {
   const messages = [
     { role: "user", content: "Fix the state hygiene residue and verify the audit is clean." },
@@ -550,6 +578,7 @@ test("captureTaskExperience writes a durable reusable capsule through store.stor
     action: "created",
     id: "exp-1",
     taskType: "State hygiene residue cleanup",
+    mirrorStatus: "not_configured",
   });
   assert.equal(storedEntry.category, "other");
   assert.equal(storedEntry.scope, "agent:main");
@@ -636,5 +665,67 @@ test("generic other memories do not suppress reusable task experience capture as
     action: "created",
     id: "exp-2",
     taskType: "Schema-safe plugin config repair",
+    mirrorStatus: "not_configured",
   });
+});
+
+test("markdown mirror failure returns a committed capture receipt with repair debt", async () => {
+  const messages = [
+    { role: "user", content: "Repair the gateway and verify it end to end." },
+    { role: "assistant", content: "I will inspect, repair, verify, and retain rollback evidence." },
+    {
+      role: "tool",
+      isError: false,
+      content: `Command completed | status=completed\nhealth and durable state checks passed. ${"The bounded verification receipt confirms service state, durable state, and rollback readiness. ".repeat(6)}`,
+    },
+    { role: "assistant", content: "Completed and verified. Health and durable state checks passed." },
+  ];
+  let stored = false;
+  const warnings = [];
+  const result = await captureTaskExperience({
+    messages,
+    sessionKey: "agent:main:test",
+    agentId: "main",
+    scope: "agent:main",
+    config: { ...DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG, enabled: true, minMessages: 3 },
+    llmClient: {
+      async completeJson() {
+        return {
+          should_store: true,
+          confidence: 0.95,
+          task_type: "Gateway recovery",
+          trigger_phrases: ["gateway failure"],
+          applicability: ["gateway health is degraded"],
+          preconditions: ["confirm the active unit"],
+          steps: ["inspect current state", "apply the narrow repair"],
+          verification: ["health and durable state checks pass"],
+          failure_signals: ["health remains degraded"],
+          safety_boundaries: ["do not claim success without probes"],
+          cleanup: ["remove owned temporary probes"],
+          evidence_required: ["retain the final health receipt"],
+        };
+      },
+    },
+    embedder: { async embedPassage() { return [1, 0]; } },
+    store: {
+      async vectorSearch() { return []; },
+      async store(entry) {
+        stored = true;
+        return { ...entry, id: "mirror-debt-memory", timestamp: 123 };
+      },
+    },
+    async mdMirror() { throw new Error("injected mirror failure"); },
+    logger: { warn(message) { warnings.push(message); } },
+    agentEndEvent: { success: true, messages },
+  });
+
+  assert.equal(stored, true);
+  assert.deepEqual(result, {
+    action: "created",
+    id: "mirror-debt-memory",
+    taskType: "Gateway recovery",
+    mirrorStatus: "repair_pending",
+  });
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /requires repair/);
 });

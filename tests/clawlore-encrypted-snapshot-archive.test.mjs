@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -43,11 +43,12 @@ async function missing(path) {
 
 test("encrypted archive restores verified Truth V2 without retaining plaintext snapshots", async () => {
   const root = await mkdtemp(join(tmpdir(), "clawlore-encrypted-archive-"));
+  const previousUmask = process.umask(0o002);
   const sourcePath = join(root, "source.sqlite");
   const archivePath = join(root, "backups", "truth.clawlore2");
   const keyPath = join(root, "secrets", "backup.key");
   const destinationPath = join(root, "restore", "truth.sqlite");
-  await mkdir(join(root, "secrets"), { recursive: true });
+  await mkdir(join(root, "secrets"), { recursive: true, mode: 0o700 });
   await writeFile(keyPath, Buffer.alloc(32, 0x7a), { mode: 0o600 });
   const provider = createFileSecretRefKeyProviderV2({
     keyId: "fixture-key-2026-07",
@@ -94,7 +95,13 @@ test("encrypted archive restores verified Truth V2 without retaining plaintext s
     restored.open();
     assert.equal(restored.get("encrypted-item").content, "Sensitive fixture must never appear as plaintext in the archive");
     assert.deepEqual((await readdir(join(root, "restore"))).filter((name) => name.includes(".decrypt-")), []);
+    if (process.platform !== "win32") {
+      assert.equal((await stat(join(root, "backups"))).mode & 0o777, 0o700);
+      assert.equal((await stat(join(root, "restore"))).mode & 0o777, 0o700);
+      assert.equal((await stat(destinationPath)).mode & 0o777, 0o600);
+    }
   } finally {
+    process.umask(previousUmask);
     restored?.close();
     source.close();
     await rm(root, { recursive: true, force: true });

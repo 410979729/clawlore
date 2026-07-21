@@ -221,7 +221,7 @@ export class SubagentExperienceServiceV2 {
       verificationReason: reason,
       updatedAt: this.clock.now().toISOString(),
     };
-    this.store.updateEpisode(updated);
+    this.store.updateEpisode(updated, episode);
     this.event("episode", updated.episodeId, accepted ? "parent_verified" : "episode_quarantined",
       `session:${input.parentSessionId}`, reason);
     return updated;
@@ -299,7 +299,7 @@ export class SubagentExperienceServiceV2 {
       operatorReviewed: playbook.operatorReviewed || input.operatorReviewed === true,
       updatedAt: this.clock.now().toISOString(),
     };
-    this.store.updatePlaybook(updated);
+    this.store.updatePlaybook(updated, playbook);
     this.event("playbook", updated.playbookId, "playbook_promoted", actor, reason);
     return updated;
   }
@@ -309,7 +309,7 @@ export class SubagentExperienceServiceV2 {
     const actor = requiredIdentifierText(input.actor, "quarantine actor", 512);
     const reason = requiredSemanticText(input.reason, "quarantine reason");
     const updated = { ...playbook, lifecycle: "quarantined" as const, updatedAt: this.clock.now().toISOString() };
-    this.store.updatePlaybook(updated);
+    this.store.updatePlaybook(updated, playbook);
     this.event("playbook", updated.playbookId, "playbook_quarantined", actor, reason);
     return updated;
   }
@@ -342,7 +342,10 @@ export class SubagentExperienceServiceV2 {
       updatedAt: now,
     };
     this.store.savePlaybook(next);
-    this.store.updatePlaybook({ ...previous, lifecycle: "superseded", supersededBy: next.playbookId, updatedAt: now });
+    this.store.updatePlaybook(
+      { ...previous, lifecycle: "superseded", supersededBy: next.playbookId, updatedAt: now },
+      previous,
+    );
     this.event("playbook", previous.playbookId, "playbook_superseded", actor, reason);
     return next;
   }

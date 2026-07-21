@@ -119,6 +119,8 @@ export const TRUTH_V2_SCHEMA_SQL = `
     (tenant_id,project_id,customer_id,lifecycle);
   CREATE INDEX IF NOT EXISTS idx_outbox_pending ON projection_outbox
     (processed_at,available_at,projection);
+  CREATE INDEX IF NOT EXISTS idx_outbox_item_projection_pending ON projection_outbox
+    (item_id,projection,processed_at);
   CREATE INDEX IF NOT EXISTS idx_outbox_claim_expiry ON projection_outbox_claims
     (lease_expires_at,outbox_id);
   INSERT OR IGNORE INTO clawlore_schema(version,applied_at) VALUES (3,datetime('now'));
@@ -378,8 +380,9 @@ export class SqliteTruthStoreV2 implements TruthStoreV2Port, MemoryCenterReadPor
   }
 
   listPendingOutbox(limit = 100): ProjectionOutboxRowV2[] {
-    return this.requireDb().prepare(`SELECT * FROM projection_outbox WHERE processed_at IS NULL
-      AND available_at <= ? ORDER BY created_at,outbox_id LIMIT ?`)
+    return this.requireDb().prepare(`SELECT o.*,o.rowid AS mutation_order FROM projection_outbox o
+      WHERE o.processed_at IS NULL AND o.available_at <= ?
+      ORDER BY o.rowid LIMIT ?`)
       .all(this.clock.now().toISOString(), Math.max(1, Math.min(1000, Math.floor(limit))))
       .map((row: Record<string, unknown>) => this.toOutboxRow(row));
   }
@@ -389,7 +392,8 @@ export class SqliteTruthStoreV2 implements TruthStoreV2Port, MemoryCenterReadPor
     if (unique.length === 0) return [];
     if (unique.length > 100) throw new Error("outbox inspection is limited to 100 ids");
     const placeholders = unique.map(() => "?").join(",");
-    return this.requireDb().prepare(`SELECT * FROM projection_outbox WHERE outbox_id IN (${placeholders})`)
+    return this.requireDb().prepare(`SELECT o.*,o.rowid AS mutation_order FROM projection_outbox o
+      WHERE o.outbox_id IN (${placeholders})`)
       .all(...unique)
       .map((row: Record<string, unknown>) => this.toOutboxRow(row));
   }
@@ -412,11 +416,16 @@ export class SqliteTruthStoreV2 implements TruthStoreV2Port, MemoryCenterReadPor
       const exclusionSql = excluded.length > 0
         ? `AND o.outbox_id NOT IN (${excluded.map(() => "?").join(",")})`
         : "";
-      const row = db.prepare(`SELECT o.* FROM projection_outbox o
+      const row = db.prepare(`SELECT o.*,o.rowid AS mutation_order FROM projection_outbox o
         LEFT JOIN projection_outbox_claims c ON c.outbox_id=o.outbox_id
         WHERE o.processed_at IS NULL AND o.available_at <= ? AND c.outbox_id IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM projection_outbox earlier
+          WHERE earlier.item_id=o.item_id AND earlier.projection=o.projection
+            AND earlier.processed_at IS NULL AND earlier.rowid < o.rowid
+        )
         ${exclusionSql}
-        ORDER BY o.created_at,o.outbox_id LIMIT 1`).get(claimedAt, ...excluded) as Record<string, unknown> | undefined;
+        ORDER BY o.rowid LIMIT 1`).get(claimedAt, ...excluded) as Record<string, unknown> | undefined;
       if (!row) return null;
       const token = randomUUID();
       db.prepare(`INSERT INTO projection_outbox_claims
@@ -640,6 +649,7 @@ export class SqliteTruthStoreV2 implements TruthStoreV2Port, MemoryCenterReadPor
   private toOutboxRow(row: Record<string, unknown>): ProjectionOutboxRowV2 {
     return {
       outboxId: String(row.outbox_id), itemId: String(row.item_id),
+      mutationOrder: Number(row.mutation_order),
       revisionId: row.revision_id ? String(row.revision_id) : undefined,
       operation: row.operation as ProjectionOutboxRowV2["operation"],
       projection: row.projection as ProjectionOutboxRowV2["projection"],
