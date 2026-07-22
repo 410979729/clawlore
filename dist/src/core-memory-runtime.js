@@ -1,5 +1,5 @@
 import { isSecretRef } from "openclaw/plugin-sdk/core";
-import { applyResolvedAssignments, resolveSecretRefValues, } from "openclaw/plugin-sdk/runtime-secret-resolution";
+import { applyResolvedAssignments, resolveSecretRefValues, } from "openclaw/plugin-sdk/secret-ref-runtime";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";

@@ -121,10 +121,10 @@ test("append-only V1 delta plan is redacted, complete, and non-authorizing", asy
     assert.equal(plan.proposed.candidateRows, 1);
     assert.equal(plan.proposed.archivedRows, 1);
     assert.deepEqual(plan.proposed.classifications, { reflection_summary: 1, explicit_manual: 1 });
-    assert.deepEqual(plan.proposed.verifications, { unverified: 1, user_confirmed: 1 });
+    assert.deepEqual(plan.proposed.verifications, { unverified: 2 });
     assert.equal(plan.proposed.reviewRequiredRows, 2);
     assert.equal(plan.projectionWork.outboxRows, 6);
-    assert.equal(plan.decision.deltaWriteReady, true);
+    assert.equal(plan.decision.deltaWriteReady, false);
     assert.equal(plan.authorizesDeltaWrite, false);
     assert.equal(plan.authorizesFinalRecall, false);
     const serialized = JSON.stringify(plan);

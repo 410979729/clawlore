@@ -9,6 +9,11 @@ declare module "openclaw/plugin-sdk" {
       warn(...args: unknown[]): void;
       error(...args: unknown[]): void;
     };
+    runtime: {
+      agent: {
+        runEmbeddedAgent(params: Record<string, unknown>): Promise<unknown>;
+      };
+    };
     resolvePath(path: string): string;
     registerTool(
       factory: (toolContext?: Record<string, unknown>) => unknown,
@@ -57,7 +62,7 @@ declare module "openclaw/plugin-sdk/core" {
   export function isSecretRef(value: unknown): value is SecretRef;
 }
 
-declare module "openclaw/plugin-sdk/runtime-secret-resolution" {
+declare module "openclaw/plugin-sdk/secret-ref-runtime" {
   import type { OpenClawConfig, SecretRef } from "openclaw/plugin-sdk/config-types";
 
   export function resolveSecretRefValues(

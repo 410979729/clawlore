@@ -17,12 +17,23 @@ import {
   type StructuredToolOutcome,
 } from "./task-outcome-evidence.js";
 import { formatTaskExperienceCapsule } from "./task-experience-capsule.js";
+import {
+  diagnoseTaskExperienceReview,
+  normalizeTaskExperienceReview as normalizeTaskExperienceReviewResponse,
+  type TaskExperienceReview,
+} from "./task-experience-review.js";
 
 export {
   agentEndEventAllowsTaskExperience,
   finalAssistantClaimsVerifiedSuccess,
   finalAssistantLooksUnsuccessful,
 } from "./task-outcome-evidence.js";
+export {
+  diagnoseTaskExperienceReview,
+  type TaskExperienceReview,
+  type TaskExperienceReviewDiagnostic,
+  type TaskExperienceReviewRejectionReason,
+} from "./task-experience-review.js";
 
 type StoreCategory = "preference" | "fact" | "decision" | "entity" | "other" | "reflection";
 
@@ -48,22 +59,8 @@ export interface TaskExperienceTranscript {
   successfulToolResultCount: number;
   failedToolResultCount: number;
   lastStructuredToolOutcome: StructuredToolOutcome | null;
-}
-
-export interface TaskExperienceReview {
-  should_store: boolean;
-  confidence: number;
-  task_type: string;
-  trigger_phrases: string[];
-  applicability: string[];
-  preconditions: string[];
-  steps: string[];
-  verification: string[];
-  failure_signals: string[];
-  safety_boundaries: string[];
-  cleanup: string[];
-  evidence_required: string[];
-  do_not_store_reason?: string;
+  resolvedFailureToolCount: number;
+  unresolvedFailureToolCount: number;
 }
 
 export type TaskExperienceCaptureResult =
@@ -96,12 +93,6 @@ export const DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG: TaskExperienceCaptureConfig
 const MAX_LIST_ITEMS = 8;
 const MAX_ITEM_CHARS = 260;
 
-function clampNumber(value: unknown, fallback: number, min: number, max: number): number {
-  const n = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.min(max, Math.max(min, n));
-}
-
 function compactWhitespace(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
@@ -110,21 +101,6 @@ function truncate(value: string, maxChars: number): string {
   const trimmed = value.trim();
   if (trimmed.length <= maxChars) return trimmed;
   return `${trimmed.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
-}
-
-function asStringList(value: unknown): string[] {
-  const raw = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const item of raw) {
-    if (typeof item !== "string") continue;
-    const text = truncate(compactWhitespace(item), MAX_ITEM_CHARS);
-    if (!text || seen.has(text.toLowerCase())) continue;
-    seen.add(text.toLowerCase());
-    out.push(text);
-    if (out.length >= MAX_LIST_ITEMS) break;
-  }
-  return out;
 }
 
 function extractTextFromContent(content: unknown, depth = 0): string {
@@ -270,6 +246,8 @@ export function extractTaskExperienceTranscript(
     successfulToolResultCount: structured.successCount,
     failedToolResultCount: structured.failureCount,
     lastStructuredToolOutcome: structured.lastOutcome,
+    resolvedFailureToolCount: structured.resolvedFailureToolCount,
+    unresolvedFailureToolCount: structured.unresolvedFailureToolCount,
   };
 }
 
@@ -293,13 +271,17 @@ export function shouldAttemptTaskExperienceCapture(
   if (transcript.lastStructuredToolOutcome !== "success") {
     return { ok: false, reason: "tool_outcome_not_successful" };
   }
-  if (transcript.failedToolResultCount > 0) {
-    // Task Experience is optional and must fail closed. Without a reliable
-    // operation/call correlation model, a later unrelated success cannot be
-    // assumed to resolve an earlier structured failure.
+  if (transcript.unresolvedFailureToolCount > 0) {
+    // Resolve an earlier failure only when the same explicit tool capability
+    // later returns structured success. A success from another tool cannot
+    // erase the failed capability's terminal state.
     return { ok: false, reason: "structured_tool_failure_present" };
   }
-  if (!finalAssistantClaimsVerifiedSuccess(transcript.finalAssistantText)) {
+  // A typed successful agent_end plus terminal structured tool success is
+  // sufficient to enter the reviewer. When no typed event is available (for
+  // example an offline caller), retain the explicit final-answer verification
+  // requirement rather than inferring success from prose or stdout alone.
+  if (!finalAssistantClaimsVerifiedSuccess(transcript.finalAssistantText) && agentEndEvent === undefined) {
     return { ok: false, reason: "verified_success_not_established" };
   }
   if (transcript.text.length < 400) return { ok: false, reason: "transcript_too_short" };
@@ -481,33 +463,7 @@ export function normalizeTaskExperienceReview(
   raw: unknown,
   minConfidence = DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG.minConfidence,
 ): TaskExperienceReview | null {
-  if (!raw || typeof raw !== "object") return null;
-  const obj = raw as Record<string, unknown>;
-  const confidence = clampNumber(obj.confidence, 0, 0, 1);
-  const review: TaskExperienceReview = {
-    should_store: obj.should_store === true,
-    confidence,
-    task_type: truncate(compactWhitespace(typeof obj.task_type === "string" ? obj.task_type : ""), 140),
-    trigger_phrases: asStringList(obj.trigger_phrases),
-    applicability: asStringList(obj.applicability),
-    preconditions: asStringList(obj.preconditions),
-    steps: asStringList(obj.steps),
-    verification: asStringList(obj.verification),
-    failure_signals: asStringList(obj.failure_signals),
-    safety_boundaries: asStringList(obj.safety_boundaries),
-    cleanup: asStringList(obj.cleanup),
-    evidence_required: asStringList(obj.evidence_required),
-    do_not_store_reason: typeof obj.do_not_store_reason === "string"
-      ? truncate(compactWhitespace(obj.do_not_store_reason), 300)
-      : undefined,
-  };
-
-  if (!review.should_store) return review;
-  if (review.confidence < minConfidence) return null;
-  if (!review.task_type) return null;
-  if (review.steps.length < 2) return null;
-  if (review.verification.length < 1) return null;
-  return review;
+  return normalizeTaskExperienceReviewResponse(raw, minConfidence);
 }
 
 function formatBullets(items: string[]): string[] {
@@ -567,10 +523,36 @@ export async function captureTaskExperience(params: {
     buildTaskExperiencePrompt(transcript.text),
     "task-experience",
   );
-  const review = normalizeTaskExperienceReview(reviewRaw, params.config.minConfidence);
-  if (!review) return { action: "skipped", reason: "review_invalid_or_low_confidence" };
+  const reviewDiagnostic = diagnoseTaskExperienceReview(reviewRaw, params.config.minConfidence);
+  if (!reviewDiagnostic.ok) {
+    const failureCategory = typeof params.llmClient.getLastFailure === "function"
+      ? params.llmClient.getLastFailure()?.category
+      : undefined;
+    const reviewerTransportFailed =
+      reviewDiagnostic.reason === "review_response_unavailable" &&
+      typeof params.llmClient.getLastError === "function" &&
+      Boolean(params.llmClient.getLastError());
+    const transportReason = (() => {
+      if (failureCategory === "authentication") return "review_request_authentication_failed";
+      if (failureCategory === "authorization") return "review_request_authorization_failed";
+      if (failureCategory === "rate_limit") return "review_request_rate_limited";
+      if (failureCategory === "timeout") return "review_request_timed_out";
+      if (failureCategory === "endpoint_or_model") return "review_request_endpoint_or_model_failed";
+      if (failureCategory === "empty_response" || failureCategory === "invalid_response") {
+        return "review_response_invalid";
+      }
+      return reviewerTransportFailed ? "review_request_failed" : reviewDiagnostic.reason;
+    })();
+    return {
+      action: "skipped",
+      reason: transportReason,
+    };
+  }
+  const review = reviewDiagnostic.review;
   if (!review.should_store) {
-    return { action: "skipped", reason: review.do_not_store_reason || "review_declined" };
+    // Persist only the stable category. Reviewer prose may paraphrase transcript
+    // content and must not become governance-ledger data.
+    return { action: "skipped", reason: "review_declined" };
   }
 
   const untrustedText = formatTaskExperienceMemoryText(review, { maxChars: params.config.maxCapsuleChars });

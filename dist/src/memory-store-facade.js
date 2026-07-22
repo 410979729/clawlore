@@ -36,6 +36,9 @@ export class MemoryStoreFacade {
     deleteVectorCompanion(id, operation) {
         return this.ports.deleteVectorCompanion(id, operation);
     }
+    getVectorEntryById(id) {
+        return this.ports.getVectorEntryById(id);
+    }
     delete(id, scopeFilter) {
         return this.ports.delete(id, scopeFilter);
     }

@@ -4,6 +4,7 @@
 import { diagnosticErrorSummary } from "../diagnostic-redaction.js";
 import { createMemoryUpgrader } from "../memory-upgrader.js";
 import { isMemoryEntrySafeForEgress, redactMemoryTextForOutput } from "../memory-egress-policy.js";
+import { resolvePrincipalWriteTarget } from "../principal-write-boundary.js";
 import { loadLanceDB } from "../store.js";
 import { clampInt } from "./cli-runtime-policy.js";
 export function registerMigrationCommands(runtime) {
@@ -218,14 +219,19 @@ export function registerMigrationCommands(runtime) {
         .command("run")
         .description("Run migration from legacy memory-lancedb")
         .option("--source <path>", "Specific source database path")
-        .option("--default-scope <scope>", "Default scope for migrated data", "global")
+        .option("--principal-key <platform:account:principal>", "Exact canonical private principal")
+        .option("--session-key <key>", "Exact OpenClaw private session key")
         .option("--dry-run", "Show what would be migrated without actually migrating")
         .option("--skip-existing", "Skip entries that already exist")
         .action(async (options) => {
         try {
+            const target = resolvePrincipalWriteTarget({
+                principalKey: options.principalKey,
+                sessionKey: options.sessionKey,
+            });
             const result = await context.migrator.migrate({
                 sourceDbPath: options.source,
-                defaultScope: options.defaultScope,
+                defaultScope: target.scope,
                 dryRun: options.dryRun,
                 skipExisting: options.skipExisting,
             });

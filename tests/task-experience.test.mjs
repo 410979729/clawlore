@@ -14,6 +14,7 @@ const {
   agentEndEventAllowsTaskExperience,
   buildTaskExperienceEpisodeDraft,
   captureTaskExperience,
+  diagnoseTaskExperienceReview,
   extractTaskExperienceTranscript,
   finalAssistantLooksUnsuccessful,
   formatTaskExperienceMemoryText,
@@ -232,6 +233,30 @@ test("capture gate requires structured tool success and a verified final outcome
   );
 });
 
+test("typed successful agent_end sends neutral completion prose to the reviewer after structured tool success", () => {
+  const transcript = extractTaskExperienceTranscript([
+    { role: "user", content: "Repair the configuration and run the focused schema, startup, and health checks before finishing. Preserve the existing routing, avoid unrelated changes, and leave an auditable result." },
+    { role: "assistant", content: "I will inspect the active configuration and schema, make only the narrow repair, run the focused schema validation, verify startup behavior and the health endpoint, then check that the routing and unrelated settings stayed unchanged." },
+    { role: "toolResult", toolName: "config_check", success: true, status: "passed", content: "The focused schema validation, startup check, health endpoint, and unchanged-routing comparison all returned structured pass results." },
+    { role: "assistant", content: "The configuration change is in place, the preserved settings remain unchanged, and the audit record is available." },
+  ]);
+  assert.deepEqual(
+    shouldAttemptTaskExperienceCapture(
+      transcript,
+      { ...DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG, enabled: true },
+    ),
+    { ok: false, reason: "verified_success_not_established" },
+  );
+  assert.deepEqual(
+    shouldAttemptTaskExperienceCapture(
+      transcript,
+      { ...DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG, enabled: true },
+      { success: true },
+    ),
+    { ok: true },
+  );
+});
+
 test("conflicting tool envelopes and unrelated later successes fail closed", () => {
   const conflicting = [
     { role: "tool", success: true, status: "failed" },
@@ -258,6 +283,27 @@ test("conflicting tool envelopes and unrelated later successes fail closed", () 
       { success: true },
     ),
     { ok: false, reason: "structured_tool_failure_present" },
+  );
+});
+
+test("a later structured success from the same tool resolves its earlier diagnostic failure", () => {
+  const transcript = extractTaskExperienceTranscript([
+    { role: "user", content: "Reproduce the service failure, repair it, then rerun the same health tool and report only after verification." },
+    { role: "assistant", content: "I will reproduce the failure, make the narrow repair, and rerun the same health tool before reporting completion." },
+    { role: "toolResult", toolName: "service_health", success: false, status: "failed", content: "The initial health check returned a structured failure." },
+    { role: "toolResult", toolName: "service_health", success: true, status: "passed", content: "The post-repair health check returned a structured pass." },
+    { role: "assistant", content: "Repair completed and verified. The post-repair health check passed." },
+  ]);
+  assert.equal(transcript.failedToolResultCount, 1);
+  assert.equal(transcript.resolvedFailureToolCount, 1);
+  assert.equal(transcript.unresolvedFailureToolCount, 0);
+  assert.deepEqual(
+    shouldAttemptTaskExperienceCapture(
+      transcript,
+      { ...DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG, enabled: true },
+      { success: true },
+    ),
+    { ok: true },
   );
 });
 
@@ -384,7 +430,7 @@ test("reviewer-skipped tool-backed tasks still produce an episode draft", async 
     },
   });
 
-  assert.deepEqual(result, { action: "skipped", reason: "review_invalid_or_low_confidence" });
+  assert.deepEqual(result, { action: "skipped", reason: "review_confidence_below_threshold" });
   const transcript = extractTaskExperienceTranscript(messages, config.maxInputChars);
   assert.equal(shouldRecordTaskExperienceEpisode(transcript, result), true);
   const draft = buildTaskExperienceEpisodeDraft({ transcript, result, agentId: "main" });
@@ -392,13 +438,13 @@ test("reviewer-skipped tool-backed tasks still produce an episode draft", async 
   assert.equal(draft.outcome, "success");
   assert.equal(draft.status, "completed");
   assert.equal(draft.metadata.capture_action, "skipped");
-  assert.equal(draft.metadata.capture_reason, "review_invalid_or_low_confidence");
+  assert.equal(draft.metadata.capture_reason, "review_confidence_below_threshold");
   assert.equal(draft.metadata.reviewer_passed, false);
   assert.equal(draft.metadata.promotion_eligible, false);
   assert.deepEqual(draft.metadata.promotion_review, {
     source: "task-experience-reviewer",
     decision: "rejected",
-    reason: "review_invalid_or_low_confidence",
+    reason: "review_confidence_below_threshold",
   });
   assert.equal(draft.tool_names.includes("exec_command"), true);
   assert.match(draft.task_goal, /OpenClaw digest recovery/);
@@ -480,6 +526,73 @@ test("review normalization requires replayable steps and verification", () => {
   const text = formatTaskExperienceMemoryText(review);
   assert.match(text, /Reusable Task Experience: Gateway health repair/);
   assert.match(text, /Verification Gate:/);
+});
+
+test("review diagnostics use stable content-free rejection categories", () => {
+  assert.deepEqual(
+    diagnoseTaskExperienceReview(null, 0.68),
+    { ok: false, reason: "review_response_unavailable" },
+  );
+  assert.deepEqual(
+    diagnoseTaskExperienceReview([], 0.68),
+    { ok: false, reason: "review_invalid_shape" },
+  );
+  assert.deepEqual(
+    diagnoseTaskExperienceReview({ confidence: 0.9 }, 0.68),
+    { ok: false, reason: "review_invalid_shape" },
+  );
+
+  const base = {
+    should_store: true,
+    confidence: 0.9,
+    task_type: "Gateway recovery",
+    steps: ["Inspect live state", "Apply the narrow repair"],
+    verification: ["Health probe passes"],
+  };
+  assert.deepEqual(
+    diagnoseTaskExperienceReview({ ...base, confidence: 0.2 }, 0.68),
+    { ok: false, reason: "review_confidence_below_threshold" },
+  );
+  assert.deepEqual(
+    diagnoseTaskExperienceReview({ ...base, task_type: "" }, 0.68),
+    { ok: false, reason: "review_task_type_missing" },
+  );
+  assert.deepEqual(
+    diagnoseTaskExperienceReview({ ...base, steps: ["Inspect live state"] }, 0.68),
+    { ok: false, reason: "review_steps_insufficient" },
+  );
+  assert.deepEqual(
+    diagnoseTaskExperienceReview({ ...base, verification: [] }, 0.68),
+    { ok: false, reason: "review_verification_missing" },
+  );
+});
+
+test("review transport failures emit a stable safe category", async () => {
+  const messages = [
+    { role: "user", content: "Repair a synthetic gateway and verify the focused test and health probe." },
+    { role: "assistant", content: "I will inspect the active state and schema, preserve a rollback copy, make one bounded repair, run the focused configuration test, then run the independent health probe before reporting completion." },
+    { role: "toolResult", toolName: "gateway_check", success: true, status: "passed", content: "The synthetic focused configuration test, schema validation, independent health probe, unchanged-setting comparison, rollback receipt check, and temporary-artifact cleanup check all returned structured pass results." },
+    { role: "assistant", content: "Repair completed and verified. The synthetic focused test, schema validation, independent health probe, unchanged-setting comparison, rollback receipt check, and cleanup check passed." },
+  ];
+  const result = await captureTaskExperience({
+    messages,
+    sessionKey: "agent:main:synthetic",
+    agentId: "main",
+    scope: "agent:main",
+    config: { ...DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG, enabled: true },
+    llmClient: {
+      async completeJson() { return null; },
+      getLastError() { return "opaque content-free error"; },
+      getLastFailure() { return { category: "authentication", status: 401, code: "invalid_api_key" }; },
+    },
+    embedder: { async embedPassage() { throw new Error("must not embed"); } },
+    store: {
+      async vectorSearch() { throw new Error("must not search"); },
+      async store() { throw new Error("must not store"); },
+    },
+    agentEndEvent: { success: true },
+  });
+  assert.deepEqual(result, { action: "skipped", reason: "review_request_authentication_failed" });
 });
 
 test("long task-experience capsules retain every safety-critical section inside recall budget", () => {

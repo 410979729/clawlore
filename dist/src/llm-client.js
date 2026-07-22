@@ -5,6 +5,7 @@
 import OpenAI from "openai";
 import { buildOauthEndpoint, extractOutputTextFromSse, loadOAuthSession, needsRefresh, normalizeOauthModel, refreshOAuthSession, saveOAuthSession, } from "./llm-oauth.js";
 import { diagnosticErrorSummary, diagnosticTextSummary } from "./diagnostic-redaction.js";
+import { diagnoseLlmFailure, } from "./llm-failure-diagnostic.js";
 const OPENAI_CLIENT_AUTH_FIELD = ["api", "Key"].join("");
 function assignOpenAiClientCredential(target, value) {
     target[OPENAI_CLIENT_AUTH_FIELD] = value;
@@ -138,9 +139,11 @@ function createApiKeyClient(config, log) {
     };
     const client = new OpenAI(assignOpenAiClientCredential(clientOptions, config.apiKey));
     let lastError = null;
+    let lastFailure = null;
     return {
         async completeJson(prompt, label = "generic") {
             lastError = null;
+            lastFailure = null;
             try {
                 const response = await client.chat.completions.create({
                     model: config.model,
@@ -157,12 +160,14 @@ function createApiKeyClient(config, log) {
                 if (!raw) {
                     lastError =
                         `clawlore: llm-client [${label}] empty response content from model ${config.model}`;
+                    lastFailure = { category: "empty_response" };
                     log(lastError);
                     return null;
                 }
                 if (typeof raw !== "string") {
                     lastError =
                         `clawlore: llm-client [${label}] non-string response content type=${Array.isArray(raw) ? "array" : typeof raw} from model ${config.model}`;
+                    lastFailure = { category: "invalid_response" };
                     log(lastError);
                     return null;
                 }
@@ -170,6 +175,7 @@ function createApiKeyClient(config, log) {
                 if (!jsonStr) {
                     lastError =
                         `clawlore: llm-client [${label}] no JSON object found (${diagnosticTextSummary(raw)})`;
+                    lastFailure = { category: "invalid_response" };
                     log(lastError);
                     return null;
                 }
@@ -187,12 +193,14 @@ function createApiKeyClient(config, log) {
                         catch (repairErr) {
                             lastError =
                                 `clawlore: llm-client [${label}] JSON.parse failed: ${diagnosticErrorSummary(err)}; repair failed: ${diagnosticErrorSummary(repairErr)} (${diagnosticTextSummary(jsonStr)})`;
+                            lastFailure = { category: "invalid_response" };
                             log(lastError);
                             return null;
                         }
                     }
                     lastError =
                         `clawlore: llm-client [${label}] JSON.parse failed: ${diagnosticErrorSummary(err)} (${diagnosticTextSummary(jsonStr)})`;
+                    lastFailure = { category: "invalid_response" };
                     log(lastError);
                     return null;
                 }
@@ -200,12 +208,16 @@ function createApiKeyClient(config, log) {
             catch (err) {
                 lastError =
                     `clawlore: llm-client [${label}] request failed for model ${config.model}: ${diagnosticErrorSummary(err)}`;
+                lastFailure = diagnoseLlmFailure(err);
                 log(lastError);
                 return null;
             }
         },
         getLastError() {
             return lastError;
+        },
+        getLastFailure() {
+            return lastFailure;
         },
     };
 }
@@ -215,6 +227,7 @@ function createOauthClient(config, log) {
     }
     let cachedSessionPromise = null;
     let lastError = null;
+    let lastFailure = null;
     async function getSession() {
         if (!cachedSessionPromise) {
             cachedSessionPromise = loadOAuthSession(config.oauthPath).catch((error) => {
@@ -233,6 +246,7 @@ function createOauthClient(config, log) {
     return {
         async completeJson(prompt, label = "generic") {
             lastError = null;
+            lastFailure = null;
             try {
                 const session = await getSession();
                 const { signal, dispose } = createTimeoutSignal(config.timeoutMs);
@@ -297,6 +311,7 @@ function createOauthClient(config, log) {
                     if (!raw) {
                         lastError =
                             `clawlore: llm-client [${label}] empty OAuth response content from model ${config.model}`;
+                        lastFailure = { category: "empty_response" };
                         log(lastError);
                         return null;
                     }
@@ -304,6 +319,7 @@ function createOauthClient(config, log) {
                     if (!jsonStr) {
                         lastError =
                             `clawlore: llm-client [${label}] no JSON object found in OAuth response (${diagnosticTextSummary(raw)})`;
+                        lastFailure = { category: "invalid_response" };
                         log(lastError);
                         return null;
                     }
@@ -321,12 +337,14 @@ function createOauthClient(config, log) {
                             catch (repairErr) {
                                 lastError =
                                     `clawlore: llm-client [${label}] OAuth JSON.parse failed: ${diagnosticErrorSummary(err)}; repair failed: ${diagnosticErrorSummary(repairErr)} (${diagnosticTextSummary(jsonStr)})`;
+                                lastFailure = { category: "invalid_response" };
                                 log(lastError);
                                 return null;
                             }
                         }
                         lastError =
                             `clawlore: llm-client [${label}] OAuth JSON.parse failed: ${diagnosticErrorSummary(err)} (${diagnosticTextSummary(jsonStr)})`;
+                        lastFailure = { category: "invalid_response" };
                         log(lastError);
                         return null;
                     }
@@ -338,12 +356,16 @@ function createOauthClient(config, log) {
             catch (err) {
                 lastError =
                     `clawlore: llm-client [${label}] OAuth request failed for model ${config.model}: ${diagnosticErrorSummary(err)}`;
+                lastFailure = diagnoseLlmFailure(err);
                 log(lastError);
                 return null;
             }
         },
         getLastError() {
             return lastError;
+        },
+        getLastFailure() {
+            return lastFailure;
         },
     };
 }

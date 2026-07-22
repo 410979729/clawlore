@@ -203,7 +203,7 @@ export async function executeLiveV1AppendDeltaV1(input) {
         for (const row of delta) {
             if (row.lifecycle !== "candidate"
                 || row.verification !== "unverified"
-                || row.verificationDebt !== "legacy_identity"
+                || row.verificationDebt === "none"
                 || row.reviewRequired !== true)
                 throw new Error("delta row no longer satisfies the candidate-only classification");
             const itemId = `legacy:${row.legacyId}`;
@@ -225,7 +225,7 @@ export async function executeLiveV1AppendDeltaV1(input) {
         VALUES (?,?,?,?,?,?)`).run(randomUUID(), revisionId, "legacy", row.legacyId, row.observedAt, JSON.stringify({
                 classification: row.classification,
                 reviewRequired: true,
-                verificationDebt: "legacy_identity",
+                verificationDebt: row.verificationDebt,
                 rolloutId: input.rolloutId,
                 appendOnlyV1Delta: true,
             }));

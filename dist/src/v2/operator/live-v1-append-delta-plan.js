@@ -152,6 +152,10 @@ export async function createLiveV1AppendDeltaPlanV1(input) {
         || after.memoryTruth.logicalDigest !== before.memoryTruth.logicalDigest)
         throw new Error("live V1 source changed during append-delta planning");
     const deltaRows = rows.length;
+    const conservativeCandidateOnly = rows.every((row) => row.lifecycle === "candidate"
+        && row.verification === "unverified"
+        && row.reviewRequired === true
+        && row.verificationDebt !== "none");
     return {
         schemaVersion: 1,
         phase: "clawlore-v1-append-delta-plan",
@@ -198,7 +202,7 @@ export async function createLiveV1AppendDeltaPlanV1(input) {
             outboxRows: deltaRows * 3,
         },
         decision: {
-            deltaWriteReady: deltaRows > 0 && invalidMetadata === 0,
+            deltaWriteReady: deltaRows > 0 && invalidMetadata === 0 && conservativeCandidateOnly,
             requiresFreshEncryptedSnapshot: true,
             finalRecallCutoverReady: false,
         },

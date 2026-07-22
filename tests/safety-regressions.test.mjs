@@ -991,6 +991,10 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   assert.match(gate, /"clawlore",\s*"doctor",\s*"--json",\s*"--quiet"/);
   assert.match(gate, /scripts\/packed-runtime-smoke\.mjs/);
   assert.match(gate, /"npm", \[\s*"install"/);
+  assert.match(gate, /function installScannedLocalArchive/);
+  assert.match(gate, /\["plugins",\s*"install",\s*"--force",\s*realTarball\]/);
+  assert.match(gate, /refusing --force outside the scanned local archive boundary/);
+  assert.doesNotMatch(gate, /dangerously-force-unsafe-install/);
   assert.match(gate, /packedRuntimeSmoke: true/);
   assert.match(gate, /installed-tarball OpenClaw inspect/);
   assert.match(gate, /legacy-migrated effective ClawLore config/);

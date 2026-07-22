@@ -11,6 +11,7 @@ import { buildForgettingReport, runForgettingWithVectorSync } from "../forgettin
 import { applyCleanup, rollbackCleanupBatch } from "../governance-cleanup.js";
 import { graphHygieneReport, repairGraphHygiene } from "../graph-hygiene.js";
 import { recoveryReport, scheduleReplay } from "../journal-recovery.js";
+import { resolvePrincipalWriteTarget } from "../principal-write-boundary.js";
 import { evaluateRecallScopePolicy, scopeIdForContext } from "../scope-policy.js";
 import { groupedCounts, tableNames, writeJson } from "./cli-runtime-policy.js";
 export function registerGovernanceCommands(runtime) {
@@ -115,7 +116,8 @@ export function registerGovernanceCommands(runtime) {
         .description("Run OpenClaw-native digest extraction; dry-run by default")
         .option("--text <text>", "Explicit digest input text")
         .option("--input-file <path>", "Read digest input text from a file")
-        .option("--scope <scope>", "Target memory scope", "agent:main")
+        .option("--principal-key <platform:account:principal>", "Exact canonical private principal")
+        .option("--session-key <key>", "Exact OpenClaw private session key")
         .option("--max-chunks <n>", "Maximum reflection chunks when no explicit input is provided", "25")
         .option("--use-llm", "Use configured LLM extraction before heuristic fallback")
         .option("--no-llm-fallback", "Disable heuristic fallback after LLM extraction")
@@ -126,13 +128,17 @@ export function registerGovernanceCommands(runtime) {
         try {
             const db = await getSqlDbOrThrow();
             const dryRun = dryRunFromApplyOptions(options);
+            const target = resolvePrincipalWriteTarget({
+                principalKey: options.principalKey,
+                sessionKey: options.sessionKey,
+            });
             let inputText = typeof options.text === "string" ? options.text : undefined;
             if (typeof options.inputFile === "string" && options.inputFile.trim()) {
                 inputText = await readFile(path.resolve(options.inputFile.trim()), "utf8");
             }
             const result = await runDigestPipeline(db, {
                 apply: !dryRun,
-                scope: typeof options.scope === "string" && options.scope.trim() ? options.scope.trim() : "agent:main",
+                scope: target.scope,
                 inputText,
                 sourceId: typeof options.inputFile === "string" && options.inputFile.trim()
                     ? "cli-file"

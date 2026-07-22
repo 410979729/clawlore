@@ -105,6 +105,13 @@ export class SqliteBruteForceVectorStore {
             .get(id);
         return row ? rowToEntry(row, true) : null;
     }
+    /** Update only the companion scope column; content and vector bytes remain untouched. */
+    updateScope(id, expectedScope, targetScope) {
+        const result = this.requireDb().prepare(`UPDATE vector_records SET scope=?,updated_at=?
+      WHERE id=? AND scope=?`).run(targetScope, Date.now(), id, expectedScope);
+        this.enforcePrivateFiles();
+        return Number(result.changes);
+    }
     listIds() {
         const rows = this.requireDb()
             .prepare("SELECT id FROM vector_records ORDER BY id")

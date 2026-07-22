@@ -115,7 +115,7 @@ function registerCliMetadata(api) {
         runtimeDiagnosticFile: undefined,
         beforeAction: async (commandPath) => {
             const root = commandPath[0];
-            if (root === "version" || root === "auth" || root === "authority" || initialized)
+            if (root === "version" || root === "auth" || root === "authority" || root === "principal" || initialized)
                 return;
             const runtime = createCoreMemoryRuntime(api, await resolveCliPluginConfig(api));
             context.store = runtime.store;

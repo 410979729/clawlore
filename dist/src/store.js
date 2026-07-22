@@ -1,43 +1,17 @@
 import { randomUUID } from "node:crypto";
-import { createRequire } from "node:module";
-import { existsSync, accessSync, constants, realpathSync, lstatSync, } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { buildSmartMetadata, effectiveMemoryLifecycle, isMemoryActiveAt, parseSmartMetadata, stringifySmartMetadata } from "./smart-metadata.js";
 import { SqlTruthStore, } from "./sql-truth-store.js";
 import { SqliteBruteForceVectorStore } from "./sqlite-vector-store.js";
 import { diagnosticErrorSummary, diagnosticIdentifier } from "./diagnostic-redaction.js";
-import { ensurePrivateDirectory } from "./file-privacy.js";
-import { ensurePrivateLockFile } from "./private-lock-file.js";
+import { loadLanceDB } from "./lancedb-loader.js";
+import { withMemoryWriteLock } from "./memory-write-lock.js";
 import { assertMemoryEntrySafeForPersistence } from "./memory-entry-write-policy.js";
 import { isMemoryEntrySafeForEgress } from "./memory-egress-policy.js";
 import { MemoryStoreFacade } from "./memory-store-facade.js";
-// ============================================================================
-// LanceDB Dynamic Import
-// ============================================================================
-let lancedbImportPromise = null;
-const require = createRequire(import.meta.url);
-// =========================================================================
-// Cross-Process File Lock (proper-lockfile)
-// =========================================================================
-let lockfileModule = null;
-async function loadLockfile() {
-    if (!lockfileModule) {
-        lockfileModule = await import("proper-lockfile");
-    }
-    return lockfileModule;
-}
-export const loadLanceDB = async () => {
-    if (!lancedbImportPromise) {
-        // Use require() for CommonJS modules on Windows to avoid ESM URL scheme issues
-        lancedbImportPromise = Promise.resolve(require("@lancedb/lancedb"));
-    }
-    try {
-        return await lancedbImportPromise;
-    }
-    catch (err) {
-        throw new Error(`CLAWLORE_LANCEDB_LOAD_FAILED: ${diagnosticErrorSummary(err)}`, { cause: err });
-    }
-};
+export { loadLanceDB } from "./lancedb-loader.js";
+export { validateStoragePath } from "./storage-path.js";
 // ============================================================================
 // Utility Functions
 // ============================================================================
@@ -71,57 +45,6 @@ function scoreLexicalHit(query, candidates) {
     return score;
 }
 // ============================================================================
-// Storage Path Validation
-// ============================================================================
-/**
- * Validate and prepare the storage directory before LanceDB connection.
- * Resolves symlinks, creates missing directories, and checks write permissions.
- * Returns the resolved absolute path on success, or throws a descriptive error.
- */
-export function validateStoragePath(dbPath) {
-    let resolvedPath = dbPath;
-    // Resolve symlinks (including dangling symlinks)
-    try {
-        const stats = lstatSync(dbPath);
-        if (stats.isSymbolicLink()) {
-            try {
-                resolvedPath = realpathSync(dbPath);
-            }
-            catch (err) {
-                throw new Error(`CLAWLORE_STORAGE_PATH_INVALID: path=${diagnosticIdentifier(dbPath)} dangling_symlink ${diagnosticErrorSummary(err)}`);
-            }
-        }
-    }
-    catch (err) {
-        // Missing path is OK (it will be created below)
-        if (err?.code === "ENOENT") {
-            // no-op
-        }
-        else if (typeof err?.message === "string" &&
-            err.message.includes("symlink whose target does not exist")) {
-            throw err;
-        }
-        else {
-            // Other lstat failures — continue with original path
-        }
-    }
-    // Create directory if it doesn't exist
-    try {
-        ensurePrivateDirectory(resolvedPath);
-    }
-    catch (err) {
-        throw new Error(`CLAWLORE_STORAGE_PRIVATE_DIRECTORY_REQUIRED: path=${diagnosticIdentifier(resolvedPath)} parent=${diagnosticIdentifier(dirname(resolvedPath))} ${diagnosticErrorSummary(err)}`);
-    }
-    // Check write permissions
-    try {
-        accessSync(resolvedPath, constants.W_OK);
-    }
-    catch (err) {
-        throw new Error(`CLAWLORE_STORAGE_NOT_WRITABLE: path=${diagnosticIdentifier(resolvedPath)} ${diagnosticErrorSummary(err)}`);
-    }
-    return resolvedPath;
-}
-// ============================================================================
 // Memory Store
 // ============================================================================
 const TABLE_NAME = "memories";
@@ -145,19 +68,7 @@ class MemoryStoreRuntime {
         this.config = config;
     }
     async runWithFileLock(fn) {
-        const lockfile = await loadLockfile();
-        const lockPath = join(this.config.dbPath, ".memory-write.lock");
-        await ensurePrivateLockFile(lockPath);
-        const release = await lockfile.lock(lockPath, {
-            retries: { retries: 5, factor: 2, minTimeout: 100, maxTimeout: 2000 },
-            stale: 10000,
-        });
-        try {
-            return await fn();
-        }
-        finally {
-            await release();
-        }
+        return withMemoryWriteLock(this.config.dbPath, fn);
     }
     get dbPath() {
         return this.config.dbPath;

@@ -12,6 +12,7 @@ import { registerExperienceCommands } from "./src/cli/experience-commands.js";
 import { registerGovernanceCommands } from "./src/cli/governance-commands.js";
 import { registerMemoryCommands } from "./src/cli/memory-commands.js";
 import { registerMigrationCommands } from "./src/cli/migration-commands.js";
+import { registerPrincipalCommands } from "./src/cli/principal-commands.js";
 export function registerMemoryCLI(program, context) {
     const getSearchRetriever = () => {
         if (!context.embedder) {
@@ -145,6 +146,7 @@ export function registerMemoryCLI(program, context) {
         requireExperienceTables,
     };
     registerAuthCommands(runtime);
+    registerPrincipalCommands(runtime);
     registerMemoryCommands(runtime);
     registerDiagnosticCommands(runtime);
     registerGovernanceCommands(runtime);

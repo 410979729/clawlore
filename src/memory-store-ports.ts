@@ -180,6 +180,7 @@ export interface MemoryProjectionPort {
   readonly hasFtsSupport: boolean;
   readonly lastFtsError: string | null;
   deleteVectorCompanion(id: string, operation?: string): Promise<boolean>;
+  getVectorEntryById(id: string): Promise<MemoryEntry | null>;
   getFtsStatus(): { available: boolean; lastError: string | null };
   verifyFilePrivacy(): Promise<void>;
   getDiagnostics(): MemoryStoreDiagnostics;

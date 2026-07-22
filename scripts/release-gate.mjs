@@ -2,7 +2,7 @@ import { access, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, write
 import { constants } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { relative, resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import {
   compareRuntimeArtifactIdentity,
@@ -28,6 +28,24 @@ async function exists(path) {
   } catch {
     return false;
   }
+}
+
+async function installScannedLocalArchive(command, tarball, scanRoot, options) {
+  const realScanRoot = await realpath(scanRoot);
+  const realTarball = await realpath(tarball);
+  const relativeArchive = relative(realScanRoot, realTarball);
+  if (
+    !relativeArchive ||
+    relativeArchive.startsWith("..") ||
+    isAbsolute(relativeArchive) ||
+    !/\.tgz$/i.test(realTarball)
+  ) {
+    throw new Error("release gate failed: refusing --force outside the scanned local archive boundary");
+  }
+  // OpenClaw 2026.7.2+ requires explicit confirmation for non-ClawHub
+  // archives. This force is limited to the gate-created, content-scanned tgz
+  // inside its private temporary root; it never applies to an external spec.
+  return runOpenClawCapture(command, ["plugins", "install", "--force", realTarball], options);
 }
 
 function spawnTarget(command, args) {
@@ -823,7 +841,12 @@ try {
     ["config", "set", "plugins.entries.clawlore", isolatedPluginEntry, "--strict-json"],
     { env: isolatedRuntimeEnv },
   );
-  runOpenClawCapture(packedOpenClawCli, ["plugins", "install", tarball], { env: isolatedRuntimeEnv });
+  await installScannedLocalArchive(
+    packedOpenClawCli,
+    tarball,
+    packScanRoot,
+    { env: isolatedRuntimeEnv },
+  );
   runOpenClawCapture(packedOpenClawCli, ["config", "set", "plugins.slots.memory", "clawlore"], { env: isolatedRuntimeEnv });
   const packedInspect = parseJsonWithPreamble(
     runOpenClawCapture(packedOpenClawCli, ["plugins", "inspect", "clawlore", "--json"], { env: isolatedRuntimeEnv }),
@@ -874,7 +897,12 @@ try {
     ["config", "set", "plugins.entries.clawlore", isolatedPluginEntry, "--strict-json"],
     { env: legacyRuntimeEnv },
   );
-  runOpenClawCapture(packedOpenClawCli, ["plugins", "install", tarball], { env: legacyRuntimeEnv });
+  await installScannedLocalArchive(
+    packedOpenClawCli,
+    tarball,
+    packScanRoot,
+    { env: legacyRuntimeEnv },
+  );
   run("node", [
     resolve(installedRoot, "scripts/packed-legacy-identity-smoke.mjs"),
     legacyConfigPath,

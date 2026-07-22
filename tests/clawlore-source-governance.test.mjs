@@ -39,9 +39,9 @@ const ROOT_MODULES_BY_LAYER = {
     "extraction-prompts.ts", "lifecycle-metadata.ts", "memory-categories.ts", "memory-egress-policy.ts", "memory-entry-write-policy.ts", "memory-merge-policy.ts", "memory-metadata-policy.ts", "noise-filter.ts",
     "noise-prototypes.ts", "preference-slots.ts", "product-identity.ts", "self-improvement-content-policy.ts",
     "reflection-contracts.ts", "reflection-mapped-metadata.ts", "reflection-metadata.ts", "reflection-ranking.ts",
-    "reflection-slices.ts", "runtime-accessibility-diagnostic.ts", "runtime-memory-boundary.ts", "runtime-scope-metadata.ts",
-    "diagnostic-redaction.ts", "provider-output-policy.ts", "scope-policy.ts", "secret-redaction.ts", "secret-structured-text.ts", "smart-metadata.ts",
-    "task-experience-capsule.ts", "task-outcome-evidence.ts",
+    "principal-write-boundary.ts", "reflection-slices.ts", "runtime-accessibility-diagnostic.ts", "runtime-memory-boundary.ts", "runtime-scope-metadata.ts",
+    "diagnostic-redaction.ts", "llm-failure-diagnostic.ts", "provider-output-policy.ts", "scope-policy.ts", "secret-redaction.ts", "secret-structured-text.ts", "smart-metadata.ts",
+    "task-experience-capsule.ts", "task-experience-review.ts", "task-outcome-evidence.ts",
   ],
   application: [
     "application/context-composer.ts", "application/identity-resolver.ts",
@@ -76,16 +76,18 @@ const ROOT_MODULES_BY_LAYER = {
   ],
   infrastructure: [
     "artifacts.ts", "embedder.ts", "experience-store.ts", "file-privacy.ts",
-    "journal-recovery.ts", "llm-client.ts", "llm-oauth.ts", "oauth-session-storage.ts",
-    "private-lock-file.ts", "proper-lockfile.d.ts", "reflection-event-store.ts", "reflection-item-store.ts",
+    "journal-recovery.ts", "lancedb-loader.ts", "llm-client.ts", "llm-oauth.ts", "memory-write-lock.ts",
+    "oauth-session-storage.ts", "private-lock-file.ts", "proper-lockfile.d.ts",
+    "reflection-event-store.ts", "reflection-item-store.ts",
     "reflection-store.ts", "secret-index.ts",
     "sql-authority-migration.ts", "sql-truth-store.ts", "sqlite-vector-store.ts",
-    "store.ts", "workspace-boundary.ts", "markdown-mirror.ts",
+    "storage-path.ts", "store.ts", "vector-scope-metadata-updater.ts",
+    "workspace-boundary.ts", "markdown-mirror.ts",
   ],
   operator: [
     "adapters/openclaw/runtime-rollout-control.ts",
     "cli/auth-commands.ts", "cli/auth-config-transaction.ts", "cli/cli-runtime-policy.ts",
-    "cli/diagnostic-commands.ts",
+    "cli/diagnostic-commands.ts", "cli/principal-commands.ts",
     "cli/experience-commands.ts", "cli/governance-commands.ts", "cli/memory-commands.ts",
     "cli/migration-commands.ts", "diagnostics-redaction.ts", "migrate.ts",
     "memory-compactor.ts", "operator-dashboard.ts", "release-provenance.ts", "runtime-diagnostic-receipt.ts", "self-improvement-files.ts",
@@ -273,6 +275,7 @@ test("memory_truth DML is confined to the mutation allowlist and synchronizes li
     "src/forgetting.ts",
     "src/governance-cleanup.ts",
     "src/sql-truth-store.ts",
+    "src/v2/operator/live-principal-scope-apply.ts",
   ]);
   const dml = /\b(?:UPDATE\s+memory_truth|DELETE\s+FROM\s+memory_truth|INSERT\s+(?:OR\s+\w+\s+)?INTO\s+memory_truth)\b/i;
   const observed = [];

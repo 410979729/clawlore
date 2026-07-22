@@ -96,12 +96,15 @@ function metadata(value: string): Record<string, unknown> {
   }
 }
 
-function verificationFor(meta: Record<string, unknown>, classification: string): MemoryVerificationV2 {
+function verificationFor(meta: Record<string, unknown>, _classification: string): MemoryVerificationV2 {
   const explicit = String(meta.verification ?? meta.verification_status ?? "").toLowerCase();
   if (["unverified", "user_confirmed", "tool_verified", "operator_reviewed", "disputed"].includes(explicit)) {
     return explicit as MemoryVerificationV2;
   }
-  return classification === "explicit_manual" ? "user_confirmed" : "unverified";
+  // A source label such as "manual" is provenance, not proof that the owner
+  // confirmed the statement. Only an explicit persisted verification value
+  // may cross the user-confirmed boundary during legacy migration.
+  return "unverified";
 }
 
 function lifecycleFor(meta: Record<string, unknown>, reviewRequired: boolean, verification: MemoryVerificationV2): MemoryLifecycleV2 {

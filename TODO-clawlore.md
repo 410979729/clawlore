@@ -1,6 +1,75 @@
 # ClawLore v1 TODO
 
-Updated: 2026-07-20
+Updated: 2026-07-22
+
+## 2026-07-21 memory-quality incident — P0/P1/P2 handoff
+
+- [x] Apply the reversible P0 runtime stop: disable auto-recall, auto-capture,
+      smart extraction, Task Experience capture, memory compaction, session
+      reflection/compression, and use `recallMode=off` plus
+      `sessionStrategy=none`. Restart acceptance proves `smartExtraction: OFF`,
+      hooks 0, writes/prompt mutation/ContextEngine false, Gateway health live,
+      Telegram ingress live, and no post-restart recall/capture/truth write.
+- [ ] Disable or replace two still-enabled automatic writers. The
+      `nightly-conversation-extraction` cron runs at 23:00 Asia/Shanghai,
+      writes `memory_truth`/FTS, and may apply vector repair. The 15-minute
+      `tianji-session-pressure-guard` still invokes `--write` and can import an
+      `agent:main` checkpoint if its legacy session path returns and its
+      threshold is met; its current path errors are not a safety control. The
+      read-only audit changed neither job. Private-chat high-impact
+      configuration remains fail closed until the new controlled secondary
+      verifier is configured and passed.
+- [x] Complete P1 recovery baseline without changing the 1,093-row live truth:
+      AES-256-GCM SQL snapshot, isolated full restore, encrypted LanceDB
+      companion restore, exact post-P0 config, packed live 1.2.0 runtime, and
+      body-free V1/V2 row manifests. SQL/FTS/vector are 1,093/1,093/1,093;
+      integrity/FK and restored source digests pass. Evidence:
+      `../../archive/clawlore-memory-p1-baseline-20260721T183346Z/`.
+- [x] Complete the read-only P2 root-cause diagnosis. The current versioned
+      Telegram direct principal hashes to the exact current private-user scope;
+      the demonstrated drift comes from legacy/out-of-band writers that bypass
+      the runtime boundary or supply `agent:main`. Focused principal, hook,
+      tool, Experience, and allowlist regressions pass 56/56. Evidence:
+      `../../archive/clawlore-memory-p2-principal-audit-20260721T185858Z/`.
+- [x] P2 implementation: route every CLI/cron/manual/runtime writer through the
+      same versioned principal resolver, remove `agent:main` as a write default,
+      fail closed on unresolved identity, and prove same-user equality plus
+      cross-user/conversation denial across restart and every entry point.
+      Do not bypass isolation with wildcard access. `openclaw-scope-v1` is now
+      the single principal boundary for runtime, CLI, cron, and manual writers;
+      focused principal regressions and the full release gate pass.
+- [x] P3: classify legacy provenance and prepare an exact, idempotent,
+      receipt-bound migration only for records attributable to Joy. The
+      isolated 1,093-row rehearsal assigns 112 rows to the exact Telegram
+      principal and leaves 981 as `legacy:unresolved`; replay changes 0 rows.
+      Production data remains unchanged. Evidence:
+      `../../archive/clawlore-memory-p3-principal-migration-20260722T043522Z/`.
+- [x] P4 source/rehearsal: quarantine irrelevant reflection and checkpoint
+      recall, adjudicate duplicate/redundant content, and repair Experience
+      success capture without weakening reviewer gates. The exact 112-row
+      governance archive rehearsal is idempotent. A post-migration review found
+      all 88 private-principal candidates to be checkpoint/reflection/runtime
+      noise or canonically covered and proposes soft archive for all 88; it
+      authorizes neither promotion nor live mutation. Experience focused tests
+      pass 31/31 and unsafe replay admissions are 0. Evidence:
+      `../../archive/clawlore-memory-p4-governance-20260722T055819Z/` and the P5
+      migrated-candidate review.
+- [x] P5 source/release/shadow: form a clean isolated 1.2.1 candidate, pass the
+      pre-push release gate, and pass a 40-question real canonical-corpus gate.
+      Commit `9d16b803bd83bde2773cb0ad304e1fedf8e4fd2b` passes 597 tests
+      (595 pass, 0 fail, 2 Windows-only skips), typecheck/build, packed runtime,
+      LanceDB, OpenClaw CLI, migration, SBOM, and zero-vulnerability gates.
+      Real Recall@3 is 0.975, MRR 0.925, cross-scope/unsafe leakage 0. Migrated
+      common-lane overlap/rank agreement are 1 with 35/35 receipt-authorized
+      rewrites and 0 unauthorized drift. Evidence:
+      `../../archive/clawlore-memory-p5-release-shadow-20260722T071110Z/`.
+- [ ] Final live activation: after controlled authorization, disable the two
+      bypass command crons, repair reviewer/embedding credentials, take a fresh
+      encrypted snapshot, apply the exact principal migration and governance
+      controls, deploy the clean ref, and run real live-provider shadow before
+      promoting any candidate or restoring recall/capture. Current blockers are
+      explicit: active V2 rows 0, injectable results 0, provider authentication
+      failure, and no controlled secondary verifier in this private chat.
 
 ## 2026-07-19 live timeline and independent-audit remediation
 

@@ -38,11 +38,9 @@ function parseRecord(value) {
 }
 function validateControls(input) {
     const { plan, planSha256, apply } = input;
-    const classifications = plan.proposed.classifications;
-    const supportedClassifications = Object.entries(classifications)
-        .filter(([, rows]) => rows !== 0)
-        .every(([classification]) => classification === "reflection_summary"
-        || classification === "operational_checkpoint");
+    const verificationDebtRows = Object.entries(plan.proposed.verificationDebt)
+        .filter(([debt]) => debt !== "none")
+        .reduce((sum, [, rows]) => sum + rows, 0);
     if (plan.schemaVersion !== 1
         || plan.phase !== "clawlore-v1-append-delta-plan"
         || plan.readOnly !== true
@@ -56,12 +54,10 @@ function validateControls(input) {
         || plan.proposed.activeRows !== 0
         || plan.proposed.archivedRows !== 0
         || plan.proposed.verifications.unverified !== plan.source.deltaRows
-        || plan.proposed.verificationDebt.legacy_identity !== plan.source.deltaRows
+        || verificationDebtRows !== plan.source.deltaRows
+        || (plan.proposed.verificationDebt.none ?? 0) !== 0
         || plan.proposed.reviewRequiredRows !== plan.source.deltaRows
         || plan.proposed.invalidMetadataRows !== 0
-        || !supportedClassifications
-        || (classifications.reflection_summary ?? 0) + (classifications.operational_checkpoint ?? 0)
-            !== plan.source.deltaRows
         || plan.decision.deltaWriteReady !== true
         || plan.authorizesDeltaWrite !== false
         || apply.schemaVersion !== 1
@@ -179,6 +175,11 @@ export async function createLiveV1AppendDeltaAcceptanceV1(input) {
                 unverifiedRows: rolloutRows.filter((row) => row.verification === "unverified").length,
                 legacyIdentityDebtRows: rolloutRows.filter((row) => parseRecord(row.evidence_json).verificationDebt
                     === "legacy_identity").length,
+                reviewRequiredRows: rolloutRows.filter((row) => parseRecord(row.evidence_json).reviewRequired === true).length,
+                classifications: Object.fromEntries(Object.entries(loadedPlan.value.proposed.classifications)
+                    .filter(([, rows]) => rows > 0)),
+                verificationDebt: Object.fromEntries(Object.entries(loadedPlan.value.proposed.verificationDebt)
+                    .filter(([, rows]) => rows > 0)),
             },
             preserved: {
                 existingCanonicalRowsChanged: 0,

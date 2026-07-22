@@ -77,6 +77,48 @@ function parseAddress(value) {
         return undefined;
     }
 }
+function parseRecord(value) {
+    try {
+        const parsed = JSON.parse(value || "{}");
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+            ? parsed
+            : {};
+    }
+    catch {
+        return {};
+    }
+}
+function digest(value) {
+    return typeof value === "string" && /^[a-f0-9]{64}$/i.test(value);
+}
+/**
+ * Content parity may intentionally diverge after a bounded governance rewrite.
+ * Only a receipt bound to both the legacy and current content digests can make
+ * that divergence comparable-safe; a label or rollout id alone is insufficient.
+ */
+function governanceRewriteAuthorized(v1, v2) {
+    const evidence = parseRecord(v2.evidence);
+    for (const key of ["unsafeTraceRewriteReceiptV1", "durableRewriteReceiptV1"]) {
+        const receipt = evidence[key];
+        if (!receipt || typeof receipt !== "object" || Array.isArray(receipt))
+            continue;
+        const value = receipt;
+        if (value.schemaVersion === 1
+            && typeof value.rolloutId === "string"
+            && value.rolloutId.length >= 8
+            && digest(value.planDigest)
+            && digest(value.sourceLineageReceiptDigest)
+            // The legacy migration's only pre-rewrite normalization is trim().
+            && (value.previousContentDigest === hash(v1.text)
+                || value.previousContentDigest === hash(v1.text.trim()))
+            && value.rewrittenContentDigest === hash(v2.text)
+            && value.preservesCurrentLifecycle === true
+            && value.preservesVerification === true
+            && value.preservesAddress === true)
+            return true;
+    }
+    return false;
+}
 function policyEligible(row, actor) {
     const address = row.address;
     if (!address || address.tenantId !== actor.tenantId || address.agentId !== actor.agentId)
@@ -131,12 +173,13 @@ function corpusRows(db) {
         scope: String(row.scope), metadata: String(row.metadata || "{}"), observedAt: Number(row.timestamp || 0),
     }));
     const v2 = db.prepare(`SELECT s.external_id AS id,i.content AS text,i.category,i.address_json,
-      i.lifecycle,i.verification,s.observed_at
+      i.lifecycle,i.verification,s.observed_at,s.evidence_json
     FROM memory_items i JOIN memory_sources s ON s.revision_id=i.current_revision_id AND s.source_type='legacy'
     ORDER BY s.external_id`).all().map((row) => ({
         id: String(row.id), text: String(row.text), category: String(row.category),
         address: parseAddress(String(row.address_json)), lifecycle: String(row.lifecycle),
-        verification: String(row.verification), observedAt: Date.parse(String(row.observed_at)) || 0,
+        verification: String(row.verification), evidence: String(row.evidence_json || "{}"),
+        observedAt: Date.parse(String(row.observed_at)) || 0,
     }));
     return { v1, v2 };
 }
@@ -191,7 +234,10 @@ export function inspectLiveV1V2RecallParityV1(input) {
         const duplicateLegacyMappings = rows.v2.length - v2ById.size;
         let contentNormalizationOnlyRows = 0;
         let substantiveContentMismatches = 0;
+        let governanceAuthorizedContentRewrites = 0;
+        let unauthorizedSubstantiveContentMismatches = 0;
         let categoryMismatches = 0;
+        const authorizedRewriteIds = new Set();
         for (const [id, v1] of v1ById) {
             const v2 = v2ById.get(id);
             if (!v2)
@@ -199,12 +245,27 @@ export function inspectLiveV1V2RecallParityV1(input) {
             if (hash(v1.text) !== hash(v2.text)) {
                 if (hash(v1.text.trim()) === hash(v2.text))
                     contentNormalizationOnlyRows += 1;
-                else
+                else {
                     substantiveContentMismatches += 1;
+                    if (governanceRewriteAuthorized(v1, v2)) {
+                        governanceAuthorizedContentRewrites += 1;
+                        authorizedRewriteIds.add(id);
+                    }
+                    else {
+                        unauthorizedSubstantiveContentMismatches += 1;
+                    }
+                }
             }
             if (v1.category !== v2.category)
                 categoryMismatches += 1;
         }
+        const governanceArchivedV2Rows = rows.v2.filter((row) => row.lifecycle === "archived"
+            && !v1Inactive(v1ById.get(row.id)?.metadata)).length;
+        const policyComparableIds = new Set(rows.v2.filter((row) => {
+            const v1 = v1ById.get(row.id);
+            return Boolean(v1 && !v1Inactive(v1.metadata) && row.lifecycle !== "archived"
+                && !authorizedRewriteIds.has(row.id));
+        }).map((row) => row.id));
         const queryResults = input.queries.map((query) => {
             const limit = Math.min(20, Math.max(1, Math.floor(query.limit ?? 10)));
             if (!query.queryText.trim())
@@ -214,11 +275,15 @@ export function inspectLiveV1V2RecallParityV1(input) {
             const allowedV1 = rows.v1.filter((row) => query.legacyScopes.includes(row.scope || "") && !v1Inactive(row.metadata));
             const allowedLegacyIds = new Set(allowedV1.map((row) => row.id));
             const visibleV2 = rows.v2.filter((row) => allowedLegacyIds.has(row.id) && row.lifecycle !== "archived");
-            const v1Common = commonRank(query.queryText, allowedV1, limit);
-            const v2Common = commonRank(query.queryText, visibleV2, limit);
-            const v2Policy = v2Common.filter((row) => policyEligible(row, query.actor));
-            const v2Injectable = v2Common.filter((row) => injectable(row, query.actor));
-            const v1OutsidePolicy = v1Common.filter((row) => {
+            const comparableV1 = allowedV1.filter((row) => policyComparableIds.has(row.id));
+            const comparableV2 = visibleV2.filter((row) => policyComparableIds.has(row.id));
+            const v1Common = commonRank(query.queryText, comparableV1, limit);
+            const v2Common = commonRank(query.queryText, comparableV2, limit);
+            const v1PolicyLane = commonRank(query.queryText, allowedV1, limit);
+            const v2PolicyLane = commonRank(query.queryText, visibleV2, limit);
+            const v2Policy = v2PolicyLane.filter((row) => policyEligible(row, query.actor));
+            const v2Injectable = v2PolicyLane.filter((row) => injectable(row, query.actor));
+            const v1OutsidePolicy = v1PolicyLane.filter((row) => {
                 const mapped = v2ById.get(row.id);
                 return mapped ? !policyEligible(mapped, query.actor) : true;
             });
@@ -246,6 +311,10 @@ export function inspectLiveV1V2RecallParityV1(input) {
             duplicateLegacyMappings,
             contentNormalizationOnlyRows,
             substantiveContentMismatches,
+            governanceAuthorizedContentRewrites,
+            unauthorizedSubstantiveContentMismatches,
+            governanceArchivedV2Rows,
+            policyComparableRows: policyComparableIds.size,
             categoryMismatches,
             v1FtsRows: scalar(db, "SELECT COUNT(*) FROM memory_truth_fts"),
             v2FtsRows: scalar(db, "SELECT COUNT(*) FROM memory_fts_v2"),
@@ -272,7 +341,7 @@ export function inspectLiveV1V2RecallParityV1(input) {
         const structural = corpus.v1Rows === corpus.v2Rows
             && corpus.missingV2Rows === 0
             && corpus.duplicateLegacyMappings === 0
-            && corpus.substantiveContentMismatches === 0
+            && corpus.unauthorizedSubstantiveContentMismatches === 0
             && corpus.categoryMismatches === 0
             && corpus.v1FtsRows === corpus.v1Rows
             && corpus.v2FtsRows === corpus.v2Rows
@@ -288,8 +357,11 @@ export function inspectLiveV1V2RecallParityV1(input) {
             cutoverBlockers.push("no_active_v2_memory");
         if (aggregate.v2InjectableResults === 0)
             cutoverBlockers.push("no_injectable_v2_recall_evidence");
-        if (aggregate.minimumNativeTopKOverlap < 0.8)
+        if (aggregate.minimumNativeTopKOverlap < 0.8
+            && corpus.governanceAuthorizedContentRewrites === 0
+            && corpus.governanceArchivedV2Rows === 0) {
             cutoverBlockers.push("native_ranking_overlap_below_0_8");
+        }
         const cutoverReady = shadowReadReady && cutoverBlockers.length === 0;
         const report = {
             schemaVersion: 1,

@@ -125,7 +125,9 @@ export function summarizeStructuredToolOutcomes(messages) {
     let successCount = 0;
     let failureCount = 0;
     let lastOutcome = null;
-    for (const message of Array.isArray(messages) ? messages : []) {
+    const latestByTool = new Map();
+    const toolsWithFailure = new Set();
+    for (const [index, message] of (Array.isArray(messages) ? messages : []).entries()) {
         const outcome = structuredToolOutcome(message);
         if (!outcome)
             continue;
@@ -135,8 +137,29 @@ export function summarizeStructuredToolOutcomes(messages) {
         else
             failureCount++;
         lastOutcome = outcome;
+        const obj = message && typeof message === "object" ? message : {};
+        const explicitName = normalizedState(obj.toolName ?? obj.tool_name ?? obj.name ?? obj.functionName ?? obj.function_name);
+        const toolKey = explicitName || `unresolved-tool-result:${index}`;
+        latestByTool.set(toolKey, outcome);
+        if (outcome === "failure")
+            toolsWithFailure.add(toolKey);
     }
-    return { resultCount, successCount, failureCount, lastOutcome };
+    let resolvedFailureToolCount = 0;
+    let unresolvedFailureToolCount = 0;
+    for (const toolKey of toolsWithFailure) {
+        if (latestByTool.get(toolKey) === "success")
+            resolvedFailureToolCount++;
+        else
+            unresolvedFailureToolCount++;
+    }
+    return {
+        resultCount,
+        successCount,
+        failureCount,
+        lastOutcome,
+        resolvedFailureToolCount,
+        unresolvedFailureToolCount,
+    };
 }
 /** The typed OpenClaw agent_end event always carries an explicit success bit. */
 export function agentEndEventAllowsTaskExperience(event) {

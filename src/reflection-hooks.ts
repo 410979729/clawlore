@@ -252,7 +252,11 @@ export function registerReflectionHooks(params: {
           ? config.scopes?.default ?? "global"
           : scopeManager.getDefaultScope(sourceAgentId)),
         getToolErrorSignals: (sessionKey, maxEntries) => state.errorEntries(sessionKey, maxEntries),
-        generateReflectionText: createReflectionTextGenerator({ diagnosticErrorSummary, diagnosticIdentifier }),
+        generateReflectionText: createReflectionTextGenerator({
+          diagnosticErrorSummary,
+          diagnosticIdentifier,
+          loadEmbeddedRunner: async () => api.runtime.agent.runEmbeddedAgent,
+        }),
         appendSelfImprovementEntry,
         enforcePrivateFile: (path) => enforcePrivatePath(path, { kind: "file" }),
         appendPrivateFile,

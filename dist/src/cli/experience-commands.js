@@ -13,6 +13,7 @@ import { ensureExperienceSchema, getExperienceStats, reviewPlaybook, searchPlayb
 import { buildKnowledgeSkillDrafts } from "../knowledge-skill-bridge.js";
 import { verifyPrivatePath, writePrivateFileAtomic } from "../file-privacy.js";
 import { isMemoryEntrySafeForEgress } from "../memory-egress-policy.js";
+import { resolvePrincipalWriteTarget } from "../principal-write-boundary.js";
 import { formatJson, writeJson } from "./cli-runtime-policy.js";
 export function registerExperienceCommands(runtime) {
     const { program, memory, context, runSearch, getSqlDbOrThrow, parseScopeFilter, parseLimitOption, dryRunFromApplyOptions, loadKnowledgeDocs, hasTables, requireExperienceTables, } = runtime;
@@ -390,13 +391,15 @@ export function registerExperienceCommands(runtime) {
     memory
         .command("delete <id>")
         .description("Delete a specific memory by ID")
-        .option("--scope <scope>", "Scope to delete from (for access control)")
+        .option("--principal-key <platform:account:principal>", "Exact canonical private principal")
+        .option("--session-key <key>", "Exact OpenClaw private session key")
         .action(async (id, options) => {
         try {
-            let scopeFilter;
-            if (options.scope) {
-                scopeFilter = [options.scope];
-            }
+            const target = resolvePrincipalWriteTarget({
+                principalKey: options.principalKey,
+                sessionKey: options.sessionKey,
+            });
+            const scopeFilter = [target.scope];
             const deleted = await context.store.delete(id, scopeFilter);
             if (deleted) {
                 console.log(`Memory ${id} deleted successfully.`);
@@ -502,7 +505,8 @@ export function registerExperienceCommands(runtime) {
     memory
         .command("import <file>")
         .description("Import memories from JSON file")
-        .option("--scope <scope>", "Import into specific scope")
+        .option("--principal-key <platform:account:principal>", "Exact canonical private principal")
+        .option("--session-key <key>", "Exact OpenClaw private session key")
         .option("--dry-run", "Show what would be imported without actually importing")
         .action(async (file, options) => {
         try {
@@ -515,8 +519,12 @@ export function registerExperienceCommands(runtime) {
             if (options.dryRun) {
                 console.log("DRY RUN - No memories will be imported");
                 console.log(`Would import ${data.memories.length} memories`);
-                if (options.scope) {
-                    console.log(`Target scope: ${options.scope}`);
+                if (options.principalKey || options.sessionKey) {
+                    const previewTarget = resolvePrincipalWriteTarget({
+                        principalKey: options.principalKey,
+                        sessionKey: options.sessionKey,
+                    });
+                    console.log(`Target scope: ${previewTarget.scope}`);
                 }
                 return;
             }
@@ -528,7 +536,10 @@ export function registerExperienceCommands(runtime) {
                 console.error("Use the plugin's memory_store tool or pass embedder to createMemoryCLI.");
                 return;
             }
-            const targetScope = options.scope || context.scopeManager.getDefaultScope();
+            const targetScope = resolvePrincipalWriteTarget({
+                principalKey: options.principalKey,
+                sessionKey: options.sessionKey,
+            }).scope;
             for (const memory of data.memories) {
                 try {
                     const text = memory.text;

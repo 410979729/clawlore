@@ -61,6 +61,9 @@ export class MemoryStoreFacade implements MemoryStorePorts {
   deleteVectorCompanion(id: string, operation?: string): Promise<boolean> {
     return this.ports.deleteVectorCompanion(id, operation);
   }
+  getVectorEntryById(id: string): Promise<MemoryEntry | null> {
+    return this.ports.getVectorEntryById(id);
+  }
   delete(id: string, scopeFilter?: string[]): Promise<boolean> {
     return this.ports.delete(id, scopeFilter);
   }

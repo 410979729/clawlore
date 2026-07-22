@@ -81,7 +81,7 @@ function explicitChunk(params) {
         id: `chunk-${randomUUID()}`,
         source_type: requireDigestSourceType(params.sourceType, "explicit"),
         source_id: digestSourceIdentifier(params.sourceId || "explicit-input"),
-        scope: requireDigestBoundaryIdentifier(params.scope, "digest scope", "agent:main"),
+        scope: requireDigestBoundaryIdentifier(params.scope, "digest scope", ""),
         text: params.text,
     };
 }
@@ -123,7 +123,7 @@ function collectReflectionChunks(db, scope, maxChunks) {
     });
 }
 export function collectDigestChunks(db, options = {}) {
-    const scope = requireDigestBoundaryIdentifier(options.scope, "digest scope", "agent:main");
+    const scope = requireDigestBoundaryIdentifier(options.scope, "digest scope", "");
     const maxChunks = Math.max(1, Math.min(200, Math.trunc(options.maxChunks ?? 25)));
     if (typeof options.inputText === "string" && options.inputText.trim()) {
         return [explicitChunk({
@@ -281,7 +281,7 @@ function candidateToEntry(candidate, chunk, vector) {
         text,
         vector,
         category: candidate.category,
-        scope: chunk.scope || "agent:main",
+        scope: chunk.scope,
         importance: candidate.importance,
         metadata: safeJson(metadata),
     };
@@ -306,7 +306,7 @@ function updateRun(db, row) {
 }
 function insertChunkEvent(db, params) {
     const sourceId = digestSourceIdentifier(params.chunk.source_id);
-    const scope = requireDigestBoundaryIdentifier(params.chunk.scope, "digest scope", "agent:main");
+    const scope = requireDigestBoundaryIdentifier(params.chunk.scope, "digest scope", "");
     db.prepare(`
     INSERT INTO openclaw_digest_chunks (
       id, run_id, source_type, source_id, scope, status, reason,

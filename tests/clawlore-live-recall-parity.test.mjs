@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -36,9 +37,9 @@ test("read-only parity proves corpus/ranking while enforcing stricter V2 policy"
     const insert = db.prepare("INSERT INTO memory_truth VALUES (?,?,?,?,?,?,?,?,?)");
     const fts = db.prepare("INSERT INTO memory_truth_fts VALUES (?,?,?)");
     const rows = [
-      ["joy", " Telegram memory boundary ", "fact", "agent:main", 1, 1700000000, { source: "manual_user", sender_id: "joy", platform: "telegram" }],
-      ["other", "Telegram private boundary", "fact", "agent:main", 1, 1699999999, { source: "manual_user", sender_id: "other", platform: "telegram" }],
-      ["archived", "Telegram obsolete boundary", "fact", "agent:main", 1, 1699999998, { source: "manual_user", sender_id: "joy", platform: "telegram", state: "archived" }],
+      ["joy", " Telegram memory boundary ", "fact", "agent:main", 1, 1700000000, { source: "manual_user", sender_id: "joy", platform: "telegram", verification: "user_confirmed" }],
+      ["other", "Telegram private boundary", "fact", "agent:main", 1, 1699999999, { source: "manual_user", sender_id: "other", platform: "telegram", verification: "user_confirmed" }],
+      ["archived", "Telegram obsolete boundary", "fact", "agent:main", 1, 1699999998, { source: "manual_user", sender_id: "joy", platform: "telegram", verification: "user_confirmed", state: "archived" }],
     ];
     for (const row of rows) {
       const metadata = JSON.stringify(row[6]);
@@ -68,6 +69,8 @@ test("read-only parity proves corpus/ranking while enforcing stricter V2 policy"
     assert.deepEqual(report.corpus, {
       v1Rows: 3, v2Rows: 3, missingV2Rows: 0, duplicateLegacyMappings: 0,
       contentNormalizationOnlyRows: 1, substantiveContentMismatches: 0,
+      governanceAuthorizedContentRewrites: 0, unauthorizedSubstantiveContentMismatches: 0,
+      governanceArchivedV2Rows: 0, policyComparableRows: 2,
       categoryMismatches: 0, v1FtsRows: 3, v2FtsRows: 3,
       vectorFallbackRows: 3, invalidVectorFallbackRows: 0, active: 2, candidate: 0, archived: 1,
     });
@@ -100,7 +103,7 @@ test("candidate-only V2 corpus can pass shadow parity but never cut over", async
     ); CREATE VIRTUAL TABLE memory_truth_fts USING fts5(memory_id UNINDEXED,text,metadata_text);
     CREATE TABLE memory_items (item_id TEXT PRIMARY KEY,current_revision_id TEXT,content TEXT,category TEXT,
       address_json TEXT,lifecycle TEXT,verification TEXT);
-    CREATE TABLE memory_sources (revision_id TEXT,source_type TEXT,external_id TEXT,observed_at TEXT);
+    CREATE TABLE memory_sources (revision_id TEXT,source_type TEXT,external_id TEXT,observed_at TEXT,evidence_json TEXT);
     CREATE VIRTUAL TABLE memory_fts_v2 USING fts5(item_id UNINDEXED,content,category);
     CREATE TABLE memory_vector_projection_v2 (item_id TEXT PRIMARY KEY,legacy_id TEXT,backend TEXT,state TEXT);`);
     const address = JSON.stringify({ schemaVersion: 2, tenantId: "local", principalId: "legacy:unresolved",
@@ -110,8 +113,8 @@ test("candidate-only V2 corpus can pass shadow parity but never cut over", async
     db.prepare("INSERT INTO memory_truth_fts VALUES (?,?,?)").run("candidate", "Memory candidate", "");
     db.prepare("INSERT INTO memory_items VALUES (?,?,?,?,?,?,?)")
       .run("legacy:candidate", "rev", "Memory candidate", "fact", address, "candidate", "unverified");
-    db.prepare("INSERT INTO memory_sources VALUES (?,?,?,?)")
-      .run("rev", "legacy", "candidate", "2023-11-14T22:13:20.000Z");
+    db.prepare("INSERT INTO memory_sources VALUES (?,?,?,?,?)")
+      .run("rev", "legacy", "candidate", "2023-11-14T22:13:20.000Z", "{}");
     db.prepare("INSERT INTO memory_fts_v2 VALUES (?,?,?)").run("legacy:candidate", "Memory candidate", "fact");
     db.prepare("INSERT INTO memory_vector_projection_v2 VALUES (?,?,?,?)")
       .run("legacy:candidate", "candidate", "v1-lancedb-fallback", "fallback_verified");
@@ -125,6 +128,66 @@ test("candidate-only V2 corpus can pass shadow parity but never cut over", async
     assert.equal(report.decision.cutoverReady, false);
     assert.ok(report.decision.cutoverBlockers.includes("no_active_v2_memory"));
     assert.ok(report.decision.cutoverBlockers.includes("no_injectable_v2_recall_evidence"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("receipt-bound governance rewrites are separated from unauthorized content drift", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clawlore-governed-parity-"));
+  const source = join(root, "memory.sqlite3");
+  try {
+    const db = new DatabaseSync(source);
+    db.exec(`CREATE TABLE memory_truth (
+      id TEXT PRIMARY KEY,text TEXT NOT NULL,category TEXT NOT NULL,scope TEXT NOT NULL,
+      importance REAL NOT NULL DEFAULT 0,timestamp REAL NOT NULL DEFAULT 0,
+      metadata TEXT NOT NULL DEFAULT '{}',metadata_text TEXT NOT NULL DEFAULT '',updated_at REAL NOT NULL DEFAULT 0
+    ); CREATE VIRTUAL TABLE memory_truth_fts USING fts5(memory_id UNINDEXED,text,metadata_text);
+    CREATE TABLE memory_items (item_id TEXT PRIMARY KEY,current_revision_id TEXT,content TEXT,category TEXT,
+      address_json TEXT,lifecycle TEXT,verification TEXT);
+    CREATE TABLE memory_sources (revision_id TEXT,source_type TEXT,external_id TEXT,observed_at TEXT,evidence_json TEXT);
+    CREATE VIRTUAL TABLE memory_fts_v2 USING fts5(item_id UNINDEXED,content,category);
+    CREATE TABLE memory_vector_projection_v2 (item_id TEXT PRIMARY KEY,legacy_id TEXT,backend TEXT,state TEXT);`);
+    const legacy = "stdout: unsafe operational trace";
+    const rewritten = "Bounded operational recovery summary";
+    const digest = (value) => createHash("sha256").update(value).digest("hex");
+    const address = JSON.stringify({ schemaVersion: 2, tenantId: "local", principalId: "legacy:unresolved",
+      agentId: "main", workspaceId: "workspace-main", visibility: "private", retention: "durable" });
+    const evidence = JSON.stringify({
+      unsafeTraceRewriteReceiptV1: {
+        schemaVersion: 1,
+        rolloutId: "governed-rewrite-fixture",
+        planDigest: digest("plan"),
+        sourceLineageReceiptDigest: digest("lineage"),
+        previousContentDigest: digest(legacy),
+        rewrittenContentDigest: digest(rewritten),
+        preservesCurrentLifecycle: true,
+        preservesVerification: true,
+        preservesAddress: true,
+      },
+    });
+    db.prepare("INSERT INTO memory_truth VALUES (?,?,?,?,?,?,?,?,?)")
+      .run("governed", legacy, "fact", "agent:main", 1, 1700000000, "{}", "", 1700000000);
+    db.prepare("INSERT INTO memory_truth_fts VALUES (?,?,?)").run("governed", legacy, "");
+    db.prepare("INSERT INTO memory_items VALUES (?,?,?,?,?,?,?)")
+      .run("legacy:governed", "rev", rewritten, "fact", address, "candidate", "unverified");
+    db.prepare("INSERT INTO memory_sources VALUES (?,?,?,?,?)")
+      .run("rev", "legacy", "governed", "2023-11-14T22:13:20.000Z", evidence);
+    db.prepare("INSERT INTO memory_fts_v2 VALUES (?,?,?)").run("legacy:governed", rewritten, "fact");
+    db.prepare("INSERT INTO memory_vector_projection_v2 VALUES (?,?,?,?)")
+      .run("legacy:governed", "governed", "v1-lancedb-fallback", "fallback_verified");
+    db.close();
+
+    const report = inspectLiveV1V2RecallParityV1({ sqlitePath: source, queries: [{
+      queryText: "operational recovery", legacyScopes: ["agent:main"],
+      actor: { tenantId: "local", principalId: "telegram:default:joy", agentId: "main", workspaceId: "workspace-main" },
+    }] });
+    assert.equal(report.corpus.substantiveContentMismatches, 1);
+    assert.equal(report.corpus.governanceAuthorizedContentRewrites, 1);
+    assert.equal(report.corpus.unauthorizedSubstantiveContentMismatches, 0);
+    assert.equal(report.corpus.policyComparableRows, 0);
+    assert.equal(report.decision.shadowReadReady, true);
+    assert.equal(report.decision.cutoverReady, false);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
