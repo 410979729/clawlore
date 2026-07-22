@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { chmod, mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import * as lancedb from "@lancedb/lancedb";
 import { auditPersistedSecrets } from "../scripts/clawlore-persisted-secret-audit.mjs";
 
 test("persisted-secret audit is read-only and emits only counts", async () => {
   const root = await mkdtemp(join(tmpdir(), "clawlore-persisted-secret-audit-"));
   const memoryPath = join(root, "memory.sqlite3");
   const conversationPath = join(root, "conversation.sqlite3");
+  const vectorPath = join(root, "vectors");
   const secret = "SyntheticBraveCredentialValue123456";
   try {
     const memory = new DatabaseSync(memoryPath);
@@ -30,10 +32,23 @@ test("persisted-secret audit is read-only and emits only counts", async () => {
     conversation.close();
     await chmod(memoryPath, 0o600);
     await chmod(conversationPath, 0o600);
+    await writeFile(`${conversationPath}-wal`, "", { mode: 0o644 });
+    await mkdir(vectorPath, { mode: 0o755 });
+    const vectorDb = await lancedb.connect(vectorPath);
+    const vectorTable = await vectorDb.createTable("memories", [{
+      id: "unsafe-vector",
+      text: `${secret} 这是BRAVE的API`,
+      metadata: "{}",
+      vector: [1, 0, 0, 0],
+    }]);
+    await vectorTable.close?.();
+    await vectorDb.close?.();
+    await chmod(vectorPath, 0o755);
 
     const report = await auditPersistedSecrets({
       memoryDb: memoryPath,
       conversationDb: conversationPath,
+      lancedbDir: vectorPath,
     });
     assert.equal(report.status, "fail");
     assert.equal(report.readOnly, true);
@@ -41,6 +56,8 @@ test("persisted-secret audit is read-only and emits only counts", async () => {
     assert.ok(report.totals.secretBearingRows >= 3);
     assert.ok(report.databases.some((database) => database.findings
       .some((finding) => finding.patternCounts["provider-key-context-reversed"] >= 1)));
+    assert.equal(report.databases.find((database) => database.kind === "vector")?.ownerOnlyMode, false);
+    assert.ok(report.blockers.includes("database_file_not_owner_only"));
     assert.equal(JSON.stringify(report).includes(secret), false);
     assert.equal(JSON.stringify(report).includes("Authorization: Bearer"), false);
 
@@ -53,6 +70,7 @@ test("persisted-secret audit is read-only and emits only counts", async () => {
     conversationCleanup.prepare("UPDATE conversations SET detail=? WHERE id=1")
       .run("Authentication output was redacted before persistence.");
     conversationCleanup.close();
+    await chmod(`${conversationPath}-wal`, 0o600);
 
     const clean = await auditPersistedSecrets({
       memoryDb: memoryPath,

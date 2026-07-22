@@ -22,6 +22,12 @@ import {
   restoreVerifiedLegacySqliteSnapshotV2,
   type LegacySqliteSnapshotManifestV2,
 } from "./legacy-v1-snapshot.js";
+import {
+  createVerifiedGenericSqliteSnapshotV2,
+  inspectGenericSqliteSnapshotV2,
+  restoreVerifiedGenericSqliteSnapshotV2,
+  type GenericSqliteSnapshotManifestV2,
+} from "./generic-sqlite-snapshot.js";
 
 const MAGIC = Buffer.from("CLAWLORE2\n", "ascii");
 const HEADER_LENGTH_BYTES = 4;
@@ -63,12 +69,22 @@ export interface EncryptedLegacySnapshotArchiveManifestV2 {
   snapshot: LegacySqliteSnapshotManifestV2;
 }
 
+export interface EncryptedGenericSnapshotArchiveManifestV2 {
+  schemaVersion: 1;
+  createdAt: string;
+  algorithm: "aes-256-gcm";
+  keyId: string;
+  archiveSha256: string;
+  bytes: number;
+  snapshot: GenericSqliteSnapshotManifestV2;
+}
+
 interface ArchiveHeaderV2 {
   schemaVersion: 1;
   algorithm: "aes-256-gcm";
   keyId: string;
   iv: string;
-  snapshot: SqliteSnapshotManifestV2 | LegacySqliteSnapshotManifestV2;
+  snapshot: SqliteSnapshotManifestV2 | LegacySqliteSnapshotManifestV2 | GenericSqliteSnapshotManifestV2;
 }
 
 function normalizeKey(value: Uint8Array): Buffer {
@@ -284,6 +300,61 @@ export async function createEncryptedLegacySnapshotArchiveV2(input: {
   }
 }
 
+export async function createEncryptedGenericSnapshotArchiveV2(input: {
+  sourcePath: string;
+  archivePath: string;
+  keyProvider: SnapshotArchiveKeyProviderV2;
+  now?: () => Date;
+}): Promise<EncryptedGenericSnapshotArchiveManifestV2> {
+  const createdAt = (input.now?.() ?? new Date()).toISOString();
+  const plaintextPath = `${input.archivePath}.plaintext-${process.pid}-${randomBytes(8).toString("hex")}.sqlite`;
+  ensurePrivateDirectory(dirname(input.archivePath));
+  try {
+    const snapshot = await createVerifiedGenericSqliteSnapshotV2({
+      sourcePath: input.sourcePath,
+      destinationPath: plaintextPath,
+      now: () => new Date(createdAt),
+    });
+    const resolved = await input.keyProvider.current();
+    const key = normalizeKey(resolved.key);
+    const iv = randomBytes(12);
+    const header: ArchiveHeaderV2 = {
+      schemaVersion: 1,
+      algorithm: "aes-256-gcm",
+      keyId: resolved.keyId,
+      iv: iv.toString("base64"),
+      snapshot,
+    };
+    await writeFile(input.archivePath, encodeHeader(header), { flag: "wx", mode: 0o600 });
+    enforcePrivatePath(input.archivePath, { kind: "file" });
+    try {
+      const cipher = createCipheriv("aes-256-gcm", key, iv, { authTagLength: AUTH_TAG_BYTES });
+      await pipeline(
+        createReadStream(plaintextPath),
+        cipher,
+        createWriteStream(input.archivePath, { flags: "a", mode: 0o600 }),
+      );
+      await appendFile(input.archivePath, cipher.getAuthTag());
+      enforcePrivatePath(input.archivePath, { kind: "file" });
+    } catch (error) {
+      await rm(input.archivePath, { force: true });
+      throw error;
+    }
+    const info = await stat(input.archivePath);
+    return {
+      schemaVersion: 1,
+      createdAt,
+      algorithm: "aes-256-gcm",
+      keyId: resolved.keyId,
+      archiveSha256: await sha256File(input.archivePath),
+      bytes: info.size,
+      snapshot,
+    };
+  } finally {
+    await removeSqliteFiles(plaintextPath);
+  }
+}
+
 export async function restoreEncryptedSnapshotArchiveV2(input: {
   archivePath: string;
   destinationPath: string;
@@ -383,6 +454,64 @@ export async function restoreEncryptedLegacySnapshotArchiveV2(input: {
       throw new Error("decrypted legacy snapshot checksum mismatch");
     }
     return await restoreVerifiedLegacySqliteSnapshotV2({
+      snapshotPath: plaintextPath,
+      destinationPath: input.destinationPath,
+      expected: parsed.header.snapshot,
+      now: input.now,
+    });
+  } finally {
+    await removeSqliteFiles(plaintextPath);
+  }
+}
+
+export async function restoreEncryptedGenericSnapshotArchiveV2(input: {
+  archivePath: string;
+  destinationPath: string;
+  expected: EncryptedGenericSnapshotArchiveManifestV2;
+  keyProvider: SnapshotArchiveKeyProviderV2;
+  now?: () => Date;
+}): Promise<GenericSqliteSnapshotManifestV2> {
+  if (await sha256File(input.archivePath) !== input.expected.archiveSha256) {
+    throw new Error("encrypted generic snapshot archive checksum mismatch");
+  }
+  const parsed = await readHeader(input.archivePath);
+  if (!("profile" in parsed.header.snapshot)
+    || parsed.header.snapshot.profile !== "generic-sqlite-v1") {
+    throw new Error("encrypted snapshot archive does not contain a generic SQLite profile");
+  }
+  if (parsed.header.keyId !== input.expected.keyId
+    || parsed.header.snapshot.sha256 !== input.expected.snapshot.sha256
+    || parsed.header.snapshot.schemaDigest !== input.expected.snapshot.schemaDigest
+    || parsed.header.snapshot.logicalDigest !== input.expected.snapshot.logicalDigest) {
+    throw new Error("encrypted generic snapshot archive manifest mismatch");
+  }
+  const resolved = await input.keyProvider.resolve(parsed.header.keyId);
+  const key = normalizeKey(resolved.key);
+  const iv = Buffer.from(parsed.header.iv, "base64");
+  if (iv.length !== 12) throw new Error("invalid snapshot archive IV");
+  const plaintextPath = `${input.destinationPath}.decrypt-${process.pid}-${randomBytes(8).toString("hex")}.sqlite`;
+  ensurePrivateDirectory(dirname(input.destinationPath));
+  try {
+    const decipher = createDecipheriv("aes-256-gcm", key, iv, { authTagLength: AUTH_TAG_BYTES });
+    decipher.setAuthTag(parsed.authTag);
+    try {
+      await pipeline(
+        createReadStream(input.archivePath, { start: parsed.ciphertextStart, end: parsed.ciphertextEnd }),
+        decipher,
+        createWriteStream(plaintextPath, { flags: "wx", mode: 0o600 }),
+      );
+    } catch (error) {
+      await removeSqliteFiles(plaintextPath);
+      throw new Error("encrypted generic snapshot archive authentication failed", { cause: error });
+    }
+    const decrypted = await inspectGenericSqliteSnapshotV2(
+      plaintextPath,
+      parsed.header.snapshot.createdAt,
+    );
+    if (decrypted.sha256 !== parsed.header.snapshot.sha256) {
+      throw new Error("decrypted generic snapshot checksum mismatch");
+    }
+    return await restoreVerifiedGenericSqliteSnapshotV2({
       snapshotPath: plaintextPath,
       destinationPath: input.destinationPath,
       expected: parsed.header.snapshot,

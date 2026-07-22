@@ -1088,3 +1088,38 @@ secret audit is also red and the current controlled verifier is not configured,
 so credential rotation, exact cross-store purge, cron/config changes, deploy,
 restart, and migration remain blocked. See
 `eval/clawlore-v1-twentieth-memory-quality-remediation-run-2026-07-22.md`.
+
+## 2026-07-22 P8 production-GO preflight correction
+
+The preceding P6 quality conclusion is historical, not current clearance. P7
+fixed the deterministic corpus and SQLite transcript reader; P8 has now also
+passed the same reviewed 40-positive/10-no-answer corpus through the configured
+live provider at Recall@3, Precision@3, MRR and abstention 1.0, with zero false
+positives, scope leaks or unsafe egress. Two supporting results are explicitly
+annotated as `relevant_ids`; they do not satisfy mandatory-answer Recall/MRR,
+cannot appear on negative cases, and do not weaken retrieval thresholds.
+
+P8 also corrected the OpenClaw SecretRef leaf contract and replaced the former
+partial secret audit with one shared policy over canonical/history/FTS/
+projection/Experience/digest/conversation and LanceDB content. The new live
+read-only preflight reports 103 mirrored rows and 149 fields, with an
+81-payload upper bound; these are not 103 unique memories. SQLite companions
+and the full LanceDB tree now participate in the owner-only mode gate.
+
+The source checkout now contains a digest- and identity-bound exact remediation
+planner/apply path plus actually restored encrypted snapshots for memory SQL,
+generic conversation SQLite, and the LanceDB companion. Apply requires the
+three source-bound receipts, prior credential rotation, explicit approval, a
+fresh plan digest and permission tightening. It purges affected V1/V2 truth,
+history, FTS and vector rows, redacts non-memory records, handles orphan
+projections without fabricating ledger events, and fails with
+`CLAWLORE_PERSISTED_SECRET_REMEDIATION_RECOVERY_REQUIRED` after any external or
+committed mutation boundary instead of claiming a whole-system rollback.
+
+This closes candidate-side tooling, not the production incident. Live remains
+NO-GO until a registered controlled secondary verifier passes and authorizes:
+disable both bypass writers, rotate credentials, create fresh three-store
+snapshots, execute a newly generated exact remediation plan, set deprecated
+`autoBackup` false, deploy/restart once, and complete live-provider shadow plus
+real-channel acceptance. OpenClaw transcript rows remain read-only evidence;
+controlled OpenClaw auth stores are outside ClawLore's purge boundary.

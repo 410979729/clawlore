@@ -828,7 +828,22 @@ test("manifest declares all owned tools and marks management tools with config a
 
   assert.deepEqual(
     manifest.configContracts.secretInputs.paths.map((entry) => entry.path),
-    ["embedding.apiKey", "embedding.apiKey.*", "retrieval.rerankApiKey", "llm.apiKey"],
+    [
+      "embedding.apiKey",
+      ...Array.from({ length: 8 }, (_, index) => `embedding.apiKey.${index}`),
+      "retrieval.rerankApiKey",
+      "llm.apiKey",
+    ],
+  );
+  assert.equal(
+    manifest.configSchema.properties.embedding.properties.apiKey.oneOf.find(
+      (entry) => entry.type === "array",
+    ).maxItems,
+    8,
+  );
+  assert.ok(
+    manifest.configContracts.secretInputs.paths.every((entry) => !entry.path.includes("*")),
+    "SecretRef array contracts must not fan out across object fields",
   );
   assert.ok(
     manifest.configSchema.properties.embedding.properties.apiKey.oneOf.some(

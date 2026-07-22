@@ -2,6 +2,37 @@
 
 Updated: 2026-07-22
 
+## 2026-07-22 P8 production-GO preflight
+
+- [x] Close the candidate-side live semantic gate against the configured
+      provider. The reviewed 40-positive plus 10-no-answer corpus passes
+      Recall@3, Precision@3, MRR and abstention at 1.0 with 0 false positives,
+      0 cross-scope leaks and 0 unsafe egress. `expected_ids` remain mandatory
+      answers; two separately reviewed `relevant_ids` annotate supporting
+      results without weakening ranker thresholds or negative cases.
+- [x] Correct OpenClaw SecretRef discovery for the bounded embedding-key array:
+      explicit leaf paths replace the object wildcard, and runtime rejects more
+      entries than the manifest can safely enumerate.
+- [x] Expand the secret-at-rest boundary from selected canonical tables to the
+      shared V1/V2/history/FTS/projection/Experience/digest/conversation policy
+      plus LanceDB. The current content-free live preflight finds 103 mirrored
+      rows / 149 fields (81 unique-payload upper bound), and additionally finds
+      non-owner-only SQLite companions and LanceDB tree entries. These counts
+      are blockers, not 103 unique memories.
+- [x] Add a digest- and identity-bound exact remediation workflow with orphan
+      projection handling, three independently restored encrypted snapshots
+      (memory, conversation, vector), mandatory prior credential rotation,
+      whole-tree permission tightening, post-audit/integrity/FK checks and an
+      explicit recovery-required failure when the vector/commit boundary has
+      been crossed.
+- [ ] Execute the controlled production sequence only after the registered
+      secondary verifier exists and passes: disable both bypass writers, rotate
+      potentially exposed credentials, take fresh three-store snapshots, apply
+      a newly generated exact plan, set deprecated `autoBackup` false, deploy
+      the exact candidate, restart once, run live-provider shadow/Telegram
+      acceptance, and issue a GO receipt. The OpenClaw transcript remains
+      read-only evidence; controlled auth stores are not ClawLore purge targets.
+
 ## 2026-07-22 P7 quality and SQLite transcript correction
 
 - [x] Withdraw the old P5 deployment-readiness claim and supersede the P6

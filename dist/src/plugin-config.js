@@ -8,6 +8,7 @@ export const DEFAULT_REFLECTION_TIMEOUT_MS = 20_000;
 export const DEFAULT_REFLECTION_THINK_LEVEL = "medium";
 export const DEFAULT_REFLECTION_ERROR_REMINDER_MAX_ENTRIES = 3;
 export const DEFAULT_REFLECTION_DEDUPE_ERROR_SIGNALS = true;
+export const MAX_EMBEDDING_API_KEYS = 8;
 function looksLikeUnresolvedSecretRef(value) {
     if (!value || typeof value !== "object" || Array.isArray(value))
         return false;
@@ -131,6 +132,9 @@ export function parsePluginConfig(value) {
         embeddingAuthMaterial = embedding.apiKey;
     }
     else if (Array.isArray(embedding.apiKey) && embedding.apiKey.length > 0) {
+        if (embedding.apiKey.length > MAX_EMBEDDING_API_KEYS) {
+            throw new Error(`embedding.apiKey supports at most ${MAX_EMBEDDING_API_KEYS} entries`);
+        }
         const invalid = embedding.apiKey.findIndex((key) => typeof key !== "string" || key.trim().length === 0);
         if (invalid !== -1) {
             throw new Error(`embedding.apiKey[${invalid}] is invalid: expected non-empty string`);

@@ -152,17 +152,78 @@ every memory-bearing SQLite authority and companion database:
 node scripts/clawlore-persisted-secret-audit.mjs \
   --memory-db /private/live/memory.sqlite3 \
   --conversation-db /private/live/conversation-memory.sqlite3 \
+  --lancedb-dir /private/live/lancedb-root \
   --receipt /private/receipts/persisted-secret-audit.json
 ```
 
 The receipt is owner-only and content-free: it contains counts, pattern names,
 and path hashes, never row text, identifiers, or secret values. Any finding or
-non-private database mode is a deployment blocker. Rotate potentially exposed
-credentials outside ClawLore first, take a fresh encrypted snapshot, then use
-an independently reviewed exact-target purge that covers SQL truth, V2 current
-items and revisions, FTS/vector companions, Task Experience, digest records,
-and conversation memory. Re-run the audit after cleanup. Do not treat deletion
-from one mirror as complete remediation.
+non-private mode on a SQLite database/WAL/SHM or anywhere inside the LanceDB
+tree is a deployment blocker. The audit covers ClawLore-owned derived stores;
+the OpenClaw transcript database remains read-only source evidence, and
+controlled OpenClaw auth stores are never generic-redaction targets.
+
+Quiesce every automatic writer, rotate potentially exposed credentials outside
+ClawLore, and create three fresh encrypted recovery points. Each workflow
+performs an actual isolated restore and removes the plaintext test copy:
+
+```bash
+node scripts/clawlore-encrypted-live-snapshot.mjs \
+  --source /private/live/memory.sqlite3 \
+  --archive /private/backups/memory.clawlore2 \
+  --restore-test /private/restore-test/memory.sqlite3 \
+  --receipt /private/receipts/memory-snapshot.json \
+  --key-id <controlled-key-id> --secret-ref /private/vault/snapshot.key
+
+node scripts/clawlore-generic-encrypted-live-snapshot.mjs \
+  --source /private/live/conversation-memory.sqlite3 \
+  --archive /private/backups/conversation.clawlore2 \
+  --restore-test /private/restore-test/conversation.sqlite3 \
+  --receipt /private/receipts/conversation-snapshot.json \
+  --key-id <controlled-key-id> --secret-ref /private/vault/snapshot.key
+
+node scripts/clawlore-vector-companion-encrypted-live-snapshot.mjs \
+  --source-root /private/live/lancedb-root \
+  --archive /private/backups/vector.clawlore2 \
+  --restore-test-root /private/restore-test/vector \
+  --receipt /private/receipts/vector-snapshot.json \
+  --key-id <controlled-key-id> --secret-ref /private/vault/snapshot.key
+```
+
+Then generate a fresh read-only exact plan. Review its content-free target
+counts and retain its digest; a prior digest is invalid after any source or
+projection-identity change:
+
+```bash
+node scripts/clawlore-persisted-secret-remediation.mjs \
+  --memory-db /private/live/memory.sqlite3 \
+  --conversation-db /private/live/conversation-memory.sqlite3 \
+  --lancedb-dir /private/live/lancedb-root \
+  --receipt /private/receipts/remediation-plan.json
+```
+
+Only an explicitly authorized operator may apply that exact plan:
+
+```bash
+node scripts/clawlore-persisted-secret-remediation.mjs \
+  --memory-db /private/live/memory.sqlite3 \
+  --conversation-db /private/live/conversation-memory.sqlite3 \
+  --lancedb-dir /private/live/lancedb-root \
+  --receipt /private/receipts/remediation-apply.json \
+  --apply --approved --credentials-rotated --tighten-permissions \
+  --expected-plan-digest <reviewed-digest> \
+  --memory-snapshot-receipt /private/receipts/memory-snapshot.json \
+  --conversation-snapshot-receipt /private/receipts/conversation-snapshot.json \
+  --vector-snapshot-receipt /private/receipts/vector-snapshot.json
+```
+
+The operation hard-purges affected V1/V2 truth, history, FTS and vector rows,
+structurally redacts non-memory records, verifies SQL integrity/FKs, rescans all
+stores, and tightens persisted-store permissions. Do not treat deletion from
+one mirror as complete remediation. If it raises
+`CLAWLORE_PERSISTED_SECRET_REMEDIATION_RECOVERY_REQUIRED`, do not retry or claim
+that SQL rollback restored the LanceDB side. Restore all verified snapshots to
+isolated paths, validate them, and obtain a new plan.
 
 Recall quality evidence must use a schema-v2 operator-annotated corpus with at
 least 30 positive cases and 10 no-answer cases. The gate records Recall@3,
@@ -171,7 +232,10 @@ deterministic embedding run is reproducibility evidence only; it cannot set
 `liveProviderSemanticReady=true`. The final semantic gate must use the same
 live embedding provider through an owner-only key file and must pass the
 negative/no-answer thresholds before automatic recall or deployment can be
-approved.
+approved. `expected_ids` are mandatory answers used for Recall/MRR;
+operator-reviewed `relevant_ids` may identify supporting results used only for
+Precision/false-positive scoring. They must be disjoint from required and
+forbidden IDs, and no-answer cases may not declare relevant results.
 
 The supported transcript source is the current OpenClaw SQLite transcript
 store, not legacy JSONL. Use one exact session and an explicit target identity:

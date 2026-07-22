@@ -619,6 +619,8 @@ for (const marker of [
   "falsePositiveResults",
   "expect_empty",
   "liveProviderSemanticReady",
+  "relevant_ids",
+  "relevantSetSha256",
   "filterConfidentManualRecall",
   "expandedManualRecallCandidateLimit",
   "VECTOR_DIMENSION = 384",
@@ -628,9 +630,69 @@ for (const marker of [
   }
 }
 const persistedSecretAuditSource = await readFile("scripts/clawlore-persisted-secret-audit.mjs", "utf8");
-for (const marker of ["readOnly: true", "emitsSecretValues: false", "persisted_secret_material_detected"]) {
+for (const marker of [
+  "readOnly: true",
+  "emitsSecretValues: false",
+  "persisted_secret_material_detected",
+  "lancedbDir",
+  "inspectOwnerOnlyTree",
+]) {
   if (!persistedSecretAuditSource.includes(marker)) {
     throw new Error(`release gate failed: persisted-secret audit missing ${marker}`);
+  }
+}
+const persistedSecretRemediationSource = await readFile(
+  "src/v2/operator/persisted-secret-remediation.ts",
+  "utf8",
+);
+for (const marker of [
+  "targetIdentityDigest",
+  "requiresVerifiedVectorSnapshot",
+  "credentialsRotated",
+  "CLAWLORE_PERSISTED_SECRET_REMEDIATION_RECOVERY_REQUIRED",
+  "tightenOwnerOnlyTree",
+]) {
+  if (!persistedSecretRemediationSource.includes(marker)) {
+    throw new Error(`release gate failed: persisted-secret remediation missing ${marker}`);
+  }
+}
+const persistedSecretRemediationCli = await readFile(
+  "scripts/clawlore-persisted-secret-remediation.mjs",
+  "utf8",
+);
+for (const marker of [
+  "--apply",
+  "expected-plan-digest",
+  "memory-snapshot-receipt",
+  "conversation-snapshot-receipt",
+  "vector-snapshot-receipt",
+]) {
+  if (!persistedSecretRemediationCli.includes(marker)) {
+    throw new Error(`release gate failed: persisted-secret remediation CLI missing ${marker}`);
+  }
+}
+const genericSnapshotSource = await readFile(
+  "src/v2/operator/generic-live-encrypted-snapshot.ts",
+  "utf8",
+);
+for (const marker of ["sourceStableDuringBackup", "restoreVerified", "restoredPlaintextRemoved"]) {
+  if (!genericSnapshotSource.includes(marker)) {
+    throw new Error(`release gate failed: generic encrypted snapshot missing ${marker}`);
+  }
+}
+const vectorSnapshotSource = await readFile(
+  "src/v2/operator/vector-companion-live-encrypted-snapshot.ts",
+  "utf8",
+);
+for (const marker of [
+  "sourceStableDuringBackup",
+  "restoreVerified",
+  "rowIdDigest",
+  "treeDigest",
+  "restoredPlaintextRemoved",
+]) {
+  if (!vectorSnapshotSource.includes(marker)) {
+    throw new Error(`release gate failed: vector encrypted snapshot missing ${marker}`);
   }
 }
 const scalabilityBenchmarkSource = await readFile("scripts/scalability-benchmark.mjs", "utf8");

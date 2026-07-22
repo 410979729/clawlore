@@ -18,7 +18,18 @@ assert.deepEqual(publicExperienceTools, [
 ]);
 assert.deepEqual(
   manifest.configContracts.secretInputs.paths.map((item) => item.path),
-  ["embedding.apiKey", "embedding.apiKey.*", "retrieval.rerankApiKey", "llm.apiKey"],
+  [
+    "embedding.apiKey",
+    ...Array.from({ length: 8 }, (_, index) => `embedding.apiKey.${index}`),
+    "retrieval.rerankApiKey",
+    "llm.apiKey",
+  ],
+);
+assert.equal(
+  manifest.configSchema.properties.embedding.properties.apiKey.oneOf.find(
+    (entry) => entry.type === "array",
+  ).maxItems,
+  8,
 );
 assert.equal(manifest.configSchema.properties.allowAgentOperatorTools.default, false);
 assert.equal(

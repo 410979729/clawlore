@@ -40,7 +40,7 @@ const ROOT_MODULES_BY_LAYER = {
     "manual-recall-confidence.ts", "manual-recall-lexical-evidence.ts", "noise-prototypes.ts", "preference-slots.ts", "product-identity.ts", "self-improvement-content-policy.ts",
     "reflection-contracts.ts", "reflection-mapped-metadata.ts", "reflection-metadata.ts", "reflection-ranking.ts",
     "principal-write-boundary.ts", "reflection-slices.ts", "runtime-accessibility-diagnostic.ts", "runtime-memory-boundary.ts", "runtime-scope-metadata.ts",
-    "diagnostic-redaction.ts", "llm-failure-diagnostic.ts", "provider-output-policy.ts", "scope-policy.ts", "secret-redaction.ts", "secret-structured-text.ts", "smart-metadata.ts",
+    "diagnostic-redaction.ts", "llm-failure-diagnostic.ts", "persisted-secret-policy.ts", "provider-output-policy.ts", "scope-policy.ts", "secret-redaction.ts", "secret-structured-text.ts", "smart-metadata.ts",
     "task-experience-capsule.ts", "task-experience-review.ts", "task-outcome-evidence.ts",
   ],
   application: [
@@ -81,6 +81,7 @@ const ROOT_MODULES_BY_LAYER = {
     "reflection-event-store.ts", "reflection-item-store.ts",
     "reflection-store.ts", "secret-index.ts",
     "sql-authority-migration.ts", "sql-truth-store.ts", "sqlite-vector-store.ts",
+    "persisted-secret-scan.ts", "persisted-store-permissions.ts",
     "storage-path.ts", "store.ts", "vector-scope-metadata-updater.ts",
     "workspace-boundary.ts", "markdown-mirror.ts",
   ],

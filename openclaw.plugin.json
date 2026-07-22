@@ -62,7 +62,35 @@
           "expected": "string"
         },
         {
-          "path": "embedding.apiKey.*",
+          "path": "embedding.apiKey.0",
+          "expected": "string"
+        },
+        {
+          "path": "embedding.apiKey.1",
+          "expected": "string"
+        },
+        {
+          "path": "embedding.apiKey.2",
+          "expected": "string"
+        },
+        {
+          "path": "embedding.apiKey.3",
+          "expected": "string"
+        },
+        {
+          "path": "embedding.apiKey.4",
+          "expected": "string"
+        },
+        {
+          "path": "embedding.apiKey.5",
+          "expected": "string"
+        },
+        {
+          "path": "embedding.apiKey.6",
+          "expected": "string"
+        },
+        {
+          "path": "embedding.apiKey.7",
           "expected": "string"
         },
         {
@@ -667,7 +695,8 @@
                     }
                   ]
                 },
-                "minItems": 1
+                "minItems": 1,
+                "maxItems": 8
               }
             ],
             "description": "Single API key/SecretRef or array for hosted embedding providers. Hosted providers receive memory text for embedding; use local-hash/local-debug or a local endpoint for sensitive deployments."

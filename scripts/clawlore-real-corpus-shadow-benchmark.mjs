@@ -160,9 +160,18 @@ function validateFixture(value) {
       "real-corpus annotation is required");
     assert.ok(Array.isArray(testCase.expected_ids), "real-corpus expected_ids are required");
     assert.ok(testCase.expected_ids.every((id) => ids.has(id)), "real-corpus expected id is unknown");
+    const relevantIds = testCase.relevant_ids ?? [];
+    assert.ok(Array.isArray(relevantIds) && relevantIds.every((id) => ids.has(id)),
+      "real-corpus relevant id is unknown");
+    assert.equal(new Set(relevantIds).size, relevantIds.length,
+      "real-corpus relevant ids must be unique");
+    assert.equal(relevantIds.some((id) => testCase.expected_ids.includes(id)), false,
+      "real-corpus relevant ids must not duplicate required expected ids");
     if (testCase.expect_empty === true) {
       assert.equal(testCase.expected_ids.length, 0,
         "real-corpus negative case must not declare expected ids");
+      assert.equal(relevantIds.length, 0,
+        "real-corpus negative case must not declare relevant ids");
       negativeCases += 1;
     } else {
       assert.ok(testCase.expected_ids.length > 0,
@@ -175,6 +184,8 @@ function validateFixture(value) {
     const forbidden = testCase.forbidden_ids ?? [];
     assert.ok(Array.isArray(forbidden) && forbidden.every((id) => ids.has(id)),
       "real-corpus forbidden id is unknown");
+    assert.equal(forbidden.some((id) => relevantIds.includes(id)), false,
+      "real-corpus relevant and forbidden ids must be disjoint");
   }
   assert.ok(positiveCases >= 30, "real-corpus fixture requires at least 30 positive cases");
   assert.ok(negativeCases >= 10, "real-corpus fixture requires at least 10 no-answer cases");
@@ -268,6 +279,7 @@ export async function evaluateRealCorpusShadow(input) {
 
     let expected = 0;
     let hits = 0;
+    let relevantHits = 0;
     let reciprocalRankTotal = 0;
     let crossScopeLeakage = 0;
     let unsafeEgressViolations = 0;
@@ -299,6 +311,7 @@ export async function evaluateRealCorpusShadow(input) {
       const ids = results.map((result) => result.entry.id);
       const expectsEmpty = testCase.expect_empty === true;
       const expectedSet = new Set(testCase.expected_ids);
+      const relevantSet = new Set([...testCase.expected_ids, ...(testCase.relevant_ids ?? [])]);
       const expectedRanks = testCase.expected_ids
         .map((id) => ids.indexOf(id) + 1)
         .filter((rank) => rank > 0)
@@ -313,9 +326,10 @@ export async function evaluateRealCorpusShadow(input) {
         reciprocalRankTotal += expectedRanks.length > 0 ? 1 / expectedRanks[0] : 0;
       }
       returnedResults += results.length;
+      relevantHits += ids.filter((id) => relevantSet.has(id)).length;
       const caseFalsePositives = expectsEmpty
         ? results.length
-        : ids.filter((id) => !expectedSet.has(id)).length;
+        : ids.filter((id) => !relevantSet.has(id)).length;
       falsePositiveResults += caseFalsePositives;
       const allowedScopes = new Set(testCase.scope_filter);
       const caseLeakage = results.filter((result) => !allowedScopes.has(result.entry.scope)).length;
@@ -328,10 +342,13 @@ export async function evaluateRealCorpusShadow(input) {
       cases.push({
         caseSha256: hash(`${testCase.name}\0${testCase.query}\0${testCase.annotation}`),
         expectedSetSha256: hash(JSON.stringify([...testCase.expected_ids].sort())),
+        relevantSetSha256: hash(JSON.stringify([...relevantSet].sort())),
         returnedSetSha256: hash(JSON.stringify(ids)),
         firstRelevantRank: expectedRanks[0] ?? 0,
         expectedHitsAt3: expectedRanks.length,
         expectedCount: testCase.expected_ids.length,
+        relevantHitsAt3: ids.filter((id) => relevantSet.has(id)).length,
+        relevantCount: relevantSet.size,
         expectsEmpty,
         returnedCount: results.length,
         confidenceRejected: confidence.rejectedCount,
@@ -349,6 +366,7 @@ export async function evaluateRealCorpusShadow(input) {
           vectorScore: Number((result.sources.vector?.score ?? 0).toFixed(6)),
           bm25Score: Number((result.sources.bm25?.score ?? 0).toFixed(6)),
           expected: expectedSet.has(result.entry.id),
+          relevant: relevantSet.has(result.entry.id),
         })),
         crossScopeLeakage: caseLeakage,
         unsafeEgressViolations: caseUnsafe,
@@ -357,7 +375,7 @@ export async function evaluateRealCorpusShadow(input) {
     }
 
     const recallAt3 = expected === 0 ? 0 : hits / expected;
-    const precisionAt3 = returnedResults === 0 ? 0 : hits / returnedResults;
+    const precisionAt3 = returnedResults === 0 ? 0 : relevantHits / returnedResults;
     const mrr = positiveCases === 0 ? 0 : reciprocalRankTotal / positiveCases;
     const abstentionRate = negativeCases === 0 ? 0 : negativeAbstentions / negativeCases;
     const missingStages = REQUIRED_STAGES.filter((stage) => !stages.has(stage));

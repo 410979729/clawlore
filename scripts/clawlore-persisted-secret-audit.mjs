@@ -6,112 +6,97 @@ import { chmod, realpath, stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { findSecret } from "../dist/src/secret-redaction.js";
-
-const FIELD_MAP = {
-  memory: {
-    memory_truth: ["text", "metadata", "metadata_text"],
-    memory_items: ["content"],
-    memory_revisions: ["content"],
-    nightly_digest_runs: ["notes"],
-    task_episodes: [
-      "task_goal", "user_intent", "message_ids", "journal_entry_ids",
-      "tool_names", "evidence", "verification", "environment", "metadata",
-    ],
-    procedural_playbooks: [
-      "title", "trigger", "goal", "preconditions", "steps", "pitfalls",
-      "verification", "cleanup", "evidence_anchors", "related_skills",
-      "environment_constraints", "reuse_policy", "metadata",
-    ],
-  },
-  conversation: {
-    conversations: ["summary", "detail", "source_detail", "tools_used", "model_used"],
-    extraction_runs: ["notes"],
-    decisions: ["decision", "context", "rationale", "alternatives_considered", "impact"],
-    research_queries: ["query", "findings", "sources"],
-    task_executions: [
-      "description", "result_summary", "lessons_learned", "pitfalls_encountered",
-      "files_modified", "root_cause", "fix_applied",
-    ],
-  },
-};
+import {
+  PERSISTED_SECRET_VECTOR_FIELDS,
+} from "../dist/src/persisted-secret-policy.js";
+import { scanPersistedSecretDatabase } from "../dist/src/persisted-secret-scan.js";
+import {
+  inspectOwnerOnlySqliteFamily,
+  inspectOwnerOnlyTree,
+} from "../dist/src/persisted-store-permissions.js";
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function quoteIdentifier(value) {
-  return `"${String(value).replaceAll('"', '""')}"`;
-}
-
-function tableExists(db, table) {
-  return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table));
-}
-
 export async function auditPersistedSecretDatabase({ path, kind }) {
-  assert.ok(FIELD_MAP[kind], `unsupported persisted-secret database kind: ${kind}`);
+  assert.ok(["memory", "conversation"].includes(kind), `unsupported persisted-secret database kind: ${kind}`);
   const canonicalPath = await realpath(resolve(path));
   const info = await stat(canonicalPath);
   assert.equal(info.isFile(), true, `${kind} database must be a regular file`);
   const db = new DatabaseSync(canonicalPath, { readOnly: true });
-  const findings = [];
-  const flaggedPayloads = new Set();
-  let secretBearingRows = 0;
-  let secretBearingFields = 0;
-
   try {
-    for (const [table, requestedFields] of Object.entries(FIELD_MAP[kind])) {
-      if (!tableExists(db, table)) continue;
-      const columns = new Set(db.prepare(`PRAGMA table_info(${quoteIdentifier(table)})`).all()
-        .map((column) => String(column.name)));
-      const fields = requestedFields.filter((field) => columns.has(field));
-      if (fields.length === 0) continue;
-
-      const selected = fields.map(quoteIdentifier).join(", ");
-      const rows = db.prepare(`SELECT rowid AS __rowid, ${selected} FROM ${quoteIdentifier(table)}`);
-      const rowHits = new Set();
-      const patternCounts = {};
-      let tableFieldHits = 0;
-      let scannedRows = 0;
-
-      for (const row of rows.iterate()) {
-        scannedRows += 1;
-        for (const field of fields) {
-          const value = row[field];
-          if (value === null || value === undefined || value === "") continue;
-          const text = String(value);
-          const secret = findSecret(text);
-          if (!secret) continue;
-          rowHits.add(String(row.__rowid));
-          flaggedPayloads.add(sha256(text));
-          tableFieldHits += 1;
-          patternCounts[secret.name] = (patternCounts[secret.name] ?? 0) + 1;
-        }
-      }
-
-      if (tableFieldHits > 0) {
-        findings.push({
-          table,
-          scannedRows,
-          secretBearingRows: rowHits.size,
-          secretBearingFields: tableFieldHits,
-          patternCounts,
-        });
-        secretBearingRows += rowHits.size;
-        secretBearingFields += tableFieldHits;
-      }
-    }
+    const { summary } = scanPersistedSecretDatabase(db, kind);
+    const permissions = inspectOwnerOnlySqliteFamily(canonicalPath);
+    return {
+      kind,
+      databasePathSha256: sha256(canonicalPath),
+      ownerOnlyMode: permissions.ownerOnly,
+      permissionEntries: {
+        files: permissions.files,
+        directories: permissions.directories,
+        unsafe: permissions.unsafeEntries,
+      },
+      ...summary,
+    };
   } finally {
     db.close();
   }
+}
 
+export async function auditPersistedSecretLanceDb({ path }) {
+  const canonicalPath = await realpath(resolve(path));
+  const info = await stat(canonicalPath);
+  assert.equal(info.isDirectory(), true, "LanceDB path must be a directory");
+  const lancedb = await import("@lancedb/lancedb");
+  const db = await lancedb.connect(canonicalPath);
+  const table = await db.openTable("memories");
+  const rows = await table.query().select(["id", ...PERSISTED_SECRET_VECTOR_FIELDS]).toArray();
+  const permissions = inspectOwnerOnlyTree(canonicalPath);
+  const rowHits = new Set();
+  const flaggedPayloads = new Set();
+  const patternCounts = {};
+  const fieldCounts = {};
+  let secretBearingFields = 0;
+  try {
+    for (const row of rows) {
+      for (const field of PERSISTED_SECRET_VECTOR_FIELDS) {
+        const value = row[field];
+        if (value === null || value === undefined || value === "") continue;
+        const text = String(value);
+        const secret = findSecret(text);
+        if (!secret) continue;
+        rowHits.add(sha256(String(row.id)));
+        flaggedPayloads.add(sha256(text));
+        secretBearingFields += 1;
+        fieldCounts[field] = (fieldCounts[field] ?? 0) + 1;
+        patternCounts[secret.name] = (patternCounts[secret.name] ?? 0) + 1;
+      }
+    }
+  } finally {
+    await table.close?.();
+    await db.close?.();
+  }
   return {
-    kind,
+    kind: "vector",
     databasePathSha256: sha256(canonicalPath),
-    ownerOnlyMode: process.platform === "win32" ? null : (info.mode & 0o077) === 0,
-    secretBearingRows,
+    ownerOnlyMode: permissions.ownerOnly,
+    permissionEntries: {
+      files: permissions.files,
+      directories: permissions.directories,
+      unsafe: permissions.unsafeEntries,
+    },
+    secretBearingRows: rowHits.size,
     secretBearingFields,
     uniqueFlaggedPayloads: flaggedPayloads.size,
-    findings,
+    findings: secretBearingFields === 0 ? [] : [{
+      table: "memories",
+      scannedRows: rows.length,
+      secretBearingRows: rowHits.size,
+      secretBearingFields,
+      fieldCounts,
+      patternCounts,
+    }],
   };
 }
 
@@ -122,6 +107,9 @@ export async function auditPersistedSecrets(input) {
   }
   if (input.conversationDb) {
     databases.push(await auditPersistedSecretDatabase({ path: input.conversationDb, kind: "conversation" }));
+  }
+  if (input.lancedbDir) {
+    databases.push(await auditPersistedSecretLanceDb({ path: input.lancedbDir }));
   }
   assert.ok(databases.length > 0, "at least one persisted-secret database is required");
   const totals = databases.reduce((current, database) => ({
@@ -159,8 +147,8 @@ function parseArgs(argv) {
     }
     args[token.slice(2)] = value;
   }
-  if (!args["memory-db"] && !args["conversation-db"]) {
-    throw new Error("--memory-db or --conversation-db is required");
+  if (!args["memory-db"] && !args["conversation-db"] && !args["lancedb-dir"]) {
+    throw new Error("--memory-db, --conversation-db, or --lancedb-dir is required");
   }
   if (!args.receipt) throw new Error("--receipt is required");
   return args;
@@ -171,6 +159,7 @@ async function main() {
   const report = await auditPersistedSecrets({
     memoryDb: args["memory-db"],
     conversationDb: args["conversation-db"],
+    lancedbDir: args["lancedb-dir"],
   });
   const receiptPath = resolve(args.receipt);
   await writeFile(receiptPath, `${JSON.stringify(report, null, 2)}\n`, { flag: "wx", mode: 0o600 });

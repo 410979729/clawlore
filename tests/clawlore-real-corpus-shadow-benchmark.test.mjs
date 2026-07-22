@@ -32,6 +32,14 @@ test("real-corpus shadow benchmark is source-bound, content-free, and enforces R
         source_file: "source.md",
         source_anchor: "scope isolation decoy",
       },
+      {
+        id: "relevant-release-context",
+        text: "发布验收还应保留可追溯证据，并确认没有遗留临时产物。",
+        category: "procedures",
+        scope: "user:fixture",
+        source_file: "source.md",
+        source_anchor: "relevant release context",
+      },
     ];
     for (let index = 0; index < 8; index += 1) {
       setup.push({
@@ -70,8 +78,9 @@ test("real-corpus shadow benchmark is source-bound, content-free, and enforces R
         name: `release-verification-${index + 1}`,
         query: "发布前要做哪些测试构建和健康验证？",
         annotated: true,
-        annotation: "The canonical release verification rule is the only relevant result.",
+        annotation: "The canonical rule is required; the release evidence rule is relevant support.",
         expected_ids: ["expected-release-rule"],
+        relevant_ids: ["relevant-release-context"],
         forbidden_ids: ["decoy-other-scope"],
         scope_filter: ["user:fixture"],
         limit: 3,

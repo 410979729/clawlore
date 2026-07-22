@@ -2,7 +2,33 @@
 
 ## Unreleased
 
-No changes yet.
+- Corrected OpenClaw SecretRef compatibility for embedding-key arrays by
+  enumerating bounded array leaves instead of treating SecretRef object fields
+  as plaintext wildcard values; runtime configuration rejects more keys than
+  the manifest can represent.
+- Made the live-provider 40-positive/10-no-answer gate distinguish one required
+  answer from explicitly annotated relevant supporting results. Required
+  Recall/MRR remain strict, while Precision/false-positive scoring no longer
+  mislabels reviewed supporting rules as irrelevant; negative cases cannot
+  declare relevant results.
+- Expanded the persisted-secret audit to one shared policy covering V1/V2
+  truth and history, every FTS/projection mirror, Task Experience/digest and
+  conversation stores, plus LanceDB text/metadata. SQLite WAL/SHM files and the
+  complete LanceDB tree now participate in the owner-only permission gate.
+- Added a content-free, digest-bound remediation planner and explicit apply
+  path. It requires verified encrypted memory, conversation, and vector
+  snapshots, prior credential rotation, fresh target identities, exact
+  approval, and permission tightening; orphan projections do not manufacture
+  V2 ledger events, and any crossed external/commit boundary returns a
+  recovery-required error instead of claiming full rollback.
+- Added generic SQLite and LanceDB companion AES-256-GCM snapshot workflows.
+  Both perform an actual isolated restore, verify logical/tree and row-ID
+  digests, remove all plaintext restore material, and emit owner-only,
+  content-free receipts.
+- Added release guards and regressions for the expanded audit, three-snapshot
+  remediation boundary, supporting-result annotations, permission tightening,
+  orphan projection cleanup, partial-vector failure recovery, and snapshot
+  restore behavior.
 
 ## 1.2.2 - 2026-07-22
 

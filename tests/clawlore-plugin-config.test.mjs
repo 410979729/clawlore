@@ -94,6 +94,10 @@ test("plugin config fails closed for missing or malformed hosted credentials", (
     /embedding.apiKey\[1\] is invalid/,
   );
   assert.throws(
+    () => parsePluginConfig({ embedding: { apiKey: Array(9).fill("key") } }),
+    /embedding.apiKey supports at most 8 entries/,
+  );
+  assert.throws(
     () => parsePluginConfig({ embedding: { apiKey: { secret: "ref" } } }),
     /embedding.apiKey must be a string or non-empty array of strings/,
   );
