@@ -1065,3 +1065,26 @@ not an implied approval to switch later without fresh evidence.
    run probes under `User=a`/`Group=a`, atomically swap, restart once, and require
    principal-aware doctor, runtime receipt, health/auth/search, and real Telegram
    recall before acceptance.
+
+## 2026-07-22 independent memory-quality audit and 1.2.2 remediation
+
+The deployment-ready conclusion for 1.2.1 is withdrawn. Manual recall was
+silently reinforcing every returned result, the 40-question corpus had no
+no-answer cases, plaintext secret-shaped material remained in multiple
+persistence layers, and the enabled nightly writer still reads legacy JSONL
+instead of the active OpenClaw SQLite transcript database.
+
+The isolated 1.2.2 source candidate makes manual recall observation-only,
+introduces a separately owned confidence/abstention policy, requires schema-v2
+positive and negative quality metrics, extends the canonical secret policy,
+and adds a content-free streaming persisted-secret audit. The new policy lives
+outside the 1,425-line retriever hotspot; architecture and non-growth checks
+pass without increasing the budget.
+
+The operator 40+10 deterministic corpus is intentionally red: all ten negative
+cases abstain, but nine positives are rejected and precision remains below the
+release threshold. A live-provider gate is still required. The production
+secret audit is also red and the current controlled verifier is not configured,
+so credential rotation, exact cross-store purge, cron/config changes, deploy,
+restart, and migration remain blocked. See
+`eval/clawlore-v1-twentieth-memory-quality-remediation-run-2026-07-22.md`.

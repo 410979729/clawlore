@@ -16,6 +16,7 @@ import {
 } from "./task-experience.js";
 import type { WorkspaceBoundaryConfig } from "./workspace-boundary.js";
 import type { ReflectionThinkLevel } from "./reflection-contracts.js";
+import type { ManualRecallConfidenceConfig } from "./manual-recall-confidence.js";
 export type { ReflectionThinkLevel } from "./reflection-contracts.js";
 
 export type SessionStrategy = "memoryReflection" | "systemSessionMemory" | "none";
@@ -85,7 +86,7 @@ export interface PluginConfig {
     timeDecayHalfLifeDays?: number;
     reinforcementFactor?: number;
     maxHalfLifeMultiplier?: number;
-  };
+  } & ManualRecallConfidenceConfig;
   decay?: {
     recencyHalfLifeDays?: number;
     recencyWeight?: number;

@@ -7,6 +7,8 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { performance } from "node:perf_hooks";
 import { evaluateCaptureSafety } from "../dist/src/capture-safety.js";
+import { createEmbedder } from "../dist/src/embedder.js";
+import { filterConfidentManualRecall } from "../dist/src/manual-recall-confidence.js";
 import { MemoryStore } from "../dist/src/store.js";
 import { DEFAULT_RETRIEVAL_CONFIG, MemoryRetriever } from "../dist/src/retriever.js";
 
@@ -82,19 +84,37 @@ function productionCategory(category) {
 }
 
 function validateFixture(value) {
-  assert.equal(value?.schemaVersion, 1, "real-corpus fixture schemaVersion must be 1");
+  assert.equal(value?.schemaVersion, 2, "real-corpus fixture schemaVersion must be 2");
   assert.equal(value?.kind, "operator-annotated-real-corpus", "real-corpus fixture kind is invalid");
   assert.ok(typeof value.name === "string" && value.name.trim(), "real-corpus fixture name is required");
   assert.ok(Array.isArray(value.source_files) && value.source_files.length > 0,
     "real-corpus fixture source_files are required");
   assert.ok(Array.isArray(value.setup) && value.setup.length >= 10 && value.setup.length <= 200,
     "real-corpus fixture requires 10-200 setup rows");
-  assert.ok(Array.isArray(value.cases) && value.cases.length >= 30 && value.cases.length <= 50,
-    "real-corpus fixture requires 30-50 annotated questions");
+  assert.ok(Array.isArray(value.cases) && value.cases.length >= 40 && value.cases.length <= 80,
+    "real-corpus fixture requires 40-80 annotated questions");
   assert.ok(value.thresholds && Number(value.thresholds.recall_at_3) >= 0.9,
     "real-corpus Recall@3 threshold must be at least 0.90");
   assert.ok(Number(value.thresholds.mrr) >= 0.85,
     "real-corpus MRR threshold must be at least 0.85");
+  assert.ok(Number(value.thresholds.precision_at_3) >= 0.8,
+    "real-corpus Precision@3 threshold must be at least 0.80");
+  assert.ok(Number(value.thresholds.abstention_rate) >= 0.9,
+    "real-corpus abstention threshold must be at least 0.90");
+  assert.ok(value.retrieval && typeof value.retrieval === "object",
+    "real-corpus manual recall confidence configuration is required");
+  const confidenceMinimums = {
+    manual_recall_min_score: 0.3,
+    manual_recall_lexical_min_score: 0.01,
+    manual_recall_vector_only_min_score: 0.6,
+    manual_recall_minimum_top_gap: 0.03,
+  };
+  for (const [key, minimum] of Object.entries(confidenceMinimums)) {
+    assert.ok(Number.isFinite(Number(value.retrieval[key]))
+      && Number(value.retrieval[key]) >= minimum
+      && Number(value.retrieval[key]) <= 1,
+    `real-corpus ${key} must be between ${minimum} and 1`);
+  }
 
   const sourceNames = new Set();
   for (const source of value.source_files) {
@@ -120,6 +140,8 @@ function validateFixture(value) {
   }
 
   const caseNames = new Set();
+  let positiveCases = 0;
+  let negativeCases = 0;
   for (const testCase of value.cases) {
     assert.equal(testCase.annotated, true, "real-corpus question annotation flag is required");
     assert.ok(typeof testCase.name === "string" && testCase.name.trim(), "real-corpus case name is required");
@@ -130,9 +152,17 @@ function validateFixture(value) {
       "real-corpus query failed capture safety");
     assert.ok(typeof testCase.annotation === "string" && testCase.annotation.trim(),
       "real-corpus annotation is required");
-    assert.ok(Array.isArray(testCase.expected_ids) && testCase.expected_ids.length > 0,
-      "real-corpus expected_ids are required");
+    assert.ok(Array.isArray(testCase.expected_ids), "real-corpus expected_ids are required");
     assert.ok(testCase.expected_ids.every((id) => ids.has(id)), "real-corpus expected id is unknown");
+    if (testCase.expect_empty === true) {
+      assert.equal(testCase.expected_ids.length, 0,
+        "real-corpus negative case must not declare expected ids");
+      negativeCases += 1;
+    } else {
+      assert.ok(testCase.expected_ids.length > 0,
+        "real-corpus positive case requires expected ids");
+      positiveCases += 1;
+    }
     assert.ok(Array.isArray(testCase.scope_filter) && testCase.scope_filter.length > 0,
       "real-corpus scope_filter is required");
     assert.equal(Number(testCase.limit ?? 3), 3, "real-corpus questions must evaluate Recall@3");
@@ -140,6 +170,8 @@ function validateFixture(value) {
     assert.ok(Array.isArray(forbidden) && forbidden.every((id) => ids.has(id)),
       "real-corpus forbidden id is unknown");
   }
+  assert.ok(positiveCases >= 30, "real-corpus fixture requires at least 30 positive cases");
+  assert.ok(negativeCases >= 10, "real-corpus fixture requires at least 10 no-answer cases");
   return value;
 }
 
@@ -171,17 +203,34 @@ export async function evaluateRealCorpusShadow(input) {
   const loaded = await loadFixture(input.fixturePath, input.workspaceRoot);
   const fixture = loaded.fixture;
   const root = await mkdtemp(join(tmpdir(), "clawlore-real-corpus-shadow-"));
-  const store = new MemoryStore({
-    dbPath: root,
-    vectorDim: VECTOR_DIMENSION,
-    vectorBackend: "sqlite-bruteforce",
-  });
+  const embedPassage = input.embedding?.embedPassage ?? (async (text) => deterministicEmbedding(text));
+  const embedQuery = input.embedding?.embedQuery ?? (async (text) => deterministicEmbedding(text));
+  const embeddingLabel = input.embedding?.label ?? "deterministic-hashed-token-v1";
+  const liveProvider = input.embedding?.liveProvider === true;
+  let store;
   try {
-    for (const item of fixture.setup) {
+    const firstPassageVector = await embedPassage(fixture.setup[0].text);
+    assert.ok(Array.isArray(firstPassageVector) && firstPassageVector.length > 0,
+      "real-corpus passage embedding must be a non-empty numeric array");
+    assert.equal(firstPassageVector.every(Number.isFinite), true,
+      "real-corpus passage embedding contains a non-finite value");
+    const vectorDimension = firstPassageVector.length;
+    store = new MemoryStore({
+      dbPath: root,
+      vectorDim: vectorDimension,
+      vectorBackend: "sqlite-bruteforce",
+    });
+    for (let index = 0; index < fixture.setup.length; index += 1) {
+      const item = fixture.setup[index];
+      const vector = index === 0 ? firstPassageVector : await embedPassage(item.text);
+      assert.equal(vector.length, vectorDimension,
+        "real-corpus passage embedding dimension drifted");
+      assert.equal(vector.every(Number.isFinite), true,
+        "real-corpus passage embedding contains a non-finite value");
       await store.importEntry({
         id: item.id,
         text: item.text,
-        vector: deterministicEmbedding(item.text),
+        vector,
         category: productionCategory(item.category),
         scope: item.scope,
         importance: Number(item.importance ?? 0.8),
@@ -190,20 +239,25 @@ export async function evaluateRealCorpusShadow(input) {
       });
     }
 
+    const retrievalConfig = {
+      ...DEFAULT_RETRIEVAL_CONFIG,
+      mode: "hybrid",
+      minScore: 0,
+      hardMinScore: 0,
+      rerank: "none",
+      candidatePoolSize: 60,
+      recencyWeight: 0,
+      lengthNormAnchor: 0,
+      timeDecayHalfLifeDays: 0,
+      manualRecallMinScore: Number(fixture.retrieval.manual_recall_min_score),
+      manualRecallLexicalMinScore: Number(fixture.retrieval.manual_recall_lexical_min_score),
+      manualRecallVectorOnlyMinScore: Number(fixture.retrieval.manual_recall_vector_only_min_score),
+      manualRecallMinimumTopGap: Number(fixture.retrieval.manual_recall_minimum_top_gap),
+    };
     const retriever = new MemoryRetriever(
       store,
-      { embedQuery: async (query) => deterministicEmbedding(query) },
-      {
-        ...DEFAULT_RETRIEVAL_CONFIG,
-        mode: "hybrid",
-        minScore: 0,
-        hardMinScore: 0,
-        rerank: "none",
-        candidatePoolSize: 60,
-        recencyWeight: 0,
-        lengthNormAnchor: 0,
-        timeDecayHalfLifeDays: 0,
-      },
+      { embedQuery },
+      retrievalConfig,
     );
 
     let expected = 0;
@@ -212,12 +266,17 @@ export async function evaluateRealCorpusShadow(input) {
     let crossScopeLeakage = 0;
     let unsafeEgressViolations = 0;
     let forbiddenViolations = 0;
+    let returnedResults = 0;
+    let falsePositiveResults = 0;
+    let positiveCases = 0;
+    let negativeCases = 0;
+    let negativeAbstentions = 0;
     const latencies = [];
     const stages = new Set();
     const cases = [];
     for (const testCase of fixture.cases) {
       const started = performance.now();
-      const { results, trace } = await retriever.retrieveWithTrace({
+      const { results: candidates, trace } = await retriever.retrieveWithTrace({
         query: testCase.query,
         limit: 3,
         scopeFilter: testCase.scope_filter,
@@ -225,14 +284,29 @@ export async function evaluateRealCorpusShadow(input) {
       });
       latencies.push(performance.now() - started);
       for (const stage of trace.stages) stages.add(stage.name);
+      const confidence = filterConfidentManualRecall(candidates, retrievalConfig);
+      const results = confidence.results;
       const ids = results.map((result) => result.entry.id);
+      const expectsEmpty = testCase.expect_empty === true;
+      const expectedSet = new Set(testCase.expected_ids);
       const expectedRanks = testCase.expected_ids
         .map((id) => ids.indexOf(id) + 1)
         .filter((rank) => rank > 0)
         .sort((left, right) => left - right);
-      expected += testCase.expected_ids.length;
-      hits += expectedRanks.length;
-      reciprocalRankTotal += expectedRanks.length > 0 ? 1 / expectedRanks[0] : 0;
+      if (expectsEmpty) {
+        negativeCases += 1;
+        if (results.length === 0) negativeAbstentions += 1;
+      } else {
+        positiveCases += 1;
+        expected += testCase.expected_ids.length;
+        hits += expectedRanks.length;
+        reciprocalRankTotal += expectedRanks.length > 0 ? 1 / expectedRanks[0] : 0;
+      }
+      returnedResults += results.length;
+      const caseFalsePositives = expectsEmpty
+        ? results.length
+        : ids.filter((id) => !expectedSet.has(id)).length;
+      falsePositiveResults += caseFalsePositives;
       const allowedScopes = new Set(testCase.scope_filter);
       const caseLeakage = results.filter((result) => !allowedScopes.has(result.entry.scope)).length;
       const caseUnsafe = results.filter((result) => !evaluateCaptureSafety(result.entry.text).allowed).length;
@@ -248,6 +322,24 @@ export async function evaluateRealCorpusShadow(input) {
         firstRelevantRank: expectedRanks[0] ?? 0,
         expectedHitsAt3: expectedRanks.length,
         expectedCount: testCase.expected_ids.length,
+        expectsEmpty,
+        returnedCount: results.length,
+        confidenceRejected: confidence.rejectedCount,
+        falsePositiveResults: caseFalsePositives,
+        topCandidateScore: Number((candidates[0]?.score ?? 0).toFixed(6)),
+        secondCandidateScore: Number((candidates[1]?.score ?? 0).toFixed(6)),
+        topCandidateGap: Number(Math.max(
+          0,
+          (candidates[0]?.score ?? 0) - (candidates[1]?.score ?? 0),
+        ).toFixed(6)),
+        topCandidateVectorScore: Number((candidates[0]?.sources.vector?.score ?? 0).toFixed(6)),
+        topCandidateBm25Score: Number((candidates[0]?.sources.bm25?.score ?? 0).toFixed(6)),
+        returnedScoreProfile: results.map((result) => ({
+          score: Number(result.score.toFixed(6)),
+          vectorScore: Number((result.sources.vector?.score ?? 0).toFixed(6)),
+          bm25Score: Number((result.sources.bm25?.score ?? 0).toFixed(6)),
+          expected: expectedSet.has(result.entry.id),
+        })),
         crossScopeLeakage: caseLeakage,
         unsafeEgressViolations: caseUnsafe,
         forbiddenViolations: caseForbidden,
@@ -255,11 +347,16 @@ export async function evaluateRealCorpusShadow(input) {
     }
 
     const recallAt3 = expected === 0 ? 0 : hits / expected;
-    const mrr = fixture.cases.length === 0 ? 0 : reciprocalRankTotal / fixture.cases.length;
+    const precisionAt3 = returnedResults === 0 ? 0 : hits / returnedResults;
+    const mrr = positiveCases === 0 ? 0 : reciprocalRankTotal / positiveCases;
+    const abstentionRate = negativeCases === 0 ? 0 : negativeAbstentions / negativeCases;
     const missingStages = REQUIRED_STAGES.filter((stage) => !stages.has(stage));
     const thresholds = {
       recallAt3: Number(fixture.thresholds.recall_at_3),
       mrr: Number(fixture.thresholds.mrr),
+      precisionAt3: Number(fixture.thresholds.precision_at_3),
+      abstentionRate: Number(fixture.thresholds.abstention_rate),
+      maximumFalsePositiveResults: Number(fixture.thresholds.maximum_false_positive_results ?? 0),
       maximumCrossScopeLeakage: Number(fixture.thresholds.maximum_cross_scope_leakage ?? 0),
       maximumUnsafeEgressViolations: Number(fixture.thresholds.maximum_unsafe_egress_violations ?? 0),
       maximumForbiddenViolations: Number(fixture.thresholds.maximum_forbidden_violations ?? 0),
@@ -267,12 +364,15 @@ export async function evaluateRealCorpusShadow(input) {
     const blockers = [];
     if (recallAt3 < thresholds.recallAt3) blockers.push("recall_at_3_below_threshold");
     if (mrr < thresholds.mrr) blockers.push("mrr_below_threshold");
+    if (precisionAt3 < thresholds.precisionAt3) blockers.push("precision_at_3_below_threshold");
+    if (abstentionRate < thresholds.abstentionRate) blockers.push("abstention_rate_below_threshold");
+    if (falsePositiveResults > thresholds.maximumFalsePositiveResults) blockers.push("false_positive_result");
     if (crossScopeLeakage > thresholds.maximumCrossScopeLeakage) blockers.push("cross_scope_leakage");
     if (unsafeEgressViolations > thresholds.maximumUnsafeEgressViolations) blockers.push("unsafe_egress");
     if (forbiddenViolations > thresholds.maximumForbiddenViolations) blockers.push("forbidden_result");
     if (missingStages.length > 0) blockers.push("retrieval_stage_not_exercised");
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       phase: "clawlore-real-corpus-shadow-benchmark",
       evaluatedAt: new Date().toISOString(),
       status: blockers.length === 0 ? "pass" : "fail",
@@ -285,14 +385,22 @@ export async function evaluateRealCorpusShadow(input) {
       corpus: {
         setupRows: fixture.setup.length,
         questionCount: fixture.cases.length,
+        positiveCases,
+        negativeCases,
         canonicalSourceFiles: fixture.source_files.length,
-        embedding: "deterministic-hashed-token-v1",
+        embedding: embeddingLabel,
+        embeddingDimensions: vectorDimension,
+        liveProvider,
         retrieval: "MemoryRetriever/hybrid",
+        manualConfidencePolicy: "manual-recall-confidence-v1",
         scopeFiltered: true,
       },
       metrics: {
         RecallAt3: recallAt3,
+        PrecisionAt3: precisionAt3,
         MRR: mrr,
+        abstentionRate,
+        falsePositiveResults,
         crossScopeLeakage,
         unsafeEgressViolations,
         forbiddenViolations,
@@ -307,20 +415,60 @@ export async function evaluateRealCorpusShadow(input) {
       cases,
       decision: {
         shadowRetrievalQualityReady: blockers.length === 0,
+        liveProviderSemanticReady: liveProvider && blockers.length === 0,
         authorizesRuntimeChange: false,
         authorizesCandidatePromotion: false,
         authorizesAutomaticRecall: false,
         limitations: [
-          "offline_deterministic_embedding_does_not_replace_live_provider_semantic_validation",
+          ...(!liveProvider
+            ? ["offline_deterministic_embedding_does_not_replace_live_provider_semantic_validation"]
+            : []),
           "fixture_candidates_are_operator_annotated_and_not_promoted_memory",
         ],
         blockers,
       },
     };
   } finally {
-    await store.close();
+    await store?.close();
     await rm(root, { recursive: true, force: true });
   }
+}
+
+async function resolveEvaluationEmbedding(args) {
+  if (!args["embedding-provider"]) return undefined;
+  const provider = args["embedding-provider"];
+  assert.ok(["openai-compatible", "azure-openai", "minimax"].includes(provider),
+    "unsupported live embedding provider");
+  assert.ok(args["embedding-model"], "--embedding-model is required for live provider evaluation");
+  assert.ok(args["embedding-api-key-file"],
+    "--embedding-api-key-file is required for live provider evaluation");
+  const keyPath = await realpath(resolve(args["embedding-api-key-file"]));
+  const keyInfo = await stat(keyPath);
+  assertPrivateFile(keyInfo, "embedding API key file");
+  const apiKey = (await readFile(keyPath, "utf8")).trim();
+  assert.ok(apiKey && !/[\r\n]/u.test(apiKey), "embedding API key file must contain one non-empty line");
+  const dimensions = args["embedding-dimensions"] == null
+    ? undefined
+    : Number(args["embedding-dimensions"]);
+  if (dimensions !== undefined) {
+    assert.ok(Number.isSafeInteger(dimensions) && dimensions > 0,
+      "--embedding-dimensions must be a positive integer");
+  }
+  const embedder = createEmbedder({
+    provider,
+    apiKey,
+    model: args["embedding-model"],
+    baseURL: args["embedding-base-url"],
+    dimensions,
+  });
+  const probe = await embedder.test?.();
+  assert.equal(probe?.success, true, "live embedding provider probe failed");
+  return {
+    embedPassage: (text) => embedder.embedPassage(text),
+    embedQuery: (text) => embedder.embedQuery(text),
+    label: `live-provider:${provider}:${args["embedding-model"]}`,
+    liveProvider: true,
+  };
 }
 
 function parseArgs(argv) {
@@ -341,9 +489,11 @@ function parseArgs(argv) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  const embedding = await resolveEvaluationEmbedding(args);
   const report = await evaluateRealCorpusShadow({
     fixturePath: resolve(args.fixture),
     workspaceRoot: resolve(args.workspace),
+    embedding,
   });
   const receiptPath = resolve(args.receipt);
   await writeFile(receiptPath, `${JSON.stringify(report, null, 2)}\n`, { flag: "wx", mode: 0o600 });
@@ -351,7 +501,11 @@ async function main() {
   process.stdout.write(`${JSON.stringify({
     status: report.status,
     RecallAt3: report.metrics.RecallAt3,
+    PrecisionAt3: report.metrics.PrecisionAt3,
     MRR: report.metrics.MRR,
+    abstentionRate: report.metrics.abstentionRate,
+    falsePositiveResults: report.metrics.falsePositiveResults,
+    liveProviderSemanticReady: report.decision.liveProviderSemanticReady,
     crossScopeLeakage: report.metrics.crossScopeLeakage,
     unsafeEgressViolations: report.metrics.unsafeEgressViolations,
     blockers: report.decision.blockers,
@@ -363,4 +517,3 @@ const invoked = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).href :
 if (import.meta.url === invoked) {
   await main();
 }
-

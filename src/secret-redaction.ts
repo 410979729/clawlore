@@ -141,6 +141,14 @@ const SECRET_PATTERNS: SecretPattern[] = [
     re: /(?:(?<![A-Za-z0-9_])(?:api\s*key|apikey|secret|token)(?![A-Za-z0-9_])|密钥|令牌|访问令牌|凭证)\s*(?:是|为|[:：=])\s*["'`]?([A-Za-z0-9_./+=:@-]{8,})/giu,
     valueIndex: 1,
   },
+  {
+    // Users also paste an opaque value first and explain its purpose after it,
+    // e.g. "<value> 这是 BRAVE 的 API". Keep this provider-bounded to avoid
+    // treating every long commit/content digest near the word API as a key.
+    name: "provider-key-context-reversed",
+    re: /\b([A-Za-z0-9_./+=:@-]{20,})\b\s*(?:这(?:是|个)?|就是|为|is)?\s*(?:BRAVE|OPENAI|ANTHROPIC|GEMINI|GOOGLE|JINA|DASHSCOPE|QIANFAN|MINIMAX|VOLCENGINE|GITHUB|SLACK|TELEGRAM|DISCORD)(?:\s*的)?\s*(?:API(?:\s*KEY)?|密钥|令牌|TOKEN|凭证)\b/giu,
+    valueIndex: 1,
+  },
   { name: "openai-style-key", re: /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b/g },
   { name: "stripe-secret-key", re: /\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}\b/g },
   { name: "github-token", re: /\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{16,}\b/g },

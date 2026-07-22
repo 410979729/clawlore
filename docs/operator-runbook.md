@@ -136,6 +136,43 @@ promotion. Do not edit their metadata to manufacture `promotion_eligible` or
 reviewer approval. Until a separate actor/reason/evidence review receipt flow
 is implemented, treat them as non-promotable historical records.
 
+## Memory quality and secret-at-rest gate
+
+Manual `memory_recall` is an observation-only operation. It must not increment
+access counters, set `last_confirmed_use_at`, clear bad-recall feedback, or
+change suppression state. A release is rejected if the static guard or the
+read-only regression test detects any metadata patch from that tool. Positive
+feedback belongs to a separate, explicit governance action with actor and
+reason evidence.
+
+Before any rollout, run the source-checkout persisted-secret audit against
+every memory-bearing SQLite authority and companion database:
+
+```bash
+node scripts/clawlore-persisted-secret-audit.mjs \
+  --memory-db /private/live/memory.sqlite3 \
+  --conversation-db /private/live/conversation-memory.sqlite3 \
+  --receipt /private/receipts/persisted-secret-audit.json
+```
+
+The receipt is owner-only and content-free: it contains counts, pattern names,
+and path hashes, never row text, identifiers, or secret values. Any finding or
+non-private database mode is a deployment blocker. Rotate potentially exposed
+credentials outside ClawLore first, take a fresh encrypted snapshot, then use
+an independently reviewed exact-target purge that covers SQL truth, V2 current
+items and revisions, FTS/vector companions, Task Experience, digest records,
+and conversation memory. Re-run the audit after cleanup. Do not treat deletion
+from one mirror as complete remediation.
+
+Recall quality evidence must use a schema-v2 operator-annotated corpus with at
+least 30 positive cases and 10 no-answer cases. The gate records Recall@3,
+Precision@3, MRR, abstention rate, and false-positive results. An offline
+deterministic embedding run is reproducibility evidence only; it cannot set
+`liveProviderSemanticReady=true`. The final semantic gate must use the same
+live embedding provider through an owner-only key file and must pass the
+negative/no-answer thresholds before automatic recall or deployment can be
+approved.
+
 For V2 write operators, convergence, integrity, and foreign-key checks must
 pass before commit. If a committed run returns
 `CLAWLORE_V2_POST_COMMIT_RECOVERY_REQUIRED`, do not retry against the same

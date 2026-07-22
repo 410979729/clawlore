@@ -538,6 +538,16 @@ for (const marker of ["ok_with_fallback", "dead_letter", "digest-candidate", "op
   }
 }
 
+const manualRecallSource = await readFile("src/memory-recall-tools.ts", "utf8");
+if (manualRecallSource.includes(".patchMetadata(")) {
+  throw new Error("release gate failed: manual memory_recall must remain observation-only");
+}
+for (const marker of ["filterConfidentManualRecall", "readOnly: true", "feedbackApplied: false"]) {
+  if (!manualRecallSource.includes(marker)) {
+    throw new Error(`release gate failed: manual recall missing ${marker}`);
+  }
+}
+
 const retrieverSource = await readFile("src/retriever.ts", "utf8");
 for (const marker of ["relation_evidence", "applyRelationEvidence", "conflict_review_penalty", "freshness_debt_penalty"]) {
   if (!retrieverSource.includes(marker)) {
@@ -561,6 +571,25 @@ const productionBenchmarkSource = await readFile("scripts/production-retrieval-b
 for (const marker of ["MemoryStore", "MemoryRetriever", "retrieveWithTrace", "RecallAtK", "PrecisionAtK", "MRR", "nDCGAtK", "stageCoverage"]) {
   if (!productionBenchmarkSource.includes(marker)) {
     throw new Error(`release gate failed: production recall benchmark missing marker ${marker}`);
+  }
+}
+const realCorpusBenchmarkSource = await readFile("scripts/clawlore-real-corpus-shadow-benchmark.mjs", "utf8");
+for (const marker of [
+  "PrecisionAt3",
+  "abstentionRate",
+  "falsePositiveResults",
+  "expect_empty",
+  "liveProviderSemanticReady",
+  "filterConfidentManualRecall",
+]) {
+  if (!realCorpusBenchmarkSource.includes(marker)) {
+    throw new Error(`release gate failed: real-corpus benchmark missing ${marker}`);
+  }
+}
+const persistedSecretAuditSource = await readFile("scripts/clawlore-persisted-secret-audit.mjs", "utf8");
+for (const marker of ["readOnly: true", "emitsSecretValues: false", "persisted_secret_material_detected"]) {
+  if (!persistedSecretAuditSource.includes(marker)) {
+    throw new Error(`release gate failed: persisted-secret audit missing ${marker}`);
   }
 }
 const scalabilityBenchmarkSource = await readFile("scripts/scalability-benchmark.mjs", "utf8");

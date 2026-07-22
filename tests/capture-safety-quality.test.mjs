@@ -74,6 +74,25 @@ test("capture safety blocks common provider secrets and alphanumeric passwords",
   }
 });
 
+test("secret policy blocks opaque provider keys described after the value", () => {
+  const secret = "SyntheticBraveCredentialValue123456";
+  const samples = [
+    `${secret} 这是BRAVE的API`,
+    `${secret} is OpenAI API key`,
+  ];
+  for (const value of samples) {
+    assert.equal(findSecret(value)?.name, "provider-key-context-reversed", value);
+    assert.equal(evaluateCaptureSafety(value).allowed, false, value);
+    const redacted = redactKnownSecrets(value);
+    assert.equal(redacted.includes(secret), false, value);
+    assert.equal(redactKnownSecrets(redacted), redacted, value);
+  }
+  assert.equal(
+    containsSecret("commit 3d8224e30f434c60b6bcde0efe3810da850ab013 updates a generic API client"),
+    false,
+  );
+});
+
 test("secret policy blocks env-style credentials and credential-bearing HTTP headers", () => {
   const cases = [
     ["DB_PASSWORD=CorrectHorse77!", "env-secret-assignment"],

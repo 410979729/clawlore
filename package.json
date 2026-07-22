@@ -1,6 +1,6 @@
 {
   "name": "clawlore",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "ClawLore memory for OpenClaw: SQLite truth, scoped hybrid recall, conservative capture, and rebuildable vectors",
   "type": "module",
   "main": "dist/index.js",
@@ -71,6 +71,7 @@
     "rollout:clawlore-live-v2-write": "node scripts/clawlore-live-v2-write-rollout.mjs",
     "eval:clawlore-live-recall-parity": "node scripts/clawlore-live-recall-parity.mjs",
     "eval:clawlore-real-corpus-shadow": "node scripts/clawlore-real-corpus-shadow-benchmark.mjs",
+    "audit:clawlore-persisted-secrets": "node scripts/clawlore-persisted-secret-audit.mjs",
     "smoke:clawlore-ranking-promotion": "node scripts/clawlore-ranking-promotion-smoke.mjs",
     "smoke:clawlore-phase7g-controls": "node scripts/clawlore-phase7g-rollout-controls-smoke.mjs",
     "preview:clawlore-phase7g-live": "node scripts/clawlore-phase7g-live-preview.mjs",

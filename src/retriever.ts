@@ -24,12 +24,12 @@ import { TraceCollector, type RetrievalTrace } from "./retrieval-trace.js";
 import { RetrievalStatsCollector } from "./retrieval-stats.js";
 import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
 import { filterUnsafeMemoryResults, memoryTextRequiresLocalProcessing, redactMemoryTextForOutput } from "./memory-egress-policy.js";
-
+import type { ManualRecallConfidenceConfig } from "./manual-recall-confidence.js";
 // ============================================================================
 // Types & Configuration
 // ============================================================================
 
-export interface RetrievalConfig {
+export interface RetrievalConfig extends ManualRecallConfidenceConfig {
   mode: "hybrid" | "vector";
   vectorWeight: number;
   bm25Weight: number;

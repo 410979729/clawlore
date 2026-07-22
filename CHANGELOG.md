@@ -4,6 +4,31 @@
 
 No changes yet.
 
+## 1.2.2 - 2026-07-22
+
+- Made `memory_recall` observation-only. Retrieval no longer increments access
+  counters, marks a result as confirmed use, clears bad-recall feedback, or
+  changes suppression state; only an explicit governance action may confirm a
+  memory.
+- Added a confidence/abstention policy for manual recall. Weak vector-only
+  matches are rejected unless one high-confidence semantic winner is clearly
+  separated, while lexical evidence follows its own explicit threshold.
+- Upgraded the real-corpus gate to schema v2 with mandatory no-answer cases,
+  Precision@3, abstention rate, and false-positive limits. It supports an
+  owner-only live-provider key file while preserving the deterministic offline
+  compatibility run as non-live evidence.
+- Extended the canonical secret policy to provider-bounded descriptions where
+  an opaque credential appears before its API/key explanation.
+- Added a read-only persisted-secret audit for SQL truth, V2 revisions, task
+  episodes, nightly records, and conversation memory. Receipts contain counts,
+  pattern names, and path hashes only; memory text and secret values are never
+  emitted.
+- Added release guards and regression tests preventing hidden recall feedback,
+  missing negative-corpus metrics, or omission of the persisted-secret audit.
+- Preserved governance, the explicit feedback journal, operator dashboard,
+  golden and hard-delete protections, SQL authority, OAuth session, Windows ACL
+  hardening, and the packed-tarball release gate from 1.2.1.
+
 ## 1.2.1 - 2026-07-20
 
 - Preserved verification, failure, safety, cleanup, and evidence sections under

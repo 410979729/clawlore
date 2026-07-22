@@ -37,7 +37,7 @@ const ROOT_MODULES_BY_LAYER = {
     "auto-capture-policy.ts", "auto-recall-query.ts", "auto-recall-session-boundary.ts", "bounded-ttl-map.ts", "capture-safety.ts",
     "decay-engine.ts", "experience-models.ts", "experience-persistence-policy.ts", "experience-playbook-successor-policy.ts", "experience-schemas.ts",
     "extraction-prompts.ts", "lifecycle-metadata.ts", "memory-categories.ts", "memory-egress-policy.ts", "memory-entry-write-policy.ts", "memory-merge-policy.ts", "memory-metadata-policy.ts", "noise-filter.ts",
-    "noise-prototypes.ts", "preference-slots.ts", "product-identity.ts", "self-improvement-content-policy.ts",
+    "manual-recall-confidence.ts", "noise-prototypes.ts", "preference-slots.ts", "product-identity.ts", "self-improvement-content-policy.ts",
     "reflection-contracts.ts", "reflection-mapped-metadata.ts", "reflection-metadata.ts", "reflection-ranking.ts",
     "principal-write-boundary.ts", "reflection-slices.ts", "runtime-accessibility-diagnostic.ts", "runtime-memory-boundary.ts", "runtime-scope-metadata.ts",
     "diagnostic-redaction.ts", "llm-failure-diagnostic.ts", "provider-output-policy.ts", "scope-policy.ts", "secret-redaction.ts", "secret-structured-text.ts", "smart-metadata.ts",

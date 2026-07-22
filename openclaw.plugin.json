@@ -5,7 +5,7 @@
   ],
   "name": "ClawLore",
   "description": "ClawLore memory for OpenClaw: SQLite truth, scoped hybrid recall, conservative capture, and rebuildable vectors",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "kind": "memory",
   "contracts": {
     "tools": [
@@ -1173,6 +1173,34 @@
             "default": 0.35,
             "description": "Hard cutoff after all scoring stages. Results below this score are discarded."
           },
+          "manualRecallMinScore": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.55,
+            "description": "Final-score floor for the read-only manual memory_recall tool."
+          },
+          "manualRecallLexicalMinScore": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.05,
+            "description": "Minimum BM25 evidence that lets a manual recall result pass the abstention gate."
+          },
+          "manualRecallVectorOnlyMinScore": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.85,
+            "description": "Minimum semantic score for a manual result with no lexical evidence."
+          },
+          "manualRecallMinimumTopGap": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.08,
+            "description": "Required score gap between the first and second result for vector-only manual recall."
+          },
           "timeDecayHalfLifeDays": {
             "type": "number",
             "minimum": 0,
@@ -2163,6 +2191,26 @@
     "retrieval.hardMinScore": {
       "label": "Hard Minimum Score",
       "help": "Discard results below this score after all scoring stages. Higher = fewer but more relevant results.",
+      "advanced": true
+    },
+    "retrieval.manualRecallMinScore": {
+      "label": "Manual Recall Minimum Score",
+      "help": "Final-score floor for read-only manual recall before a result can be returned.",
+      "advanced": true
+    },
+    "retrieval.manualRecallLexicalMinScore": {
+      "label": "Manual Recall Lexical Evidence",
+      "help": "Minimum BM25 evidence accepted by the manual recall abstention gate.",
+      "advanced": true
+    },
+    "retrieval.manualRecallVectorOnlyMinScore": {
+      "label": "Manual Recall Semantic Evidence",
+      "help": "Semantic score required when a manual result has no lexical evidence.",
+      "advanced": true
+    },
+    "retrieval.manualRecallMinimumTopGap": {
+      "label": "Manual Recall Top Gap",
+      "help": "Minimum first-versus-second score gap for vector-only manual results.",
       "advanced": true
     },
     "retrieval.timeDecayHalfLifeDays": {

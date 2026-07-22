@@ -44,19 +44,29 @@ test("real-corpus shadow benchmark is source-bound, content-free, and enforces R
       });
     }
     const fixture = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       kind: "operator-annotated-real-corpus",
       name: "fixture-real-corpus",
       source_files: [{ path: "source.md", sha256: hash(source) }],
       thresholds: {
         recall_at_3: 0.9,
         mrr: 0.85,
+        precision_at_3: 0.8,
+        abstention_rate: 0.9,
+        maximum_false_positive_results: 0,
         maximum_cross_scope_leakage: 0,
         maximum_unsafe_egress_violations: 0,
         maximum_forbidden_violations: 0,
       },
+      retrieval: {
+        manual_recall_min_score: 0.4,
+        manual_recall_lexical_min_score: 0.05,
+        manual_recall_vector_only_min_score: 0.65,
+        manual_recall_minimum_top_gap: 0.05,
+      },
       setup,
-      cases: Array.from({ length: 30 }, (_, index) => ({
+      cases: [
+        ...Array.from({ length: 30 }, (_, index) => ({
         name: `release-verification-${index + 1}`,
         query: "发布前要做哪些测试构建和健康验证？",
         annotated: true,
@@ -65,26 +75,48 @@ test("real-corpus shadow benchmark is source-bound, content-free, and enforces R
         forbidden_ids: ["decoy-other-scope"],
         scope_filter: ["user:fixture"],
         limit: 3,
-      })),
+        })),
+        ...Array.from({ length: 10 }, (_, index) => ({
+          name: `no-answer-${index + 1}`,
+          query: `火星温室第 ${index + 1} 号的虚构紫色苔藓灌溉参数是什么？`,
+          annotated: true,
+          annotation: "No canonical source contains this fictional subject, so retrieval must abstain.",
+          expect_empty: true,
+          expected_ids: [],
+          forbidden_ids: [],
+          scope_filter: ["user:fixture"],
+          limit: 3,
+        })),
+      ],
     };
     const fixturePath = join(root, "fixture.json");
     await writeFile(fixturePath, `${JSON.stringify(fixture)}\n`, { mode: 0o600 });
     await chmod(fixturePath, 0o600);
 
     const report = await evaluateRealCorpusShadow({ fixturePath, workspaceRoot: root });
-    assert.equal(report.status, "pass");
+    assert.equal(report.status, "pass", JSON.stringify({
+      metrics: report.metrics,
+      blockers: report.decision.blockers,
+      positive: report.cases[0],
+      negative: report.cases.at(-1),
+    }));
     assert.equal(report.metrics.RecallAt3, 1);
+    assert.equal(report.metrics.PrecisionAt3, 1);
     assert.equal(report.metrics.MRR, 1);
+    assert.equal(report.metrics.abstentionRate, 1);
+    assert.equal(report.metrics.falsePositiveResults, 0);
     assert.equal(report.metrics.crossScopeLeakage, 0);
     assert.equal(report.metrics.unsafeEgressViolations, 0);
     assert.equal(report.metrics.forbiddenViolations, 0);
-    assert.equal(report.cases.length, 30);
+    assert.equal(report.cases.length, 40);
+    assert.equal(report.corpus.positiveCases, 30);
+    assert.equal(report.corpus.negativeCases, 10);
     const serialized = JSON.stringify(report);
     assert.equal(serialized.includes("发布前要做哪些"), false);
     assert.equal(serialized.includes("expected-release-rule"), false);
     assert.equal(report.decision.authorizesAutomaticRecall, false);
+    assert.equal(report.decision.liveProviderSemanticReady, false);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
-

@@ -10,6 +10,7 @@ import { redactMemoryTextForOutput } from "./memory-egress-policy.js";
 import {
   parseSmartMetadata
 } from "./smart-metadata.js";
+import { filterConfidentManualRecall } from "./manual-recall-confidence.js";
 import {
   filterUserMdExclusiveRecallResults
 } from "./workspace-boundary.js";
@@ -40,7 +41,7 @@ export function registerMemoryRecallTool(
         name: "memory_recall",
         label: "Memory Recall",
         description:
-          "Search through long-term memories using hybrid retrieval (vector + keyword search). Use when you need context about user preferences, past decisions, or previously discussed topics.",
+          "Read-only search through long-term memories using hybrid retrieval (vector + keyword search). Retrieval never confirms, rewards, or mutates a memory.",
         parameters: Type.Object({
           query: Type.String({
             description: "Search query for finding relevant memories",
@@ -116,38 +117,34 @@ export function registerMemoryRecallTool(
               }
             }
 
-            const results = filterUserMdExclusiveRecallResults(await retrieveWithRetry(runtimeContext.retriever, {
+            const candidates = filterUserMdExclusiveRecallResults(await retrieveWithRetry(runtimeContext.retriever, {
               query,
               limit: safeLimit,
               scopeFilter,
               category,
               source: "manual",
             }), runtimeContext.workspaceBoundary);
+            const confidence = filterConfidentManualRecall(
+              candidates,
+              runtimeContext.retriever.getConfig(),
+            );
+            const results = confidence.results;
 
             if (results.length === 0) {
               return {
                 content: [{ type: "text", text: "No relevant memories found." }],
-                details: { count: 0, query: redactMemoryTextForOutput(query), scopes: scopeFilter },
+                details: {
+                  count: 0,
+                  candidatesEvaluated: candidates.length,
+                  confidenceRejected: confidence.rejectedCount,
+                  confidencePolicy: confidence.policy,
+                  query: redactMemoryTextForOutput(query),
+                  scopes: scopeFilter,
+                  readOnly: true,
+                  feedbackApplied: false,
+                },
               };
             }
-
-            const now = Date.now();
-            await Promise.allSettled(
-              results.map((result) => {
-                const meta = parseSmartMetadata(result.entry.metadata, result.entry);
-                return runtimeContext.store.patchMetadata(
-                  result.entry.id,
-                  {
-                    access_count: meta.access_count + 1,
-                    last_accessed_at: now,
-                    last_confirmed_use_at: now,
-                    bad_recall_count: 0,
-                    suppressed_until_turn: 0,
-                  },
-                  scopeFilter,
-                );
-              }),
-            );
 
             const text = results
               .map((r, i) => {
@@ -186,6 +183,10 @@ export function registerMemoryRecallTool(
                 query: redactMemoryTextForOutput(query),
                 scopes: scopeFilter,
                 retrievalMode: runtimeContext.retriever.getConfig().mode,
+                confidenceRejected: confidence.rejectedCount,
+                confidencePolicy: confidence.policy,
+                readOnly: true,
+                feedbackApplied: false,
               },
             };
           } catch (error) {
