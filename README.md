@@ -116,7 +116,10 @@ openclaw clawlore governance audit-coverage --json
 openclaw clawlore journal recovery --dry-run
 openclaw clawlore graph hygiene --dry-run
 openclaw clawlore digest report --json
-openclaw clawlore digest run --dry-run --json
+openclaw clawlore digest run --principal-key <platform:account:principal> --dry-run --json
+openclaw clawlore digest run --transcript-db /private/openclaw-agent.sqlite \
+  --transcript-session-id <exact-session-id> \
+  --principal-key <platform:account:principal> --dry-run --json
 openclaw clawlore digest recovery --dry-run --json
 openclaw clawlore forgetting report --json
 openclaw clawlore forgetting run --dry-run
@@ -131,6 +134,14 @@ openclaw clawlore playbooks supersede --id <id> --superseded-by <replacement-id>
 ```
 
 Mutating maintenance routes remain explicit. `governance cleanup`, `journal recovery`, `graph hygiene`, `forgetting run`, and `experience promote` preview by default and require `--apply` to write. `candidates apply` and playbook lifecycle subcommands are explicit action routes; pass `--dry-run` to `candidates apply` when only a review is wanted.
+
+SQLite transcript intake is exact-session and read-only. The database and any
+existing WAL/SHM companions must be owner-only regular files, the target
+principal or private session identity must be explicit, and a window with no
+eligible user/assistant events fails instead of reporting a false-green run.
+Tool arguments, tool-result bodies, thinking, custom events, and raw session
+identifiers are not admitted. Transcript chunks remain raw evidence; only an
+explicit `--apply` can create reviewable digest candidates.
 
 ## Legacy Compatibility
 

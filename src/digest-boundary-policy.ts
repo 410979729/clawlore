@@ -3,9 +3,26 @@ import { sanitizeCaptureText } from "./capture-safety.js";
 import { redactMemoryTextForOutput } from "./memory-egress-policy.js";
 import { normalizeTruthIdentifier } from "./v2/domain/truth-write-policy.js";
 
-export type DigestSourceTypeBoundary = "explicit" | "reflection_event" | "memory_truth";
+export type DigestSourceTypeBoundary =
+  | "explicit"
+  | "reflection_event"
+  | "memory_truth"
+  | "openclaw_sqlite_transcript";
 
-const SOURCE_TYPES = new Set<DigestSourceTypeBoundary>(["explicit", "reflection_event", "memory_truth"]);
+export interface DigestInputChunk {
+  id: string;
+  source_type: DigestSourceTypeBoundary;
+  source_id: string;
+  scope: string;
+  text: string;
+}
+
+const SOURCE_TYPES = new Set<DigestSourceTypeBoundary>([
+  "explicit",
+  "reflection_event",
+  "memory_truth",
+  "openclaw_sqlite_transcript",
+]);
 const ABSOLUTE_PATH = /(?:^|\s)(?:~[\\/]|\/[A-Za-z0-9_.-]+\/|[A-Za-z]:[\\/])/u;
 const DURABLE_IDENTIFIER = /^[\p{L}\p{N}._:@/-]+$/u;
 
@@ -45,6 +62,32 @@ export function requireDigestSourceType(value: unknown, fallback: DigestSourceTy
     throw new Error("digest source type is unsupported");
   }
   return sourceType as DigestSourceTypeBoundary;
+}
+
+export function normalizeDigestInputChunks(
+  inputChunks: DigestInputChunk[],
+  scope: string,
+  maxChunks: number,
+): DigestInputChunk[] {
+  if (inputChunks.length > maxChunks) throw new Error("digest inputChunks exceed maxChunks");
+  const normalized = inputChunks.map((chunk) => {
+    const chunkScope = requireDigestBoundaryIdentifier(chunk.scope, "digest chunk scope", "");
+    if (chunkScope !== scope) throw new Error("digest chunk scope does not match the target scope");
+    if (typeof chunk.text !== "string" || !chunk.text.trim()) {
+      throw new Error("digest chunk text is required");
+    }
+    return {
+      id: digestSourceIdentifier(chunk.id, "chunk"),
+      source_type: requireDigestSourceType(chunk.source_type, "openclaw_sqlite_transcript"),
+      source_id: digestSourceIdentifier(chunk.source_id, "source"),
+      scope: chunkScope,
+      text: chunk.text,
+    };
+  });
+  if (new Set(normalized.map((chunk) => chunk.source_type)).size > 1) {
+    throw new Error("digest inputChunks must use one source type");
+  }
+  return normalized;
 }
 
 export function digestLedgerRowForOutput<T extends Record<string, unknown>>(row: T): T {

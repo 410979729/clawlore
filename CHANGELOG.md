@@ -13,6 +13,10 @@ No changes yet.
 - Added a confidence/abstention policy for manual recall. Weak vector-only
   matches are rejected unless one high-confidence semantic winner is clearly
   separated, while lexical evidence follows its own explicit threshold.
+- Replaced untrusted BM25-as-relevance with query-to-memory lexical evidence
+  over a bounded candidate pool, removed the remaining retriever access-tracker
+  mutation path, and preserved durable post-operation rules in the noise
+  filter.
 - Upgraded the real-corpus gate to schema v2 with mandatory no-answer cases,
   Precision@3, abstention rate, and false-positive limits. It supports an
   owner-only live-provider key file while preserving the deterministic offline
@@ -23,6 +27,14 @@ No changes yet.
   episodes, nightly records, and conversation memory. Receipts contain counts,
   pattern names, and path hashes only; memory text and secret values are never
   emitted.
+- Added an exact-session, owner-only, read-only OpenClaw SQLite transcript
+  source for digest dry-runs. It admits only user/assistant text and assistant
+  tool names, excludes arguments/results/thinking/custom events, and treats an
+  empty eligible window as an error instead of a successful nightly run.
+- Widened the deterministic compatibility embedding to reduce fixture hash
+  collisions; the 40-positive plus 10-no-answer gate now passes Recall@3,
+  Precision@3, MRR, abstention, false-positive, scope, and egress checks without
+  weakening its thresholds.
 - Added release guards and regression tests preventing hidden recall feedback,
   missing negative-corpus metrics, or omission of the persisted-secret audit.
 - Preserved governance, the explicit feedback journal, operator dashboard,

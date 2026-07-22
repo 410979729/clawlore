@@ -1178,14 +1178,14 @@
             "minimum": 0,
             "maximum": 1,
             "default": 0.55,
-            "description": "Final-score floor for the read-only manual memory_recall tool."
+            "description": "Final-score floor for semantic-only manual recall fallback; query-to-text lexical evidence is evaluated separately."
           },
           "manualRecallLexicalMinScore": {
             "type": "number",
             "minimum": 0,
             "maximum": 1,
             "default": 0.05,
-            "description": "Minimum BM25 evidence that lets a manual recall result pass the abstention gate."
+            "description": "Minimum query-to-memory lexical coverage that lets a manual recall result pass the abstention gate."
           },
           "manualRecallVectorOnlyMinScore": {
             "type": "number",
@@ -2195,12 +2195,12 @@
     },
     "retrieval.manualRecallMinScore": {
       "label": "Manual Recall Minimum Score",
-      "help": "Final-score floor for read-only manual recall before a result can be returned.",
+      "help": "Final-score floor for semantic-only manual recall fallback; lexical evidence has a separate gate.",
       "advanced": true
     },
     "retrieval.manualRecallLexicalMinScore": {
       "label": "Manual Recall Lexical Evidence",
-      "help": "Minimum BM25 evidence accepted by the manual recall abstention gate.",
+      "help": "Minimum query-to-memory lexical coverage accepted by the manual recall abstention gate.",
       "advanced": true
     },
     "retrieval.manualRecallVectorOnlyMinScore": {

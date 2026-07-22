@@ -2,6 +2,29 @@
 
 Updated: 2026-07-22
 
+## 2026-07-22 P7 quality and SQLite transcript correction
+
+- [x] Withdraw the old P5 deployment-readiness claim and supersede the P6
+      `d76aec294c376863aca99c4d813085f011c6b2c1` candidate. The earlier
+      1.2.1/`9d16...` line is retained below only as historical chronology.
+- [x] Remove both ordinary-recall reinforcement paths: the tool does not patch
+      metadata, and the retriever no longer owns or calls an access tracker for
+      manual results. Only explicit journaled governance feedback may confirm
+      use.
+- [x] Replace BM25-as-relevance with query-to-memory lexical evidence over a
+      bounded pool, preserve durable post-operation rules in the noise filter,
+      and pass the unchanged 40-positive plus 10-no-answer gate at Recall@3,
+      Precision@3, MRR, and abstention 1.0 with 0 false positives, 0 cross-scope
+      leakage, and 0 unsafe egress.
+- [x] Add an owner-only, exact-session, read-only SQLite transcript source for
+      the digest CLI. It excludes arguments/results/thinking/custom events,
+      fails on empty eligible input, remains dry-run by default, and does not
+      change the active legacy cron.
+- [ ] Keep production no-go until the content-free persisted-secret audit is
+      clean, credentials are rotated, both bypass write crons are disabled,
+      `autoBackup` is false, a live-provider 40+10 gate passes, and controlled
+      authorization permits snapshot/purge/deploy/restart work.
+
 ## 2026-07-21 memory-quality incident — P0/P1/P2 handoff
 
 - [x] Apply the reversible P0 runtime stop: disable auto-recall, auto-capture,

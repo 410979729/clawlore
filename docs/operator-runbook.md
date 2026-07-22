@@ -173,6 +173,26 @@ live embedding provider through an owner-only key file and must pass the
 negative/no-answer thresholds before automatic recall or deployment can be
 approved.
 
+The supported transcript source is the current OpenClaw SQLite transcript
+store, not legacy JSONL. Use one exact session and an explicit target identity:
+
+```bash
+openclaw clawlore digest run \
+  --transcript-db /private/openclaw-agent.sqlite \
+  --transcript-session-id <exact-session-id> \
+  --principal-key <platform:account:principal> \
+  --transcript-since-ms <inclusive-epoch-ms> \
+  --dry-run --json
+```
+
+The reader opens SQLite read-only/query-only and requires owner-only database,
+WAL, and SHM files. It admits only user/assistant text and assistant tool names;
+tool arguments, tool results, thinking, custom events, session keys, and raw
+session identifiers are excluded. An empty eligible window is an error. The
+default remains dry-run, and transcript evidence never becomes durable truth
+without the existing explicit candidate-review and apply boundaries. Shipping
+this reader does not modify or authorize an existing cron job.
+
 For V2 write operators, convergence, integrity, and foreign-key checks must
 pass before commit. If a committed run returns
 `CLAWLORE_V2_POST_COMMIT_RECOVERY_REQUIRED`, do not retry against the same

@@ -8,11 +8,17 @@ import { pathToFileURL } from "node:url";
 import { performance } from "node:perf_hooks";
 import { evaluateCaptureSafety } from "../dist/src/capture-safety.js";
 import { createEmbedder } from "../dist/src/embedder.js";
-import { filterConfidentManualRecall } from "../dist/src/manual-recall-confidence.js";
+import {
+  expandedManualRecallCandidateLimit,
+  filterConfidentManualRecall,
+  MANUAL_RECALL_CONFIDENCE_POLICY,
+} from "../dist/src/manual-recall-confidence.js";
 import { MemoryStore } from "../dist/src/store.js";
 import { DEFAULT_RETRIEVAL_CONFIG, MemoryRetriever } from "../dist/src/retriever.js";
 
-const VECTOR_DIMENSION = 96;
+// A wider deterministic vector keeps the offline replay stable without the
+// collision rate of the old 96-bucket diagnostic embedding.
+const VECTOR_DIMENSION = 384;
 const MAX_FIXTURE_BYTES = 5 * 1024 * 1024;
 const REQUIRED_STAGES = [
   "parallel_search",
@@ -278,13 +284,17 @@ export async function evaluateRealCorpusShadow(input) {
       const started = performance.now();
       const { results: candidates, trace } = await retriever.retrieveWithTrace({
         query: testCase.query,
-        limit: 3,
+        limit: expandedManualRecallCandidateLimit(3),
         scopeFilter: testCase.scope_filter,
         source: "manual",
       });
       latencies.push(performance.now() - started);
       for (const stage of trace.stages) stages.add(stage.name);
-      const confidence = filterConfidentManualRecall(candidates, retrievalConfig);
+      const confidence = filterConfidentManualRecall(
+        candidates,
+        retrievalConfig,
+        { query: testCase.query, limit: 3 },
+      );
       const results = confidence.results;
       const ids = results.map((result) => result.entry.id);
       const expectsEmpty = testCase.expect_empty === true;
@@ -392,7 +402,7 @@ export async function evaluateRealCorpusShadow(input) {
         embeddingDimensions: vectorDimension,
         liveProvider,
         retrieval: "MemoryRetriever/hybrid",
-        manualConfidencePolicy: "manual-recall-confidence-v1",
+        manualConfidencePolicy: MANUAL_RECALL_CONFIDENCE_POLICY,
         scopeFiltered: true,
       },
       metrics: {

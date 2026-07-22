@@ -6,7 +6,7 @@ import { Type } from "@sinclair/typebox";
 import { getDisplayCategoryTag } from "./reflection-metadata.js";
 import { redactMemoryTextForOutput } from "./memory-egress-policy.js";
 import { parseSmartMetadata } from "./smart-metadata.js";
-import { filterConfidentManualRecall } from "./manual-recall-confidence.js";
+import { expandedManualRecallCandidateLimit, filterConfidentManualRecall, } from "./manual-recall-confidence.js";
 import { filterUserMdExclusiveRecallResults } from "./workspace-boundary.js";
 import { clampInt, MEMORY_CATEGORIES, normalizeInlineText, requireRuntimeAgentId, requireRuntimeMemoryAccess, resolveToolContext, retrieveWithRetry, safeToolFailure, sanitizeMemoryForSerialization, stringEnum, truncateText } from "./tool-runtime-policy.js";
 export function registerMemoryRecallTool(api, context) {
@@ -69,12 +69,12 @@ export function registerMemoryRecallTool(api, context) {
                     }
                     const candidates = filterUserMdExclusiveRecallResults(await retrieveWithRetry(runtimeContext.retriever, {
                         query,
-                        limit: safeLimit,
+                        limit: expandedManualRecallCandidateLimit(safeLimit),
                         scopeFilter,
                         category,
                         source: "manual",
                     }), runtimeContext.workspaceBoundary);
-                    const confidence = filterConfidentManualRecall(candidates, runtimeContext.retriever.getConfig());
+                    const confidence = filterConfidentManualRecall(candidates, runtimeContext.retriever.getConfig(), { query, limit: safeLimit });
                     const results = confidence.results;
                     if (results.length === 0) {
                         return {

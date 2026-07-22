@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { evaluateCaptureSafety, sanitizeCaptureText } from "./capture-safety.js";
 import { isNoise } from "./noise-filter.js";
 import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
-import { digestLedgerRowForOutput, digestPreviewFor as previewFor, digestSafeJson as safeJson, digestSourceIdentifier, parseDigestJsonObject as safeParseJsonObject, requireDigestBoundaryIdentifier, requireDigestSourceType, } from "./digest-boundary-policy.js";
+import { digestLedgerRowForOutput, digestPreviewFor as previewFor, digestSafeJson as safeJson, digestSourceIdentifier, normalizeDigestInputChunks, parseDigestJsonObject as safeParseJsonObject, requireDigestBoundaryIdentifier, requireDigestSourceType, } from "./digest-boundary-policy.js";
 import { isMemoryEntrySafeForEgress } from "./memory-egress-policy.js";
 function nowIso() {
     return new Date().toISOString();
@@ -125,6 +125,12 @@ function collectReflectionChunks(db, scope, maxChunks) {
 export function collectDigestChunks(db, options = {}) {
     const scope = requireDigestBoundaryIdentifier(options.scope, "digest scope", "");
     const maxChunks = Math.max(1, Math.min(200, Math.trunc(options.maxChunks ?? 25)));
+    if (options.inputChunks !== undefined) {
+        if (typeof options.inputText === "string" && options.inputText.trim()) {
+            throw new Error("digest inputText and inputChunks are mutually exclusive");
+        }
+        return normalizeDigestInputChunks(options.inputChunks, scope, maxChunks);
+    }
     if (typeof options.inputText === "string" && options.inputText.trim()) {
         return [explicitChunk({
                 text: options.inputText,

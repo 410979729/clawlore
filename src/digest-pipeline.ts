@@ -5,14 +5,17 @@ import type { LlmClient } from "./llm-client.js";
 import type { MemoryEntry, MemoryStore } from "./store.js";
 import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
 import {
+  type DigestInputChunk,
   digestLedgerRowForOutput,
   digestPreviewFor as previewFor,
   digestSafeJson as safeJson,
   digestSourceIdentifier,
+  normalizeDigestInputChunks,
   parseDigestJsonObject as safeParseJsonObject,
   requireDigestBoundaryIdentifier,
   requireDigestSourceType,
 } from "./digest-boundary-policy.js";
+export type { DigestInputChunk } from "./digest-boundary-policy.js";
 import { isMemoryEntrySafeForEgress } from "./memory-egress-policy.js";
 
 type DatabaseSync = any;
@@ -56,20 +59,13 @@ export interface DigestCandidate {
   evidence: string;
 }
 
-export interface DigestInputChunk {
-  id: string;
-  source_type: "explicit" | "reflection_event" | "memory_truth";
-  source_id: string;
-  scope: string;
-  text: string;
-}
-
 export interface DigestRunOptions {
   apply?: boolean;
   scope?: string;
   inputText?: string;
   sourceId?: string;
   sourceType?: DigestInputChunk["source_type"];
+  inputChunks?: DigestInputChunk[];
   maxChunks?: number;
   useLlm?: boolean;
   llmFallback?: boolean;
@@ -252,6 +248,12 @@ function collectReflectionChunks(db: DatabaseSync, scope: string, maxChunks: num
 export function collectDigestChunks(db: DatabaseSync, options: DigestRunOptions = {}): DigestInputChunk[] {
   const scope = requireDigestBoundaryIdentifier(options.scope, "digest scope", "");
   const maxChunks = Math.max(1, Math.min(200, Math.trunc(options.maxChunks ?? 25)));
+  if (options.inputChunks !== undefined) {
+    if (typeof options.inputText === "string" && options.inputText.trim()) {
+      throw new Error("digest inputText and inputChunks are mutually exclusive");
+    }
+    return normalizeDigestInputChunks(options.inputChunks, scope, maxChunks);
+  }
   if (typeof options.inputText === "string" && options.inputText.trim()) {
     return [explicitChunk({
       text: options.inputText,

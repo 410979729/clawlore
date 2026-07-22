@@ -211,17 +211,12 @@ export class MemoryRetriever {
     embedder;
     config;
     decayEngine;
-    accessTracker = null;
-    tierManager = null;
     _statsCollector = null;
     constructor(store, embedder, config = DEFAULT_RETRIEVAL_CONFIG, decayEngine = null) {
         this.store = store;
         this.embedder = embedder;
         this.config = config;
         this.decayEngine = decayEngine;
-    }
-    setAccessTracker(tracker) {
-        this.accessTracker = tracker;
     }
     /** Enable aggregate retrieval statistics collection. */
     setStatsCollector(collector) {
@@ -270,9 +265,6 @@ export class MemoryRetriever {
             const finalTrace = trace.finalize(redactMemoryTextForOutput(query), mode);
             this._statsCollector.recordQuery(finalTrace, source || "unknown");
         }
-        if (this.accessTracker && source === "manual" && results.length > 0) {
-            this.accessTracker.recordAccess(results.map((r) => r.entry.id));
-        }
         return results;
     }
     /**
@@ -307,9 +299,6 @@ export class MemoryRetriever {
         const finalTrace = trace.finalize(redactMemoryTextForOutput(query), mode);
         if (this._statsCollector) {
             this._statsCollector.recordQuery(finalTrace, source || "debug");
-        }
-        if (this.accessTracker && source === "manual" && results.length > 0) {
-            this.accessTracker.recordAccess(results.map((r) => r.entry.id));
         }
         return { results, trace: finalTrace };
     }
@@ -907,55 +896,6 @@ export class MemoryRetriever {
         this.decayEngine.applySearchBoost(scored, now);
         const boosted = pairs.map((p, i) => ({ ...p.r, score: scored[i].score }));
         return boosted.sort((a, b) => b.score - a.score);
-    }
-    /**
-     * Record access stats (access_count, last_accessed_at) and apply tier
-     * promotion/demotion for a small number of top results.
-     *
-     * Note: this writes back to LanceDB via delete+readd; keep it bounded.
-     */
-    async recordAccessAndMaybeTransition(results) {
-        if (!this.decayEngine && !this.tierManager)
-            return;
-        const now = Date.now();
-        const toUpdate = results.slice(0, 3);
-        for (const r of toUpdate) {
-            const { memory, meta } = getDecayableFromEntry(r.entry);
-            // Update access stats in-memory first
-            const nextAccess = memory.accessCount + 1;
-            meta.access_count = nextAccess;
-            meta.last_accessed_at = now;
-            if (meta.created_at === undefined && meta.createdAt === undefined) {
-                meta.created_at = memory.createdAt;
-            }
-            if (meta.tier === undefined) {
-                meta.tier = memory.tier;
-            }
-            if (meta.confidence === undefined) {
-                meta.confidence = memory.confidence;
-            }
-            const updatedMemory = {
-                ...memory,
-                accessCount: nextAccess,
-                lastAccessedAt: now,
-            };
-            // Tier transition (optional)
-            if (this.decayEngine && this.tierManager) {
-                const ds = this.decayEngine.score(updatedMemory, now);
-                const transition = this.tierManager.evaluate(updatedMemory, ds, now);
-                if (transition) {
-                    meta.tier = transition.toTier;
-                }
-            }
-            try {
-                await this.store.update(r.entry.id, {
-                    metadata: JSON.stringify(meta),
-                });
-            }
-            catch {
-                // best-effort: ignore
-            }
-        }
     }
     /**
      * MMR-inspired diversity filter: greedily select results that are both

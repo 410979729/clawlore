@@ -548,10 +548,49 @@ for (const marker of ["filterConfidentManualRecall", "readOnly: true", "feedback
   }
 }
 
+const manualRecallConfidenceSource = await readFile("src/manual-recall-confidence.ts", "utf8");
+for (const marker of [
+  "manual-recall-confidence-v2",
+  "rankManualRecallLexicalEvidence",
+  "expandedManualRecallCandidateLimit",
+]) {
+  if (!manualRecallConfidenceSource.includes(marker)) {
+    throw new Error(`release gate failed: manual recall confidence missing ${marker}`);
+  }
+}
+
 const retrieverSource = await readFile("src/retriever.ts", "utf8");
 for (const marker of ["relation_evidence", "applyRelationEvidence", "conflict_review_penalty", "freshness_debt_penalty"]) {
   if (!retrieverSource.includes(marker)) {
     throw new Error(`release gate failed: retriever missing relation-aware marker ${marker}`);
+  }
+}
+for (const forbidden of [".recordAccess(", "setAccessTracker("]) {
+  if (retrieverSource.includes(forbidden)) {
+    throw new Error(`release gate failed: retriever contains hidden recall reinforcement path ${forbidden}`);
+  }
+}
+const transcriptSource = await readFile(
+  "src/v2/storage/openclaw-sqlite-transcript-source.ts",
+  "utf8",
+);
+for (const marker of [
+  "readOnly: true",
+  "PRAGMA query_only=ON",
+  "exactSession: true",
+  "toolResultBodiesEligible: false",
+  "toolArgumentsEligible: false",
+  "thinkingEligible: false",
+  "no eligible transcript events",
+]) {
+  if (!transcriptSource.includes(marker)) {
+    throw new Error(`release gate failed: SQLite transcript source missing ${marker}`);
+  }
+}
+const governanceCliSource = await readFile("src/cli/governance-commands.ts", "utf8");
+for (const marker of ["--transcript-db", "--transcript-session-id", "readOpenClawSqliteTranscript"]) {
+  if (!governanceCliSource.includes(marker)) {
+    throw new Error(`release gate failed: digest CLI missing SQLite transcript marker ${marker}`);
   }
 }
 const dashboardSource = await readFile("src/operator-dashboard.ts", "utf8");
@@ -581,6 +620,8 @@ for (const marker of [
   "expect_empty",
   "liveProviderSemanticReady",
   "filterConfidentManualRecall",
+  "expandedManualRecallCandidateLimit",
+  "VECTOR_DIMENSION = 384",
 ]) {
   if (!realCorpusBenchmarkSource.includes(marker)) {
     throw new Error(`release gate failed: real-corpus benchmark missing ${marker}`);

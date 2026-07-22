@@ -6,12 +6,11 @@
 import type { MemoryEntry, MemoryStore, MemorySearchResult } from "./store.js";
 import type { TextEmbedder } from "./embedder.js";
 import {
-  AccessTracker,
   computeEffectiveHalfLife,
   parseAccessMetadata,
 } from "./access-tracker.js";
 import { filterNoise } from "./noise-filter.js";
-import type { DecayEngine, DecayableMemory } from "./decay-engine.js";
+import type { DecayEngine } from "./decay-engine.js";
 import type { TierManager } from "./tier-manager.js";
 import {
   getDecayableFromEntry,
@@ -365,8 +364,6 @@ function cosineSimilarity(a: number[], b: number[]): number {
 // ============================================================================
 
 export class MemoryRetriever {
-  private accessTracker: AccessTracker | null = null;
-  private tierManager: TierManager | null = null;
   private _statsCollector: RetrievalStatsCollector | null = null;
 
   constructor(
@@ -375,10 +372,6 @@ export class MemoryRetriever {
     private config: RetrievalConfig = DEFAULT_RETRIEVAL_CONFIG,
     private decayEngine: DecayEngine | null = null,
   ) { }
-
-  setAccessTracker(tracker: AccessTracker): void {
-    this.accessTracker = tracker;
-  }
 
   /** Enable aggregate retrieval statistics collection. */
   setStatsCollector(collector: RetrievalStatsCollector): void {
@@ -441,10 +434,6 @@ export class MemoryRetriever {
       this._statsCollector.recordQuery(finalTrace, source || "unknown");
     }
 
-    if (this.accessTracker && source === "manual" && results.length > 0) {
-      this.accessTracker.recordAccess(results.map((r) => r.entry.id));
-    }
-
     return results;
   }
 
@@ -489,10 +478,6 @@ export class MemoryRetriever {
 
     if (this._statsCollector) {
       this._statsCollector.recordQuery(finalTrace, source || "debug");
-    }
-
-    if (this.accessTracker && source === "manual" && results.length > 0) {
-      this.accessTracker.recordAccess(results.map((r) => r.entry.id));
     }
 
     return { results, trace: finalTrace };
@@ -1264,60 +1249,6 @@ export class MemoryRetriever {
 
     const boosted = pairs.map((p, i) => ({ ...p.r, score: scored[i].score }));
     return boosted.sort((a, b) => b.score - a.score);
-  }
-
-  /**
-   * Record access stats (access_count, last_accessed_at) and apply tier
-   * promotion/demotion for a small number of top results.
-   *
-   * Note: this writes back to LanceDB via delete+readd; keep it bounded.
-   */
-  private async recordAccessAndMaybeTransition(results: RetrievalResult[]): Promise<void> {
-    if (!this.decayEngine && !this.tierManager) return;
-
-    const now = Date.now();
-    const toUpdate = results.slice(0, 3);
-
-    for (const r of toUpdate) {
-      const { memory, meta } = getDecayableFromEntry(r.entry);
-
-      // Update access stats in-memory first
-      const nextAccess = memory.accessCount + 1;
-      meta.access_count = nextAccess;
-      meta.last_accessed_at = now;
-      if (meta.created_at === undefined && meta.createdAt === undefined) {
-        meta.created_at = memory.createdAt;
-      }
-      if (meta.tier === undefined) {
-        meta.tier = memory.tier;
-      }
-      if (meta.confidence === undefined) {
-        meta.confidence = memory.confidence;
-      }
-
-      const updatedMemory: DecayableMemory = {
-        ...memory,
-        accessCount: nextAccess,
-        lastAccessedAt: now,
-      };
-
-      // Tier transition (optional)
-      if (this.decayEngine && this.tierManager) {
-        const ds = this.decayEngine.score(updatedMemory, now);
-        const transition = this.tierManager.evaluate(updatedMemory, ds, now);
-        if (transition) {
-          meta.tier = transition.toTier;
-        }
-      }
-
-      try {
-        await this.store.update(r.entry.id, {
-          metadata: JSON.stringify(meta),
-        });
-      } catch {
-        // best-effort: ignore
-      }
-    }
   }
 
   /**

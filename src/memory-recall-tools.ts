@@ -10,7 +10,10 @@ import { redactMemoryTextForOutput } from "./memory-egress-policy.js";
 import {
   parseSmartMetadata
 } from "./smart-metadata.js";
-import { filterConfidentManualRecall } from "./manual-recall-confidence.js";
+import {
+  expandedManualRecallCandidateLimit,
+  filterConfidentManualRecall,
+} from "./manual-recall-confidence.js";
 import {
   filterUserMdExclusiveRecallResults
 } from "./workspace-boundary.js";
@@ -119,7 +122,7 @@ export function registerMemoryRecallTool(
 
             const candidates = filterUserMdExclusiveRecallResults(await retrieveWithRetry(runtimeContext.retriever, {
               query,
-              limit: safeLimit,
+              limit: expandedManualRecallCandidateLimit(safeLimit),
               scopeFilter,
               category,
               source: "manual",
@@ -127,6 +130,7 @@ export function registerMemoryRecallTool(
             const confidence = filterConfidentManualRecall(
               candidates,
               runtimeContext.retriever.getConfig(),
+              { query, limit: safeLimit },
             );
             const results = confidence.results;
 

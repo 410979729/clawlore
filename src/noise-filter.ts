@@ -50,9 +50,20 @@ const OPERATIONAL_TRACE_PATTERNS = [
   /^(?:Files|Result):\s*[\s\S]*\n(?:Files|Result|Command hints):/im,
 ];
 
-const RAW_USER_INSTRUCTION_PATTERNS = [
+const DIRECT_USER_INSTRUCTION_PATTERNS = [
   /^(?:去|帮我|你去|现在|继续|再|直接).{0,80}(?:检查|看看|处理|改好|审计|搜索|定位|收口)/,
+];
+
+const OPERATION_REQUEST_PATTERNS = [
   /^(?:检查|审计|搜索|定位|修复|迁移|蒸馏).{0,120}(?:记忆|插件|数据库|授权|服务)/,
+];
+
+// A concise procedure may begin with the same verb as a one-off command. Keep
+// rules that state an obligation or a postcondition instead of deleting them
+// merely because they start with “修复/检查”.
+const DURABLE_RULE_EVIDENCE_PATTERNS = [
+  /(?:必须|应当|应该|不得|不能|只允许|不允许|需要)/,
+  /(?:完成|修复|操作|变更|部署|迁移)?后.{0,40}(?:要|应|必须|需要|不得)/,
 ];
 
 // Extractor artifacts from validation prompts / synthetic summaries
@@ -91,7 +102,12 @@ export function isNoise(text: string, options: NoiseFilterOptions = {}): boolean
   if (opts.filterMetaQuestions && META_QUESTION_PATTERNS.some(p => p.test(trimmed))) return true;
   if (opts.filterBoilerplate && BOILERPLATE_PATTERNS.some(p => p.test(trimmed))) return true;
   if (OPERATIONAL_TRACE_PATTERNS.some(p => p.test(trimmed))) return true;
-  if (trimmed.length <= 180 && RAW_USER_INSTRUCTION_PATTERNS.some(p => p.test(trimmed))) return true;
+  if (trimmed.length <= 180 && DIRECT_USER_INSTRUCTION_PATTERNS.some(p => p.test(trimmed))) return true;
+  if (
+    trimmed.length <= 180
+    && OPERATION_REQUEST_PATTERNS.some(p => p.test(trimmed))
+    && !DURABLE_RULE_EVIDENCE_PATTERNS.some(p => p.test(trimmed))
+  ) return true;
   if (DIAGNOSTIC_ARTIFACT_PATTERNS.some(p => p.test(trimmed))) return true;
 
   return false;

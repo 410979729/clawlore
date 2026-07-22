@@ -937,6 +937,24 @@ test("operator CLI exposes Yuheng 1.6 governance function surface", () => {
   assert.match(cli, /dryRunFromApplyOptions/);
 });
 
+test("digest CLI binds SQLite transcript intake to exact identity and dry-run controls", () => {
+  const source = readFileSync(
+    new URL("../src/cli/governance-commands.ts", import.meta.url),
+    "utf8",
+  );
+  for (const marker of [
+    "--transcript-db",
+    "--transcript-session-id",
+    "--transcript-since-ms",
+    "readOpenClawSqliteTranscript",
+    "resolvePrincipalWriteTarget",
+    "--text, --input-file, and --transcript-db are mutually exclusive",
+    "dryRunFromApplyOptions",
+  ]) assert.ok(source.includes(marker), marker);
+  assert.ok(source.indexOf("readOpenClawSqliteTranscript") < source.indexOf("runDigestPipeline(db"));
+  assert.match(source, /sourceType:\s*transcriptSelected[\s\S]{0,160}openclaw_sqlite_transcript/u);
+});
+
 test("release gate includes source/live separation and OpenClaw runtime smoke", () => {
   const gate = readFileSync(new URL("../scripts/release-gate.mjs", import.meta.url), "utf8");
   const wrapper = readFileSync(new URL("../scripts/run-release-gate.mjs", import.meta.url), "utf8");

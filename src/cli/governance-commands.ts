@@ -8,6 +8,7 @@ import { listAutoRecallTraces } from "../auto-recall-ledger.js";
 import { candidateDebtReport, promoteMemoryCandidates } from "../candidate-promotion.js";
 import { diagnosticErrorSummary } from "../diagnostic-redaction.js";
 import {
+  type DigestInputChunk,
   digestRecoveryReport,
   digestReport,
   recoverDigestChunks,
@@ -19,6 +20,10 @@ import { graphHygieneReport, repairGraphHygiene } from "../graph-hygiene.js";
 import { recoveryReport, scheduleReplay } from "../journal-recovery.js";
 import { resolvePrincipalWriteTarget } from "../principal-write-boundary.js";
 import { evaluateRecallScopePolicy, scopeIdForContext } from "../scope-policy.js";
+import {
+  readOpenClawSqliteTranscript,
+  type OpenClawTranscriptSourceInspection,
+} from "../v2/storage/openclaw-sqlite-transcript-source.js";
 
 import {
   type CliRegistrationContext,
@@ -26,6 +31,15 @@ import {
   tableNames,
   writeJson
 } from "./cli-runtime-policy.js";
+
+function optionalTimestampMs(value: unknown, label: string): number | undefined {
+  if (value == null || value === "") return undefined;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new Error(`${label} must be a non-negative integer in milliseconds`);
+  }
+  return parsed;
+}
 
 
 export function registerGovernanceCommands(runtime: CliRegistrationContext): void {
@@ -144,9 +158,13 @@ export function registerGovernanceCommands(runtime: CliRegistrationContext): voi
     .description("Run OpenClaw-native digest extraction; dry-run by default")
     .option("--text <text>", "Explicit digest input text")
     .option("--input-file <path>", "Read digest input text from a file")
+    .option("--transcript-db <path>", "Read one exact OpenClaw SQLite session from an owner-only database")
+    .option("--transcript-session-id <id>", "Exact session id required with --transcript-db")
+    .option("--transcript-since-ms <ms>", "Inclusive transcript event lower bound")
+    .option("--transcript-until-ms <ms>", "Exclusive transcript event upper bound")
     .option("--principal-key <platform:account:principal>", "Exact canonical private principal")
     .option("--session-key <key>", "Exact OpenClaw private session key")
-    .option("--max-chunks <n>", "Maximum reflection chunks when no explicit input is provided", "25")
+    .option("--max-chunks <n>", "Maximum reflection or eligible transcript chunks", "25")
     .option("--use-llm", "Use configured LLM extraction before heuristic fallback")
     .option("--no-llm-fallback", "Disable heuristic fallback after LLM extraction")
     .option("--apply", "Write digest candidates to SQL truth and vector companion")
@@ -160,21 +178,53 @@ export function registerGovernanceCommands(runtime: CliRegistrationContext): voi
           principalKey: options.principalKey,
           sessionKey: options.sessionKey,
         });
-        let inputText = typeof options.text === "string" ? options.text : undefined;
-        if (typeof options.inputFile === "string" && options.inputFile.trim()) {
+        const textSelected = typeof options.text === "string" && options.text.trim();
+        const fileSelected = typeof options.inputFile === "string" && options.inputFile.trim();
+        const transcriptSelected = typeof options.transcriptDb === "string" && options.transcriptDb.trim();
+        if ([textSelected, fileSelected, transcriptSelected].filter(Boolean).length > 1) {
+          throw new Error("--text, --input-file, and --transcript-db are mutually exclusive");
+        }
+        if (!transcriptSelected && options.transcriptSessionId != null) {
+          throw new Error("--transcript-session-id requires --transcript-db");
+        }
+        let inputText = textSelected ? options.text : undefined;
+        if (fileSelected) {
           inputText = await readFile(path.resolve(options.inputFile.trim()), "utf8");
+        }
+        const maxChunks = parseLimitOption(options.maxChunks, 25, 200);
+        let transcriptInspection: OpenClawTranscriptSourceInspection | undefined;
+        let inputChunks: DigestInputChunk[] | undefined;
+        if (transcriptSelected) {
+          if (typeof options.transcriptSessionId !== "string" || !options.transcriptSessionId.trim()) {
+            throw new Error("--transcript-session-id is required with --transcript-db");
+          }
+          const transcript = readOpenClawSqliteTranscript({
+            dbPath: options.transcriptDb,
+            sessionId: options.transcriptSessionId,
+            scope: target.scope,
+            startMs: optionalTimestampMs(options.transcriptSinceMs, "--transcript-since-ms"),
+            endMs: optionalTimestampMs(options.transcriptUntilMs, "--transcript-until-ms"),
+            maxEvents: maxChunks,
+          });
+          inputChunks = transcript.chunks;
+          transcriptInspection = transcript.inspection;
         }
         const result = await runDigestPipeline(db, {
           apply: !dryRun,
           scope: target.scope,
           inputText,
+          inputChunks,
           sourceId: typeof options.inputFile === "string" && options.inputFile.trim()
             ? "cli-file"
             : inputText
               ? "cli-text"
               : undefined,
-          sourceType: inputText ? "explicit" : "reflection_event",
-          maxChunks: parseLimitOption(options.maxChunks, 25, 200),
+          sourceType: transcriptSelected
+            ? "openclaw_sqlite_transcript"
+            : inputText
+              ? "explicit"
+              : "reflection_event",
+          maxChunks,
           useLlm: options.useLlm === true,
           llmFallback: options.llmFallback !== false,
           llmClient: context.llmClient,
@@ -185,7 +235,7 @@ export function registerGovernanceCommands(runtime: CliRegistrationContext): voi
           actor: "clawlore:cli",
         });
         if (options.json) {
-          writeJson(result);
+          writeJson(transcriptInspection ? { ...result, transcript_source: transcriptInspection } : result);
           if (!result.ok) process.exitCode = 1;
           return;
         }
@@ -195,6 +245,10 @@ export function registerGovernanceCommands(runtime: CliRegistrationContext): voi
         console.log(`• Extracted: ${result.extracted}`);
         console.log(`• Stored candidates: ${result.stored}`);
         console.log(`• Skipped: ${result.skipped}`);
+        if (transcriptInspection) {
+          console.log(`• Transcript source: read-only exact session`);
+          console.log(`• Eligible transcript events: ${transcriptInspection.eligibleEvents}`);
+        }
         if (result.errors.length > 0) {
           console.log(`• Errors: ${result.errors.length}`);
           process.exitCode = 1;
