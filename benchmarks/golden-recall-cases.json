@@ -55,7 +55,7 @@
     },
     {
       "id": "home-ip-old",
-      "text": "Home gateway current IP was 100.64.0.25 before the reinstall.",
+      "text": "Home gateway current IP was 192.0.2.25 before the reinstall.",
       "category": "facts",
       "scope": "agent:main",
       "metadata": {
@@ -66,7 +66,7 @@
     },
     {
       "id": "home-ip-current",
-      "text": "Home gateway current IP is 100.64.0.30 after the reinstall.",
+      "text": "Home gateway current IP is 192.0.2.30 after the reinstall.",
       "category": "facts",
       "scope": "agent:main",
       "metadata": {

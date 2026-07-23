@@ -72,18 +72,21 @@ export function registerAllMemoryTools(
   api: OpenClawPluginApi,
   context: ToolContext,
   options: {
+    allowAgentMemoryWriteTools?: boolean;
     enableManagementTools?: boolean;
     enableSelfImprovementTools?: boolean;
     secretIndexToolsEnabled?: boolean;
   } = {},
 ): void {
   registerMemoryRecallTool(api, context);
-  registerMemoryStoreTool(api, context);
-  if (options.secretIndexToolsEnabled === true) {
-    registerMemoryStoreSecretIndexTool(api, context);
+  if (options.allowAgentMemoryWriteTools !== false) {
+    registerMemoryStoreTool(api, context);
+    if (options.secretIndexToolsEnabled === true) {
+      registerMemoryStoreSecretIndexTool(api, context);
+    }
+    registerMemoryForgetTool(api, context);
+    registerMemoryUpdateTool(api, context);
   }
-  registerMemoryForgetTool(api, context);
-  registerMemoryUpdateTool(api, context);
 
   if (options.enableManagementTools) {
     registerMemoryStatsTool(api, context);

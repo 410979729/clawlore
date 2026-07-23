@@ -285,6 +285,7 @@ const clawLorePlugin = {
             workspaceBoundary: config.workspaceBoundary,
             principalIsolation: config.principalIsolation,
         }, {
+            allowAgentMemoryWriteTools: config.allowAgentMemoryWriteTools !== false,
             enableManagementTools: agentOperatorToolsEnabled,
             enableSelfImprovementTools: config.selfImprovement?.enabled === true,
             secretIndexToolsEnabled: config.secretIndexToolsEnabled === true,

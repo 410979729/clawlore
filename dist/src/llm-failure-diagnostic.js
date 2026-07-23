@@ -1,8 +1,54 @@
+const NETWORK_FAILURE_CODES = new Set([
+    "EAI_AGAIN",
+    "ECONNABORTED",
+    "ECONNREFUSED",
+    "ECONNRESET",
+    "EHOSTUNREACH",
+    "ENETUNREACH",
+    "ENOTFOUND",
+    "ETIMEDOUT",
+    "UND_ERR_BODY_TIMEOUT",
+    "UND_ERR_CONNECT_TIMEOUT",
+    "UND_ERR_HEADERS_TIMEOUT",
+    "UND_ERR_SOCKET",
+]);
+const SAFE_PROVIDER_CODES = new Set([
+    "authentication_error",
+    "authorization_error",
+    "content_filter",
+    "context_length_exceeded",
+    "forbidden",
+    "insufficient_quota",
+    "invalid_api_key",
+    "invalid_request_error",
+    "model_not_found",
+    "not_found_error",
+    "overloaded_error",
+    "permission_denied",
+    "rate_limit_error",
+    "rate_limit_exceeded",
+    "request_too_large",
+    "server_error",
+    "unauthorized",
+]);
+const SAFE_ERROR_NAMES = new Set([
+    "AbortError",
+    "ConnectTimeoutError",
+    "TimeoutError",
+]);
 function safeCode(value) {
     if (typeof value !== "string")
         return undefined;
-    const safe = value.replace(/[^A-Za-z0-9_.-]/g, "").slice(0, 80);
-    return safe || undefined;
+    const normalized = value.trim();
+    return NETWORK_FAILURE_CODES.has(normalized) || SAFE_PROVIDER_CODES.has(normalized)
+        ? normalized
+        : undefined;
+}
+function safeErrorName(value) {
+    if (typeof value !== "string")
+        return undefined;
+    const normalized = value.trim();
+    return SAFE_ERROR_NAMES.has(normalized) ? normalized : undefined;
 }
 function errorRecord(error) {
     return error && typeof error === "object" && !Array.isArray(error)
@@ -31,7 +77,8 @@ export function diagnoseLlmFailure(error) {
     const record = errorRecord(error);
     const status = numericStatus(record);
     const code = safeCode(record?.code) ?? safeCode(record?.type);
-    const name = safeCode(record?.name) ?? (error instanceof Error ? safeCode(error.name) : undefined);
+    const name = safeErrorName(record?.name)
+        ?? (error instanceof Error ? safeErrorName(error.name) : undefined);
     const message = error instanceof Error ? error.message : "";
     let category = "unknown";
     if (status === 401)
@@ -50,7 +97,7 @@ export function diagnoseLlmFailure(error) {
         category = "request_rejected";
     else if (name === "AbortError" || /timeout|timed out|aborted/i.test(message))
         category = "timeout";
-    else if (code && /^(?:ECONN|ENET|EHOST|ENOTFOUND|EAI_AGAIN|UND_ERR_)/.test(code)) {
+    else if (code && NETWORK_FAILURE_CODES.has(code)) {
         category = "network_failure";
     }
     return {

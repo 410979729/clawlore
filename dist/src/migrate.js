@@ -7,6 +7,7 @@ import { join } from "node:path";
 import fs from "node:fs/promises";
 import { loadLanceDB } from "./store.js";
 import { diagnosticErrorSummary, diagnosticIdentifier } from "./diagnostic-redaction.js";
+import { collectLanceRows, DEFAULT_LANCE_SCAN_MAX_ROWS, } from "./lance-row-scan.js";
 function normalizeLegacyVector(value) {
     if (Array.isArray(value)) {
         return value.map((n) => Number(n));
@@ -115,11 +116,11 @@ export class MemoryMigrator {
         const db = await lancedb.connect(sourceDbPath);
         try {
             const table = await db.openTable("memories");
-            let query = table.query();
-            if (limit)
-                query = query.limit(limit);
-            const entries = await query.toArray();
-            return entries.map((row) => ({
+            const scan = await collectLanceRows(() => table.query(), { maxRows: limit ?? DEFAULT_LANCE_SCAN_MAX_ROWS });
+            if (!limit && scan.truncated) {
+                throw new Error("CLAWLORE_LANCE_SCAN_LIMIT_EXCEEDED:legacy-migration");
+            }
+            return scan.rows.map((row) => ({
                 id: row.id,
                 text: row.text,
                 vector: normalizeLegacyVector(row.vector),
@@ -130,6 +131,10 @@ export class MemoryMigrator {
             }));
         }
         catch (error) {
+            if (error instanceof Error
+                && error.message.startsWith("CLAWLORE_LANCE_SCAN_LIMIT_EXCEEDED:")) {
+                throw error;
+            }
             console.warn(`clawlore: legacy migration source read failed: ${diagnosticErrorSummary(error)}`);
             return [];
         }
@@ -257,10 +262,10 @@ export async function checkForLegacyData() {
             const lancedb = await loadLanceDB();
             const db = await lancedb.connect(path);
             const table = await db.openTable("memories");
-            const entries = await table.query().select(["id"]).toArray();
-            if (entries.length > 0) {
+            const entryCount = await table.countRows();
+            if (entryCount > 0) {
                 paths.push(path);
-                totalEntries += entries.length;
+                totalEntries += entryCount;
             }
         }
         catch {

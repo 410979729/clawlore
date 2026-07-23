@@ -10,6 +10,7 @@ import { withMemoryWriteLock } from "./memory-write-lock.js";
 import { assertMemoryEntrySafeForPersistence } from "./memory-entry-write-policy.js";
 import { isMemoryEntrySafeForEgress } from "./memory-egress-policy.js";
 import { MemoryStoreFacade } from "./memory-store-facade.js";
+import { collectLanceRows, scanLanceRows } from "./lance-row-scan.js";
 export { loadLanceDB } from "./lancedb-loader.js";
 export { validateStoragePath } from "./storage-path.js";
 // ============================================================================
@@ -457,14 +458,16 @@ class MemoryStoreRuntime {
         return this.rowToEntry(rows[0], true);
     }
     async listVectorIds() {
-        if (this.sqliteVectorStore)
-            return this.sqliteVectorStore.listIds();
+        if (this.sqliteVectorStore) {
+            return { ids: this.sqliteVectorStore.listIds(), truncated: false };
+        }
         if (!this.table)
-            return [];
-        const rows = await this.table.query().select(["id"]).toArray();
-        return rows
+            return { ids: [], truncated: false };
+        const scan = await collectLanceRows(() => this.table.query().select(["id"]));
+        const ids = scan.rows
             .map((row) => typeof row.id === "string" ? row.id : "")
             .filter((id) => id && id !== "__schema__");
+        return { ids, truncated: scan.truncated };
     }
     listSqlTruthEntries(limit) {
         if (!this.sqlTruthStore)
@@ -805,23 +808,28 @@ class MemoryStoreRuntime {
         const trimmedQuery = query.trim();
         if (!trimmedQuery)
             return [];
-        let searchQuery = this.table.query().select([
-            "id",
-            "text",
-            "vector",
-            "category",
-            "scope",
-            "importance",
-            "timestamp",
-            "metadata",
-        ]);
-        if (scopeFilter && scopeFilter.length > 0) {
-            const scopeConditions = scopeFilter
-                .map(scope => `scope = '${escapeSqlLiteral(scope)}'`)
-                .join(" OR ");
-            searchQuery = searchQuery.where(`(${scopeConditions}) OR scope IS NULL`);
-        }
-        const rows = await searchQuery.toArray();
+        const createSearchQuery = () => {
+            let searchQuery = this.table.query().select([
+                "id",
+                "text",
+                "vector",
+                "category",
+                "scope",
+                "importance",
+                "timestamp",
+                "metadata",
+            ]);
+            if (scopeFilter && scopeFilter.length > 0) {
+                const scopeConditions = scopeFilter
+                    .map(scope => `scope = '${escapeSqlLiteral(scope)}'`)
+                    .join(" OR ");
+                searchQuery = searchQuery.where(`(${scopeConditions}) OR scope IS NULL`);
+            }
+            return searchQuery;
+        };
+        const scan = await collectLanceRows(createSearchQuery);
+        this.assertCompleteLanceScan(scan.truncated, "lexical-fallback");
+        const rows = scan.rows;
         const matches = [];
         for (const row of rows) {
             const rowScope = row.scope ?? "global";
@@ -928,7 +936,6 @@ class MemoryStoreRuntime {
         if (this.sqlTruthStore) {
             return this.sqlTruthStore.list(scopeFilter, category, limit, offset);
         }
-        let query = this.table.query();
         // Build where conditions
         const conditions = [];
         if (scopeFilter && scopeFilter.length > 0) {
@@ -940,22 +947,26 @@ class MemoryStoreRuntime {
         if (category) {
             conditions.push(`category = '${escapeSqlLiteral(category)}'`);
         }
-        if (conditions.length > 0) {
-            query = query.where(conditions.join(" AND "));
-        }
-        // Fetch all matching rows (no pre-limit) so app-layer sort is correct across full dataset
-        const results = await query
-            .select([
-            "id",
-            "text",
-            "category",
-            "scope",
-            "importance",
-            "timestamp",
-            "metadata",
-        ])
-            .toArray();
-        return results
+        const createListQuery = () => {
+            let query = this.table.query();
+            if (conditions.length > 0) {
+                query = query.where(conditions.join(" AND "));
+            }
+            return query.select([
+                "id",
+                "text",
+                "category",
+                "scope",
+                "importance",
+                "timestamp",
+                "metadata",
+            ]);
+        };
+        // The degraded Lance-only path still sorts in application space, but the
+        // scan is paged and fails closed if it exceeds the explicit total budget.
+        const scan = await collectLanceRows(createListQuery);
+        this.assertCompleteLanceScan(scan.truncated, "list");
+        return scan.rows
             .map((row) => ({
             id: row.id,
             text: row.text,
@@ -982,30 +993,35 @@ class MemoryStoreRuntime {
         if (this.sqlTruthStore) {
             return this.sqlTruthStore.stats(scopeFilter);
         }
-        let query = this.table.query();
-        if (scopeFilter && scopeFilter.length > 0) {
-            const scopeConditions = scopeFilter
-                .map((scope) => `scope = '${escapeSqlLiteral(scope)}'`)
-                .join(" OR ");
-            query = query.where(`((${scopeConditions}) OR scope IS NULL)`);
-        }
-        const results = await query.select(["scope", "category", "text", "timestamp", "metadata"]).toArray();
         const scopeCounts = {};
         const categoryCounts = {};
         const lifecycleScopeCounts = {};
-        for (const row of results) {
-            const scope = row.scope ?? "global";
-            const category = row.category;
-            scopeCounts[scope] = (scopeCounts[scope] || 0) + 1;
-            categoryCounts[category] = (categoryCounts[category] || 0) + 1;
-            const counts = lifecycleScopeCounts[scope] ??= { recallable: 0, archived: 0, inactive: 0 };
-            const lifecycle = effectiveMemoryLifecycle(parseSmartMetadata(row.metadata, {
-                text: row.text, category: category, timestamp: Number(row.timestamp),
-            }));
-            counts[lifecycle] += 1;
-        }
+        const createStatsQuery = () => {
+            let query = this.table.query();
+            if (scopeFilter && scopeFilter.length > 0) {
+                const scopeConditions = scopeFilter
+                    .map((scope) => `scope = '${escapeSqlLiteral(scope)}'`)
+                    .join(" OR ");
+                query = query.where(`((${scopeConditions}) OR scope IS NULL)`);
+            }
+            return query.select(["scope", "category", "text", "timestamp", "metadata"]);
+        };
+        const scan = await scanLanceRows(createStatsQuery, (rows) => {
+            for (const row of rows) {
+                const scope = row.scope ?? "global";
+                const category = row.category;
+                scopeCounts[scope] = (scopeCounts[scope] || 0) + 1;
+                categoryCounts[category] = (categoryCounts[category] || 0) + 1;
+                const counts = lifecycleScopeCounts[scope] ??= { recallable: 0, archived: 0, inactive: 0 };
+                const lifecycle = effectiveMemoryLifecycle(parseSmartMetadata(row.metadata, {
+                    text: row.text, category: category, timestamp: Number(row.timestamp),
+                }));
+                counts[lifecycle] += 1;
+            }
+        });
+        this.assertCompleteLanceScan(scan.truncated, "stats");
         return {
-            totalCount: results.length,
+            totalCount: scan.scannedRows,
             scopeCounts,
             categoryCounts,
             lifecycleScopeCounts,
@@ -1230,14 +1246,9 @@ class MemoryStoreRuntime {
                 }
                 return deletedIds.length;
             }
-            const countResults = await this.table.query().where(whereClause).toArray();
-            const deleteCount = countResults.length;
+            const deleteCount = await this.table.countRows(whereClause);
             if (deleteCount > 0) {
                 await this.table.delete(whereClause);
-                for (const row of countResults) {
-                    if (row.id)
-                        this.syncSqlTruthDelete(row.id);
-                }
             }
             return deleteCount;
         });
@@ -1337,9 +1348,18 @@ class MemoryStoreRuntime {
         this.vectorCompanionError =
             "vector scan budget exhausted before enough SQL-valid rows were found; run vector companion repair";
     }
+    assertCompleteLanceScan(truncated, operation) {
+        if (!truncated)
+            return;
+        this.noteVectorScanBudgetExhausted();
+        throw new Error(`CLAWLORE_LANCE_SCAN_LIMIT_EXCEEDED:${operation}`);
+    }
     async getVectorCompanionDriftReport(maxTruthRows = 100_000) {
         await this.ensureInitialized();
-        const vectorIds = await this.listVectorIds();
+        const vectorScan = await this.listVectorIds();
+        const vectorIds = vectorScan.ids;
+        if (vectorScan.truncated)
+            this.noteVectorScanBudgetExhausted();
         if (!this.sqlTruthStore) {
             return {
                 truthCount: 0,
@@ -1347,8 +1367,8 @@ class MemoryStoreRuntime {
                 vectorRows: vectorIds.length,
                 missingVectorRows: 0,
                 staleVectorRows: 0,
-                truncated: false,
-                repairHint: null,
+                truncated: vectorScan.truncated,
+                repairHint: vectorScan.truncated ? "Vector scan limit exceeded; inspect and repair the companion" : null,
             };
         }
         const truthCount = this.sqlTruthStore.count();
@@ -1356,10 +1376,11 @@ class MemoryStoreRuntime {
         const truthIds = new Set(truthEntries.map((entry) => entry.id));
         const vectorIdSet = new Set(vectorIds);
         const missingVectorRows = truthEntries.filter((entry) => !vectorIdSet.has(entry.id)).length;
-        const truncated = truthCount > truthEntries.length;
+        const truncated = truthCount > truthEntries.length || vectorScan.truncated;
         const staleVectorRows = truncated ? 0 : vectorIds.filter((id) => !truthIds.has(id)).length;
         const pendingRepairDebt = this.sqlTruthStore.vectorRepairDebtReport().pending;
-        const needsRepair = missingVectorRows > 0 || staleVectorRows > 0 || pendingRepairDebt > 0 || this.vectorCompanionError !== null;
+        const needsRepair = truncated || missingVectorRows > 0 || staleVectorRows > 0
+            || pendingRepairDebt > 0 || this.vectorCompanionError !== null;
         return {
             truthCount,
             checkedTruthRows: truthEntries.length,
@@ -1376,15 +1397,17 @@ class MemoryStoreRuntime {
             return this.sqliteVectorStore.scopeCounts();
         if (!this.table)
             return {};
-        const rows = await this.table.query().select(["id", "scope"]).toArray();
         const counts = {};
-        for (const row of rows) {
-            const id = typeof row.id === "string" ? row.id : "";
-            if (!id || id === "__schema__")
-                continue;
-            const scope = typeof row.scope === "string" && row.scope.trim() ? row.scope : "global";
-            counts[scope] = (counts[scope] ?? 0) + 1;
-        }
+        const scan = await scanLanceRows(() => this.table.query().select(["id", "scope"]), (rows) => {
+            for (const row of rows) {
+                const id = typeof row.id === "string" ? row.id : "";
+                if (!id || id === "__schema__")
+                    continue;
+                const scope = typeof row.scope === "string" && row.scope.trim() ? row.scope : "global";
+                counts[scope] = (counts[scope] ?? 0) + 1;
+            }
+        });
+        this.assertCompleteLanceScan(scan.truncated, "vector-scope-counts");
         return counts;
     }
     async rebuildVectorCompanion(embedder, options = {}) {
@@ -1399,7 +1422,9 @@ class MemoryStoreRuntime {
         const dryRun = options.dryRun === true;
         const fullRebuild = options.fullRebuild === true;
         const truthEntries = this.listSqlTruthEntries(limit);
-        const vectorIdsBefore = await this.listVectorIds();
+        const vectorScan = await this.listVectorIds();
+        this.assertCompleteLanceScan(vectorScan.truncated, "rebuild-vector-companion");
+        const vectorIdsBefore = vectorScan.ids;
         const vectorIdSet = new Set(vectorIdsBefore);
         const truthIds = new Set(truthEntries.map((entry) => entry.id));
         const repairDebt = this.sqlTruthStore.listVectorRepairDebt(limit ?? 100_000);
@@ -1522,12 +1547,13 @@ class MemoryStoreRuntime {
             conditions.push(`((${scopeConditions}) OR scope IS NULL)`);
         }
         const whereClause = conditions.join(" AND ");
+        const safeLimit = clampInt(limit, 1, 5_000);
         const results = await this.table
             .query()
             .where(whereClause)
+            .limit(safeLimit)
             .toArray();
         return results
-            .slice(0, limit)
             .map((row) => ({
             id: row.id,
             text: row.text,

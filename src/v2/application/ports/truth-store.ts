@@ -77,6 +77,8 @@ export interface TruthStoreV2Port {
   inspectOutbox(outboxIds: string[]): ProjectionOutboxRowV2[];
   claimNextOutbox(input: ClaimProjectionOutboxV2Input): ProjectionOutboxClaimV2 | null;
   renewOutboxClaim(claim: ProjectionOutboxClaimV2, leaseDurationMs: number): boolean;
+  isOutboxClaimCurrent(claim: ProjectionOutboxClaimV2): boolean;
+  withProjectionMutationFence<T>(row: ProjectionOutboxRowV2, operation: () => Promise<T>): Promise<T>;
   markOutboxProcessed(claim: ProjectionOutboxClaimV2): boolean;
   recordOutboxFailure(claim: ProjectionOutboxClaimV2, errorCode: string, retryAt?: string): boolean;
 }

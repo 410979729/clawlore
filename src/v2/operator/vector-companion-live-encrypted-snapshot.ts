@@ -12,6 +12,7 @@ import {
 } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { enforcePrivatePath, ensurePrivateDirectory } from "../../file-privacy.js";
+import { collectLanceRows } from "../../lance-row-scan.js";
 import {
   createEncryptedGenericSnapshotArchiveV2,
   createFileSecretRefKeyProviderV2,
@@ -200,7 +201,13 @@ async function inspectVectorRows(root: string): Promise<{ rowCount: number; rowI
   const db = await lancedb.connect(root);
   const table = await db.openTable("memories");
   try {
-    const ids = (await table.query().select(["id"]).toArray()).map((row) => String(row.id)).sort();
+    const scan = await collectLanceRows<Record<string, unknown>>(
+      () => table.query().select(["id"]),
+    );
+    if (scan.truncated) {
+      throw new Error("CLAWLORE_LANCE_SCAN_LIMIT_EXCEEDED:vector-snapshot");
+    }
+    const ids = scan.rows.map((row) => String(row.id)).sort();
     return { rowCount: ids.length, rowIdDigest: sha256(JSON.stringify(ids)) };
   } finally {
     await table.close?.();

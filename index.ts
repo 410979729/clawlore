@@ -390,8 +390,7 @@ const clawLorePlugin = {
     // Register Tools
     // ========================================================================
 
-    const agentOperatorToolsEnabled =
-      config.enableManagementTools === true && config.allowAgentOperatorTools === true;
+    const agentOperatorToolsEnabled = config.enableManagementTools === true && config.allowAgentOperatorTools === true;
 
     registerAllMemoryTools(
       api,
@@ -407,6 +406,7 @@ const clawLorePlugin = {
         principalIsolation: config.principalIsolation,
       },
       {
+        allowAgentMemoryWriteTools: config.allowAgentMemoryWriteTools !== false,
         enableManagementTools: agentOperatorToolsEnabled,
         enableSelfImprovementTools: config.selfImprovement?.enabled === true,
         secretIndexToolsEnabled: config.secretIndexToolsEnabled === true,

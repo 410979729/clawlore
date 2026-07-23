@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added an independent `allowAgentMemoryWriteTools` containment gate so
+  operators can keep `memory_recall` available while removing
+  `memory_store`, `memory_update`, `memory_forget`, and secret-index writes
+  from the Agent tool surface.
 - Corrected OpenClaw SecretRef compatibility for embedding-key arrays by
   enumerating bounded array leaves instead of treating SecretRef object fields
   as plaintext wildcard values; runtime configuration rejects more keys than

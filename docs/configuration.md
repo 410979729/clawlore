@@ -33,6 +33,7 @@ use the new value. Standalone CLI commands read current config on each run.
 | --- | --- | --- | --- | --- |
 | `dbPath` | OpenClaw state memory path | high | yes | Canonical SQLite truth and vector companion directory. Back up before moving. |
 | `vectorBackend` | `lancedb` | medium | yes | `lancedb` for semantic retrieval; `sqlite-bruteforce` for native-free fallback. |
+| `allowAgentMemoryWriteTools` | `true` | high | yes | Hard gate for `memory_store`, `memory_update`, `memory_forget`, and secret-index writes. Set `false` for read-only containment without removing recall. |
 | `enableManagementTools` | `false` | high | yes | Exposes operator tools and mutating management surfaces. |
 | `secretIndexToolsEnabled` | `false` | high | yes | Exposes secret-index schemas. Keep off unless explicitly needed. |
 

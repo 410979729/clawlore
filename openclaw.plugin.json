@@ -105,6 +105,48 @@
     }
   },
   "toolMetadata": {
+    "memory_store": {
+      "configSignals": [
+        {
+          "rootPath": "plugins.entries.clawlore.config",
+          "mode": {
+            "path": "allowAgentMemoryWriteTools",
+            "default": "true",
+            "allowed": [
+              "true"
+            ]
+          }
+        }
+      ]
+    },
+    "memory_forget": {
+      "configSignals": [
+        {
+          "rootPath": "plugins.entries.clawlore.config",
+          "mode": {
+            "path": "allowAgentMemoryWriteTools",
+            "default": "true",
+            "allowed": [
+              "true"
+            ]
+          }
+        }
+      ]
+    },
+    "memory_update": {
+      "configSignals": [
+        {
+          "rootPath": "plugins.entries.clawlore.config",
+          "mode": {
+            "path": "allowAgentMemoryWriteTools",
+            "default": "true",
+            "allowed": [
+              "true"
+            ]
+          }
+        }
+      ]
+    },
     "memory_store_secret_index": {
       "configSignals": [
         {
@@ -753,6 +795,11 @@
         ],
         "default": "lancedb",
         "description": "Vector companion backend. Use lancedb for production semantic search; use sqlite-bruteforce when native dependencies are unsafe."
+      },
+      "allowAgentMemoryWriteTools": {
+        "type": "boolean",
+        "default": true,
+        "description": "Expose memory_store, memory_update, memory_forget, and secret-index writes to Agents. Set false for read-only containment while preserving memory_recall."
       },
       "enableManagementTools": {
         "type": "boolean",
@@ -2399,6 +2446,11 @@
     "enableManagementTools": {
       "label": "Management Tools",
       "help": "Expose operator tools such as memory_list, memory_stats, memory_compact, and self-improvement review/extract actions.",
+      "advanced": true
+    },
+    "allowAgentMemoryWriteTools": {
+      "label": "Agent Memory Writes",
+      "help": "Expose durable memory write tools to Agents. Turn off for read-only containment while keeping memory_recall available.",
       "advanced": true
     },
     "secretIndexToolsEnabled": {

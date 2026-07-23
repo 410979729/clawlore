@@ -9,6 +9,10 @@ import fs from "node:fs/promises";
 import type { MemoryStore, MemoryEntry } from "./store.js";
 import { loadLanceDB } from "./store.js";
 import { diagnosticErrorSummary, diagnosticIdentifier } from "./diagnostic-redaction.js";
+import {
+  collectLanceRows,
+  DEFAULT_LANCE_SCAN_MAX_ROWS,
+} from "./lance-row-scan.js";
 
 // ============================================================================
 // Types
@@ -162,11 +166,15 @@ export class MemoryMigrator {
 
     try {
       const table = await db.openTable("memories");
-      let query = table.query();
-      if (limit) query = query.limit(limit);
-      const entries = await query.toArray();
+      const scan = await collectLanceRows<Record<string, unknown>>(
+        () => table.query(),
+        { maxRows: limit ?? DEFAULT_LANCE_SCAN_MAX_ROWS },
+      );
+      if (!limit && scan.truncated) {
+        throw new Error("CLAWLORE_LANCE_SCAN_LIMIT_EXCEEDED:legacy-migration");
+      }
 
-      return entries.map((row): LegacyMemoryEntry => ({
+      return scan.rows.map((row): LegacyMemoryEntry => ({
         id: row.id as string,
         text: row.text as string,
         vector: normalizeLegacyVector(row.vector),
@@ -176,6 +184,12 @@ export class MemoryMigrator {
         scope: row.scope as string | undefined,
       }));
     } catch (error) {
+      if (
+        error instanceof Error
+        && error.message.startsWith("CLAWLORE_LANCE_SCAN_LIMIT_EXCEEDED:")
+      ) {
+        throw error;
+      }
       console.warn(`clawlore: legacy migration source read failed: ${diagnosticErrorSummary(error)}`);
       return [];
     }
@@ -345,11 +359,11 @@ export async function checkForLegacyData(): Promise<{
       const lancedb = await loadLanceDB();
       const db = await lancedb.connect(path);
       const table = await db.openTable("memories");
-      const entries = await table.query().select(["id"]).toArray();
+      const entryCount = await table.countRows();
 
-      if (entries.length > 0) {
+      if (entryCount > 0) {
         paths.push(path);
-        totalEntries += entries.length;
+        totalEntries += entryCount;
       }
     } catch {
       continue;

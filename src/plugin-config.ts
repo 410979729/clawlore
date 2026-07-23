@@ -128,6 +128,7 @@ export interface PluginConfig {
     definitions?: Record<string, { description: string }>;
     agentAccess?: Record<string, string[]>;
   };
+  allowAgentMemoryWriteTools?: boolean;
   enableManagementTools?: boolean;
   allowAgentOperatorTools?: boolean;
   secretIndexToolsEnabled?: boolean;
@@ -439,6 +440,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
     extractMinMessages: parsePositiveInt(cfg.extractMinMessages) ?? 4,
     extractMaxChars: parsePositiveInt(cfg.extractMaxChars) ?? 8_000,
     scopes: typeof cfg.scopes === "object" && cfg.scopes !== null ? cfg.scopes as any : undefined,
+    allowAgentMemoryWriteTools: cfg.allowAgentMemoryWriteTools !== false,
     enableManagementTools: cfg.enableManagementTools === true,
     allowAgentOperatorTools: cfg.allowAgentOperatorTools === true,
     sessionStrategy,

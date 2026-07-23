@@ -141,3 +141,87 @@ test("expired outbox leases recover and stale owner tokens cannot finish the new
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("lease takeover cannot let a stale adapter overwrite the final projection state", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clawlore-projection-fenced-takeover-"));
+  const path = join(root, "truth.sqlite");
+  const clock = mutableClock();
+  const firstTruth = new SqliteTruthStoreV2(path, clock);
+  const secondTruth = new SqliteTruthStoreV2(path, clock);
+  firstTruth.open();
+  secondTruth.open();
+  try {
+    const receipt = remember(firstTruth, "projection-fenced-item");
+    const projectionState = new Map();
+    let releaseOldApply;
+    let notifyOldApplyEntered;
+    const releaseOld = new Promise((resolve) => { releaseOldApply = resolve; });
+    const oldApplyEntered = new Promise((resolve) => { notifyOldApplyEntered = resolve; });
+    const oldAdapters = ["fts", "vector", "relations"].map((projection) => ({
+      projection,
+      async apply(row) {
+        if (row.outboxId === receipt.outboxIds[0]) {
+          notifyOldApplyEntered();
+          await releaseOld;
+        }
+        projectionState.set(projection, row.operation);
+      },
+    }));
+    const currentAdapters = ["fts", "vector", "relations"].map((projection) => ({
+      projection,
+      async apply(row) {
+        projectionState.set(projection, row.operation);
+      },
+    }));
+    const oldWorker = new ProjectionWorkerV2(firstTruth, oldAdapters, {
+      owner: "stale-worker",
+      leaseDurationMs: 100,
+    });
+    const takeoverWorker = new ProjectionWorkerV2(secondTruth, currentAdapters, {
+      owner: "takeover-worker",
+      leaseDurationMs: 100,
+    });
+
+    const oldRun = oldWorker.run(1);
+    await oldApplyEntered;
+    firstTruth.forget({
+      itemId: "projection-fenced-item",
+      actor: "principal:user-1",
+      reason: "archive while old adapter is blocked",
+    });
+    firstTruth.forget({
+      itemId: "projection-fenced-item",
+      hardDelete: true,
+      approved: true,
+      actor: "principal:user-1",
+      reason: "purge while old adapter is blocked",
+    });
+    clock.advance(101);
+
+    const takeoverRun = takeoverWorker.run(1);
+    await new Promise((resolve) => setImmediate(resolve));
+    releaseOldApply();
+    const [oldResult, takeoverResult] = await Promise.all([oldRun, takeoverRun]);
+
+    assert.equal(oldResult.processed, 0);
+    assert.equal(oldResult.failed, 1);
+    assert.equal(oldResult.failures[0].errorCode, "projection_claim_lost");
+    assert.equal(takeoverResult.processed, 1);
+
+    for (let round = 0; round < 4 && firstTruth.listPendingOutbox().length > 0; round++) {
+      const result = await takeoverWorker.run(100);
+      assert.equal(result.failed, 0);
+      assert.ok(result.processed > 0);
+    }
+    assert.equal(firstTruth.listPendingOutbox().length, 0);
+    assert.deepEqual(Object.fromEntries(projectionState), {
+      fts: "purge",
+      vector: "purge",
+      relations: "purge",
+    });
+  } finally {
+    secondTruth.close();
+    firstTruth.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});

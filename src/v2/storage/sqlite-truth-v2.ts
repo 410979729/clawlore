@@ -31,6 +31,7 @@ import {
   normalizeTruthSemanticText,
   normalizeVerification,
 } from "../domain/truth-write-policy.js";
+import { withProjectionApplyFence } from "./projection-apply-fence.js";
 import type {
   MemoryLifecycleV2,
   MemoryMutationReceiptV2,
@@ -448,6 +449,30 @@ export class SqliteTruthStoreV2 implements TruthStoreV2Port, MemoryCenterReadPor
           WHERE o.outbox_id=projection_outbox_claims.outbox_id AND o.processed_at IS NULL)`)
       .run(leaseExpiresAt, normalized.outboxId, normalized.token, normalized.owner, nowIso);
     return Number(result.changes ?? 0) === 1;
+  }
+
+  isOutboxClaimCurrent(claim: ProjectionOutboxClaimV2): boolean {
+    const normalized = this.normalizeOutboxClaim(claim);
+    const now = this.clock.now().toISOString();
+    const row = this.requireDb().prepare(`SELECT 1 AS current
+      FROM projection_outbox_claims c
+      JOIN projection_outbox o ON o.outbox_id=c.outbox_id
+      WHERE c.outbox_id=? AND c.claim_token=? AND c.claim_owner=?
+        AND c.lease_expires_at > ? AND o.processed_at IS NULL
+      LIMIT 1`).get(
+      normalized.outboxId,
+      normalized.token,
+      normalized.owner,
+      now,
+    ) as Record<string, unknown> | undefined;
+    return Number(row?.current ?? 0) === 1;
+  }
+
+  withProjectionMutationFence<T>(
+    row: ProjectionOutboxRowV2,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    return withProjectionApplyFence(this.sqlitePath, row.itemId, row.projection, operation);
   }
 
   listMemoryCenterRows(actor: MemoryAddressV2, limit = 200): MemoryCenterRowV1[] {

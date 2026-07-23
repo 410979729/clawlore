@@ -17,5 +17,10 @@ export interface ExperienceStoreV2Port {
   savePlaybook(playbook: ProceduralPlaybookV2): void;
   getPlaybook(playbookId: string): ProceduralPlaybookV2 | null;
   updatePlaybook(playbook: ProceduralPlaybookV2, expected: ProceduralPlaybookV2): void;
+  supersedePlaybook(
+    expectedPrevious: ProceduralPlaybookV2,
+    successor: ProceduralPlaybookV2,
+    event: ExperienceEventV2,
+  ): void;
   appendEvent(event: ExperienceEventV2): void;
 }

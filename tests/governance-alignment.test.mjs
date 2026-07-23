@@ -410,7 +410,7 @@ test("operator dashboard summarizes cleanup, journal, fts, and experience status
   });
   insertMemoryWith(db, {
     id: "stale-fact",
-    text: "Home gateway current IP was 100.64.0.25.",
+    text: "Home gateway current IP was 192.0.2.25.",
     category: "fact",
     metadata: { state: "confirmed", memory_layer: "durable", valid_until: 1 },
   });

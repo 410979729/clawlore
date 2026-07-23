@@ -233,6 +233,7 @@ export function parsePluginConfig(value) {
         extractMinMessages: parsePositiveInt(cfg.extractMinMessages) ?? 4,
         extractMaxChars: parsePositiveInt(cfg.extractMaxChars) ?? 8_000,
         scopes: typeof cfg.scopes === "object" && cfg.scopes !== null ? cfg.scopes : undefined,
+        allowAgentMemoryWriteTools: cfg.allowAgentMemoryWriteTools !== false,
         enableManagementTools: cfg.enableManagementTools === true,
         allowAgentOperatorTools: cfg.allowAgentOperatorTools === true,
         sessionStrategy,

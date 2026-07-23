@@ -13,12 +13,14 @@ export { registerMemoryContextTool, registerMemoryDebugTool, registerMemoryInspe
 export { registerMemoryArchiveTool, registerMemoryCompactTool, registerMemoryExplainRankTool, registerMemoryGovernTool, registerMemoryPromoteTool, } from "./memory-governance-tools.js";
 export function registerAllMemoryTools(api, context, options = {}) {
     registerMemoryRecallTool(api, context);
-    registerMemoryStoreTool(api, context);
-    if (options.secretIndexToolsEnabled === true) {
-        registerMemoryStoreSecretIndexTool(api, context);
+    if (options.allowAgentMemoryWriteTools !== false) {
+        registerMemoryStoreTool(api, context);
+        if (options.secretIndexToolsEnabled === true) {
+            registerMemoryStoreSecretIndexTool(api, context);
+        }
+        registerMemoryForgetTool(api, context);
+        registerMemoryUpdateTool(api, context);
     }
-    registerMemoryForgetTool(api, context);
-    registerMemoryUpdateTool(api, context);
     if (options.enableManagementTools) {
         registerMemoryStatsTool(api, context);
         registerMemoryDebugTool(api, context);

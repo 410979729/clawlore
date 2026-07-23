@@ -285,9 +285,15 @@ export class SubagentExperienceServiceV2 {
             createdAt: now,
             updatedAt: now,
         };
-        this.store.savePlaybook(next);
-        this.store.updatePlaybook({ ...previous, lifecycle: "superseded", supersededBy: next.playbookId, updatedAt: now }, previous);
-        this.event("playbook", previous.playbookId, "playbook_superseded", actor, reason);
+        this.store.supersedePlaybook(previous, next, {
+            eventId: this.clock.id("event"),
+            entityType: "playbook",
+            entityId: previous.playbookId,
+            eventType: "playbook_superseded",
+            actor,
+            reason,
+            createdAt: now,
+        });
         return next;
     }
     evaluateReplay(input) {

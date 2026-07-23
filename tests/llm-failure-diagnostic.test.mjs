@@ -28,3 +28,28 @@ test("LLM failure diagnostics expose only stable transport categories", () => {
   assert.equal(JSON.stringify(result).includes("private"), false);
   assert.deepEqual(result, { category: "authorization", status: 403, code: "forbidden" });
 });
+
+test("LLM failure diagnostics omit unknown codes even when they look syntactically safe", () => {
+  const secretShaped = [
+    "sk-synthetic-secret-value-1234567890",
+    "Bearer.synthetic-token-material",
+    "eyJhbGciOiJIUzI1NiJ9.synthetic.signature",
+    "https-private.internal-token-value",
+    "x".repeat(200),
+  ];
+  for (const code of secretShaped) {
+    assert.deepEqual(
+      diagnoseLlmFailure({ status: 401, code }),
+      { category: "authentication", status: 401 },
+    );
+    assert.deepEqual(
+      diagnoseLlmFailure({ status: 429, type: code }),
+      { category: "rate_limit", status: 429 },
+    );
+  }
+
+  assert.deepEqual(
+    diagnoseLlmFailure({ code: "ECONNSECRET_SYNTHETIC_VALUE" }),
+    { category: "unknown" },
+  );
+});

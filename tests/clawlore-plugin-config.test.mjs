@@ -28,6 +28,7 @@ test("plugin config preserves privacy-first defaults and local embedding default
   assert.equal(parsed.autoBackup, false);
   assert.equal(parsed.autoRecall, false);
   assert.equal(parsed.recallMode, "full");
+  assert.equal(parsed.allowAgentMemoryWriteTools, true);
   assert.deepEqual(parsed.principalIsolation, {
     enabled: true,
     groupMemory: "deny",
@@ -48,6 +49,15 @@ test("plugin config preserves privacy-first defaults and local embedding default
     errorReminderMaxEntries: 3,
     dedupeErrorSignals: true,
   });
+});
+
+test("plugin config can put the Agent memory surface into read-only mode", () => {
+  const parsed = parsePluginConfig({
+    embedding: {},
+    allowAgentMemoryWriteTools: false,
+  });
+
+  assert.equal(parsed.allowAgentMemoryWriteTools, false);
 });
 
 test("plugin config preserves numeric normalization and legacy session compatibility", () => {

@@ -796,6 +796,14 @@ test("manifest declares all owned tools and marks management tools with config a
   assert.ok(manifest.contracts.tools.includes("memory_govern"));
   assert.ok(manifest.contracts.tools.includes("self_improvement_review"));
 
+  for (const toolName of ["memory_store", "memory_forget", "memory_update"]) {
+    const writeSignal = manifest.toolMetadata[toolName].configSignals[0];
+    assert.equal(writeSignal.rootPath, "plugins.entries.clawlore.config");
+    assert.equal(writeSignal.mode.path, "allowAgentMemoryWriteTools");
+    assert.equal(writeSignal.mode.default, "true");
+    assert.deepEqual(writeSignal.mode.allowed, ["true"]);
+  }
+
   const secretSignal = manifest.toolMetadata.memory_store_secret_index.configSignals[0];
   assert.equal(secretSignal.rootPath, "plugins.entries.clawlore.config");
   assert.equal(secretSignal.mode.path, "secretIndexToolsEnabled");
@@ -851,6 +859,10 @@ test("manifest declares all owned tools and marks management tools with config a
     ),
   );
   assert.equal(
+    manifest.configSchema.properties.allowAgentMemoryWriteTools.default,
+    true,
+  );
+  assert.equal(
     manifest.configSchema.properties.allowAgentOperatorTools.default,
     false,
   );
@@ -860,6 +872,39 @@ test("manifest declares all owned tools and marks management tools with config a
   );
 });
 
+test("Agent memory writes can be removed without disabling read-only recall", () => {
+  const tools = new Map();
+  registerAllMemoryTools(
+    {
+      registerTool(factory, meta) {
+        tools.set(meta.name, factory({ agentId: "audit-agent" }));
+      },
+    },
+    {
+      retriever: { retrieve: async () => [] },
+      store: {},
+      scopeManager: {},
+      embedder: {},
+    },
+    {
+      allowAgentMemoryWriteTools: false,
+      enableManagementTools: false,
+      enableSelfImprovementTools: false,
+      secretIndexToolsEnabled: true,
+    },
+  );
+
+  assert.equal(tools.has("memory_recall"), true);
+  for (const toolName of [
+    "memory_store",
+    "memory_store_secret_index",
+    "memory_forget",
+    "memory_update",
+  ]) {
+    assert.equal(tools.has(toolName), false, toolName);
+  }
+});
+
 test("legacy plaintext backup and destructive startup compaction are disabled", () => {
   const entry = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
   assert.doesNotMatch(entry, /backup timers armed/);
@@ -867,6 +912,7 @@ test("legacy plaintext backup and destructive startup compaction are disabled", 
   assert.match(entry, /startupMode === "dry-run"/);
   assert.match(entry, /dryRun: true/);
   assert.doesNotMatch(entry, /recordCompactionRun\(compactionStateFile\)/);
+  assert.match(entry, /config\.allowAgentMemoryWriteTools !== false/);
   assert.match(entry, /config\.allowAgentOperatorTools === true/);
 });
 

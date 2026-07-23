@@ -6,6 +6,7 @@ import { createMemoryUpgrader } from "../memory-upgrader.js";
 import { isMemoryEntrySafeForEgress, redactMemoryTextForOutput } from "../memory-egress-policy.js";
 import { resolvePrincipalWriteTarget } from "../principal-write-boundary.js";
 import { loadLanceDB } from "../store.js";
+import { collectLanceRows, DEFAULT_LANCE_SCAN_MAX_ROWS, } from "../lance-row-scan.js";
 import { clampInt } from "./cli-runtime-policy.js";
 export function registerMigrationCommands(runtime) {
     const { program, memory, context, runSearch, getSqlDbOrThrow, parseScopeFilter, parseLimitOption, dryRunFromApplyOptions, loadKnowledgeDocs, hasTables, requireExperienceTables, } = runtime;
@@ -31,7 +32,9 @@ export function registerMigrationCommands(runtime) {
             const fs = await import("node:fs/promises");
             const sourceDbPath = options.sourceDb;
             const batchSize = clampInt(parseInt(options.batchSize, 10) || 32, 1, 128);
-            const limit = options.limit ? clampInt(parseInt(options.limit, 10) || 0, 1, 1000000) : undefined;
+            const limit = options.limit
+                ? clampInt(parseInt(options.limit, 10) || 0, 1, DEFAULT_LANCE_SCAN_MAX_ROWS)
+                : undefined;
             const dryRun = options.dryRun === true;
             const skipExisting = options.skipExisting === true;
             const force = options.force === true;
@@ -53,12 +56,13 @@ export function registerMigrationCommands(runtime) {
             const lancedb = await loadLanceDB();
             const db = await lancedb.connect(sourceDbPath);
             const table = await db.openTable("memories");
-            let query = table
+            const scan = await collectLanceRows(() => table
                 .query()
-                .select(["id", "text", "category", "scope", "importance", "timestamp", "metadata"]);
-            if (limit)
-                query = query.limit(limit);
-            const sourceRows = (await query.toArray())
+                .select(["id", "text", "category", "scope", "importance", "timestamp", "metadata"]), { maxRows: limit ?? DEFAULT_LANCE_SCAN_MAX_ROWS });
+            if (!limit && scan.truncated) {
+                throw new Error("CLAWLORE_LANCE_SCAN_LIMIT_EXCEEDED:reembed");
+            }
+            const sourceRows = scan.rows
                 .filter((r) => r && typeof r.text === "string" && r.text.trim().length > 0)
                 .filter((r) => r.id && r.id !== "__schema__");
             const rows = sourceRows.filter((row) => isMemoryEntrySafeForEgress({
@@ -75,7 +79,7 @@ export function registerMigrationCommands(runtime) {
             console.log(`Re-embedding ${rows.length} memories from ${sourceDbPath} → ${context.store.dbPath} (batchSize=${batchSize})`);
             if (dryRun) {
                 console.log("DRY RUN - No memories will be written");
-                console.log(`First example: ${rows[0].id?.slice?.(0, 8)} ${redactMemoryTextForOutput(String(rows[0].text)).slice(0, 80)}`);
+                console.log(`First example: ${String(rows[0].id).slice(0, 8)} ${redactMemoryTextForOutput(String(rows[0].text)).slice(0, 80)}`);
                 return;
             }
             let processed = safetySkipped;

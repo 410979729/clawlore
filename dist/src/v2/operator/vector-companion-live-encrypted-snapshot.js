@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile, } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { enforcePrivatePath, ensurePrivateDirectory } from "../../file-privacy.js";
+import { collectLanceRows } from "../../lance-row-scan.js";
 import { createEncryptedGenericSnapshotArchiveV2, createFileSecretRefKeyProviderV2, restoreEncryptedGenericSnapshotArchiveV2, } from "./encrypted-snapshot-archive.js";
 const require = createRequire(import.meta.url);
 function openSqlite(path, readOnly = false) {
@@ -143,7 +144,11 @@ async function inspectVectorRows(root) {
     const db = await lancedb.connect(root);
     const table = await db.openTable("memories");
     try {
-        const ids = (await table.query().select(["id"]).toArray()).map((row) => String(row.id)).sort();
+        const scan = await collectLanceRows(() => table.query().select(["id"]));
+        if (scan.truncated) {
+            throw new Error("CLAWLORE_LANCE_SCAN_LIMIT_EXCEEDED:vector-snapshot");
+        }
+        const ids = scan.rows.map((row) => String(row.id)).sort();
         return { rowCount: ids.length, rowIdDigest: sha256(JSON.stringify(ids)) };
     }
     finally {

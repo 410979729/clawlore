@@ -7,6 +7,10 @@ import { createMemoryUpgrader } from "../memory-upgrader.js";
 import { isMemoryEntrySafeForEgress, redactMemoryTextForOutput } from "../memory-egress-policy.js";
 import { resolvePrincipalWriteTarget } from "../principal-write-boundary.js";
 import { loadLanceDB, type MemoryEntry } from "../store.js";
+import {
+  collectLanceRows,
+  DEFAULT_LANCE_SCAN_MAX_ROWS,
+} from "../lance-row-scan.js";
 
 import {
   clampInt,
@@ -52,7 +56,9 @@ export function registerMigrationCommands(runtime: CliRegistrationContext): void
 
         const sourceDbPath = options.sourceDb as string;
         const batchSize = clampInt(parseInt(options.batchSize, 10) || 32, 1, 128);
-        const limit = options.limit ? clampInt(parseInt(options.limit, 10) || 0, 1, 1000000) : undefined;
+        const limit = options.limit
+          ? clampInt(parseInt(options.limit, 10) || 0, 1, DEFAULT_LANCE_SCAN_MAX_ROWS)
+          : undefined;
         const dryRun = options.dryRun === true;
         const skipExisting = options.skipExisting === true;
         const force = options.force === true;
@@ -76,13 +82,16 @@ export function registerMigrationCommands(runtime: CliRegistrationContext): void
         const db = await lancedb.connect(sourceDbPath);
         const table = await db.openTable("memories");
 
-        let query = table
-          .query()
-          .select(["id", "text", "category", "scope", "importance", "timestamp", "metadata"]);
-
-        if (limit) query = query.limit(limit);
-
-        const sourceRows = (await query.toArray())
+        const scan = await collectLanceRows<Record<string, unknown>>(
+          () => table
+            .query()
+            .select(["id", "text", "category", "scope", "importance", "timestamp", "metadata"]),
+          { maxRows: limit ?? DEFAULT_LANCE_SCAN_MAX_ROWS },
+        );
+        if (!limit && scan.truncated) {
+          throw new Error("CLAWLORE_LANCE_SCAN_LIMIT_EXCEEDED:reembed");
+        }
+        const sourceRows = scan.rows
           .filter((r: any) => r && typeof r.text === "string" && r.text.trim().length > 0)
           .filter((r: any) => r.id && r.id !== "__schema__");
         const rows = sourceRows.filter((row: any) => isMemoryEntrySafeForEgress({
@@ -104,7 +113,7 @@ export function registerMigrationCommands(runtime: CliRegistrationContext): void
 
         if (dryRun) {
           console.log("DRY RUN - No memories will be written");
-          console.log(`First example: ${rows[0].id?.slice?.(0, 8)} ${redactMemoryTextForOutput(String(rows[0].text)).slice(0, 80)}`);
+          console.log(`First example: ${String(rows[0].id).slice(0, 8)} ${redactMemoryTextForOutput(String(rows[0].text)).slice(0, 80)}`);
           return;
         }
 

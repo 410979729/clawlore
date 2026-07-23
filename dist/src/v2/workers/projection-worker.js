@@ -62,13 +62,26 @@ export class ProjectionWorkerV2 {
             }, Math.max(50, Math.floor(this.leaseDurationMs / 3)));
             renewalTimer.unref?.();
             try {
-                const memory = this.truth.get(row.itemId);
-                // A newer truth mutation may commit while an older lease is in flight.
-                // Obsolete rows complete without projection so late upserts cannot
-                // cross a correction/archive/purge tombstone.
-                if (isCurrentProjectionMutation(row, memory))
-                    await adapter.apply(row, memory);
-                if (!leaseLost && this.truth.markOutboxProcessed(claim)) {
+                let claimCompleted = false;
+                await this.truth.withProjectionMutationFence(row, async () => {
+                    // The per-item/projection fence orders external side effects. Recheck
+                    // the lease only after acquiring it so a stale waiter can never apply
+                    // after the worker that took over its claim.
+                    if (leaseLost || !this.truth.isOutboxClaimCurrent(claim)) {
+                        leaseLost = true;
+                        return;
+                    }
+                    const memory = this.truth.get(row.itemId);
+                    // A newer truth mutation may commit while an older lease is in flight.
+                    // Obsolete rows complete without projection so late upserts cannot
+                    // cross a correction/archive/purge tombstone.
+                    if (isCurrentProjectionMutation(row, memory))
+                        await adapter.apply(row, memory);
+                    claimCompleted = !leaseLost && this.truth.markOutboxProcessed(claim);
+                    if (!claimCompleted)
+                        leaseLost = true;
+                });
+                if (claimCompleted) {
                     processed += 1;
                 }
                 else {
