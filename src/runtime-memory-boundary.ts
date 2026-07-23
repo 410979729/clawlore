@@ -162,8 +162,21 @@ export function resolveRuntimeMemoryBoundary(input: {
   const sessionKey = pick(contexts, ["sessionKey", "session_key"]);
   const session = parseSessionBoundary(sessionKey);
   const chatType = explicitChatType(contexts) ?? session.chatType;
-  const platform = pick(contexts, ["platform", "provider", "surface", "channelId", "channel_id"])
-    ?? session.platform;
+  // OpenClaw agent hooks expose the provider separately from channelId.
+  // For Telegram DMs, channelId is the numeric peer id; treating it as the
+  // platform splits automatic capture/recall from CLI and tool writes.
+  const platform = pick(contexts, [
+    "platform",
+    "provider",
+    "surface",
+    "channel",
+    "messageProvider",
+    "message_provider",
+  ])
+    ?? session.platform
+    // Legacy plugin fixtures used channelId as a provider name. Keep that
+    // fallback only after explicit provider fields and the session boundary.
+    ?? pick(contexts, ["channelId", "channel_id"]);
   const accountId = pick(contexts, ["accountId", "account_id"]) ?? session.accountId ?? "default";
   const senderId = pick(contexts, ["senderId", "sender_id", "userId", "user_id", "from"]);
   const conversationId = pick(contexts, [
