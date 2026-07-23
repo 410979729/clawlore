@@ -84,7 +84,7 @@ class MemoryStoreRuntime {
         if (this.initPromise) {
             return this.initPromise;
         }
-        this.initPromise = this.doInitialize().catch(async (err) => {
+        this.initPromise = this.runWithFileLock(() => this.doInitialize()).catch(async (err) => {
             await this.releaseInitializationResources();
             const stableError = err instanceof Error ? err : new Error(String(err));
             this.initializationFailure = stableError;
@@ -1499,30 +1499,32 @@ class MemoryStoreRuntime {
         if (this.sqliteVectorStore) {
             return { success: true };
         }
-        try {
-            const indices = await this.table.listIndices();
-            for (const idx of indices) {
-                if (idx.indexType === "FTS" || idx.columns?.includes("text")) {
-                    try {
-                        await this.table.dropIndex(idx.name || "text");
-                    }
-                    catch (err) {
-                        console.warn(`clawlore: dropIndex(${idx.name || "text"}) failed: ${diagnosticErrorSummary(err)}`);
+        return this.runWithFileLock(async () => {
+            try {
+                const indices = await this.table.listIndices();
+                for (const idx of indices) {
+                    if (idx.indexType === "FTS" || idx.columns?.includes("text")) {
+                        try {
+                            await this.table.dropIndex(idx.name || "text");
+                        }
+                        catch (err) {
+                            console.warn(`clawlore: dropIndex(${idx.name || "text"}) failed: ${diagnosticErrorSummary(err)}`);
+                        }
                     }
                 }
+                // Recreate
+                await this.createFtsIndex(this.table);
+                this.ftsIndexCreated = true;
+                this._lastFtsError = null;
+                return { success: true };
             }
-            // Recreate
-            await this.createFtsIndex(this.table);
-            this.ftsIndexCreated = true;
-            this._lastFtsError = null;
-            return { success: true };
-        }
-        catch (err) {
-            const msg = diagnosticErrorSummary(err);
-            this._lastFtsError = msg;
-            this.ftsIndexCreated = false;
-            return { success: false, error: msg };
-        }
+            catch (err) {
+                const msg = diagnosticErrorSummary(err);
+                this._lastFtsError = msg;
+                this.ftsIndexCreated = false;
+                return { success: false, error: msg };
+            }
+        });
     }
     /**
      * Fetch memories older than `maxTimestamp` including their raw vectors.

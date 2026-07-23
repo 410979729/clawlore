@@ -17,6 +17,11 @@ import {
 import type { WorkspaceBoundaryConfig } from "./workspace-boundary.js";
 import type { ReflectionThinkLevel } from "./reflection-contracts.js";
 import type { ManualRecallConfidenceConfig } from "./manual-recall-confidence.js";
+import {
+  DEFAULT_AGENT_TOOL_PROFILE,
+  isAgentToolProfile,
+  type AgentToolProfile,
+} from "./agent-tool-profile.js";
 export type { ReflectionThinkLevel } from "./reflection-contracts.js";
 
 export type SessionStrategy = "memoryReflection" | "systemSessionMemory" | "none";
@@ -128,10 +133,7 @@ export interface PluginConfig {
     definitions?: Record<string, { description: string }>;
     agentAccess?: Record<string, string[]>;
   };
-  allowAgentMemoryWriteTools?: boolean;
-  enableManagementTools?: boolean;
-  allowAgentOperatorTools?: boolean;
-  secretIndexToolsEnabled?: boolean;
+  agentToolProfile: AgentToolProfile;
   sessionStrategy?: SessionStrategy;
   sessionMemory?: { enabled?: boolean; messageCount?: number };
   selfImprovement?: {
@@ -294,6 +296,23 @@ export function parsePluginConfig(value: unknown): PluginConfig {
     throw new Error("clawlore config required");
   }
   const cfg = value as Record<string, unknown>;
+  const legacyToolGates = [
+    "allowAgentMemoryWriteTools",
+    "enableManagementTools",
+    "allowAgentOperatorTools",
+    "secretIndexToolsEnabled",
+  ].filter((key) => cfg[key] !== undefined);
+  if (legacyToolGates.length > 0) {
+    throw new Error(
+      `deprecated Agent tool gates are not supported (${legacyToolGates.join(", ")}); use agentToolProfile`,
+    );
+  }
+  if (cfg.agentToolProfile !== undefined && !isAgentToolProfile(cfg.agentToolProfile)) {
+    throw new Error("agentToolProfile is invalid");
+  }
+  const agentToolProfile = isAgentToolProfile(cfg.agentToolProfile)
+    ? cfg.agentToolProfile
+    : DEFAULT_AGENT_TOOL_PROFILE;
 
   const embedding = cfg.embedding as Record<string, unknown> | undefined;
   if (!embedding) {
@@ -440,9 +459,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
     extractMinMessages: parsePositiveInt(cfg.extractMinMessages) ?? 4,
     extractMaxChars: parsePositiveInt(cfg.extractMaxChars) ?? 8_000,
     scopes: typeof cfg.scopes === "object" && cfg.scopes !== null ? cfg.scopes as any : undefined,
-    allowAgentMemoryWriteTools: cfg.allowAgentMemoryWriteTools !== false,
-    enableManagementTools: cfg.enableManagementTools === true,
-    allowAgentOperatorTools: cfg.allowAgentOperatorTools === true,
+    agentToolProfile,
     sessionStrategy,
     selfImprovement: typeof cfg.selfImprovement === "object" && cfg.selfImprovement !== null
       ? {

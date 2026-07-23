@@ -35,7 +35,7 @@ export function registerAllMemoryTools(api, context, options = {}) {
     }
     if (options.enableSelfImprovementTools !== false) {
         registerSelfImprovementLogTool(api, context);
-        if (options.enableManagementTools) {
+        if (options.enableSelfImprovementTools === true || options.enableManagementTools) {
             registerSelfImprovementExtractSkillTool(api, context);
             registerSelfImprovementReviewTool(api, context);
         }

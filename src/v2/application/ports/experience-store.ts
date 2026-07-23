@@ -7,16 +7,28 @@ import type {
 } from "../../domain/experience.js";
 
 export interface ExperienceStoreV2Port {
-  saveSnapshot(snapshot: SubagentSnapshotV2): void;
+  saveSnapshot(snapshot: SubagentSnapshotV2, event?: ExperienceEventV2): void;
   getSnapshot(snapshotId: string): SubagentSnapshotV2 | null;
-  saveScratch(scratch: ChildScratchV2): void;
-  finalizeSnapshot(snapshot: SubagentSnapshotV2, episode: ExperienceEpisodeV2): void;
+  saveScratch(scratch: ChildScratchV2, event?: ExperienceEventV2): void;
+  finalizeSnapshot(
+    snapshot: SubagentSnapshotV2,
+    episode: ExperienceEpisodeV2,
+    event?: ExperienceEventV2,
+  ): void;
   getEpisode(episodeId: string): ExperienceEpisodeV2 | null;
-  updateEpisode(episode: ExperienceEpisodeV2, expected: ExperienceEpisodeV2): void;
+  updateEpisode(
+    episode: ExperienceEpisodeV2,
+    expected: ExperienceEpisodeV2,
+    event?: ExperienceEventV2,
+  ): void;
   listEpisodes(episodeIds: string[]): ExperienceEpisodeV2[];
-  savePlaybook(playbook: ProceduralPlaybookV2): void;
+  savePlaybook(playbook: ProceduralPlaybookV2, event?: ExperienceEventV2): void;
   getPlaybook(playbookId: string): ProceduralPlaybookV2 | null;
-  updatePlaybook(playbook: ProceduralPlaybookV2, expected: ProceduralPlaybookV2): void;
+  updatePlaybook(
+    playbook: ProceduralPlaybookV2,
+    expected: ProceduralPlaybookV2,
+    event?: ExperienceEventV2,
+  ): void;
   supersedePlaybook(
     expectedPrevious: ProceduralPlaybookV2,
     successor: ProceduralPlaybookV2,

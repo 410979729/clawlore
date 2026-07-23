@@ -51,21 +51,44 @@ function safeErrorName(value) {
     return SAFE_ERROR_NAMES.has(normalized) ? normalized : undefined;
 }
 function errorRecord(error) {
-    return error && typeof error === "object" && !Array.isArray(error)
-        ? error
-        : null;
+    try {
+        return error && typeof error === "object" && !Array.isArray(error)
+            ? error
+            : null;
+    }
+    catch {
+        return null;
+    }
 }
-function numericStatus(record) {
+function safeProperty(record, key) {
     if (!record)
         return undefined;
-    for (const value of [record.status, record.statusCode]) {
-        const status = typeof value === "number" ? value : Number(value);
+    try {
+        return record[key];
+    }
+    catch {
+        return undefined;
+    }
+}
+function numericStatus(record, visited = new WeakSet(), depth = 0) {
+    if (!record || depth > 8 || visited.has(record))
+        return undefined;
+    visited.add(record);
+    for (const value of [
+        safeProperty(record, "status"),
+        safeProperty(record, "statusCode"),
+    ]) {
+        const status = typeof value === "number"
+            ? value
+            : typeof value === "string" && value.trim() !== ""
+                ? Number(value)
+                : Number.NaN;
         if (Number.isInteger(status) && status >= 100 && status <= 599)
             return status;
     }
-    const response = errorRecord(record.response);
-    if (response && response !== record)
-        return numericStatus(response);
+    const response = errorRecord(safeProperty(record, "response"));
+    if (response)
+        return numericStatus(response, visited, depth + 1);
     return undefined;
 }
 /**
@@ -76,10 +99,11 @@ function numericStatus(record) {
 export function diagnoseLlmFailure(error) {
     const record = errorRecord(error);
     const status = numericStatus(record);
-    const code = safeCode(record?.code) ?? safeCode(record?.type);
-    const name = safeErrorName(record?.name)
-        ?? (error instanceof Error ? safeErrorName(error.name) : undefined);
-    const message = error instanceof Error ? error.message : "";
+    const code = safeCode(safeProperty(record, "code"))
+        ?? safeCode(safeProperty(record, "type"));
+    const name = safeErrorName(safeProperty(record, "name"));
+    const rawMessage = safeProperty(record, "message");
+    const message = typeof rawMessage === "string" ? rawMessage : "";
     let category = "unknown";
     if (status === 401)
         category = "authentication";

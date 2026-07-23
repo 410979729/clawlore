@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { chmod, mkdir, mkdtemp, rm, stat } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,7 +18,15 @@ const { findSecret } = jiti("../src/secret-redaction.ts");
 
 class FakeVectorPort {
   constructor(rows) { this.rows = rows; }
-  async listRows() { return this.rows.map((row) => ({ ...row })); }
+  async scanRows(consume) {
+    const rows = this.rows.map((row) => ({ ...row }));
+    await consume(rows);
+    return { scannedRows: rows.length, truncated: false };
+  }
+  async existingIds(ids) {
+    const requested = new Set(ids);
+    return this.rows.filter((row) => requested.has(row.id)).map((row) => row.id).sort();
+  }
   async deleteIds(ids) {
     const planned = new Set(ids);
     const before = this.rows.length;
@@ -39,6 +47,7 @@ test("persisted-secret remediation is digest-bound, snapshot-gated, and converge
   const memoryDbPath = join(root, "memory.sqlite3");
   const conversationDbPath = join(root, "conversation.sqlite3");
   const vectorPath = join(root, "vectors");
+  const artifactPath = join(root, "artifacts");
   const secret = "SyntheticProviderCredentialValue123456";
   try {
     const memory = new DatabaseSync(memoryDbPath);
@@ -97,9 +106,32 @@ test("persisted-secret remediation is digest-bound, snapshot-gated, and converge
 
     const vector = new FakeVectorPort([{ id: "legacy-one", text: unsafeText, metadata: "{}" }]);
     await mkdir(vectorPath, { mode: 0o755 });
-    const input = { memoryDbPath, conversationDbPath, vectorPath, vector };
+    await mkdir(artifactPath, { mode: 0o700 });
+    await writeFile(
+      join(artifactPath, "history.jsonl"),
+      "{\"summary\":\"No credential values are persisted in this fixture.\"}\n",
+      { mode: 0o600 },
+    );
+    const incomplete = await buildPersistedSecretRemediationPlan({
+      memoryDbPath,
+      conversationDbPath,
+      vectorPath,
+      vector,
+    });
+    assert.equal(incomplete.receipt.status, "blocked");
+    assert.ok(incomplete.receipt.blockers.includes("persisted_artifact_roots_not_supplied"));
+
+    const input = {
+      memoryDbPath,
+      conversationDbPath,
+      vectorPath,
+      vector,
+      artifactRoots: [artifactPath],
+    };
     const plan = await buildPersistedSecretRemediationPlan(input);
     assert.equal(plan.receipt.status, "ready");
+    assert.equal(plan.receipt.artifactCoverage.complete, true);
+    assert.equal(plan.receipt.preAudit.artifactFields, 0);
     assert.deepEqual(plan.receipt.targets, {
       v1MemoryItems: 1,
       v2MemoryItems: 2,
@@ -173,7 +205,13 @@ test("persisted-secret remediation is digest-bound, snapshot-gated, and converge
       now: () => new Date("2026-07-22T01:00:00Z"),
     });
     assert.equal(receipt.status, "pass");
-    assert.deepEqual(receipt.postAudit, { memoryFields: 0, conversationFields: 0, vectorFields: 0 });
+    assert.deepEqual(receipt.postAudit, {
+      memoryFields: 0,
+      conversationFields: 0,
+      vectorFields: 0,
+      artifactFields: 0,
+      artifactCoverageComplete: true,
+    });
     assert.equal(vector.rows.length, 0);
     const verifyMemory = new DatabaseSync(memoryDbPath, { readOnly: true });
     assert.equal(verifyMemory.prepare("SELECT COUNT(*) AS count FROM memory_truth").get().count, 0);

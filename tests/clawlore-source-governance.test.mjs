@@ -34,7 +34,7 @@ const ROOT_MODULES_BY_LAYER = {
     "runtime-shadow-registration.ts",
   ],
   domain: [
-    "auto-capture-policy.ts", "auto-recall-query.ts", "auto-recall-session-boundary.ts", "bounded-ttl-map.ts", "capture-safety.ts",
+    "agent-tool-profile.ts", "auto-capture-policy.ts", "auto-recall-query.ts", "auto-recall-session-boundary.ts", "bounded-ttl-map.ts", "capture-safety.ts",
     "decay-engine.ts", "experience-models.ts", "experience-persistence-policy.ts", "experience-playbook-successor-policy.ts", "experience-schemas.ts",
     "extraction-prompts.ts", "lifecycle-metadata.ts", "memory-categories.ts", "memory-egress-policy.ts", "memory-entry-write-policy.ts", "memory-merge-policy.ts", "memory-metadata-policy.ts", "noise-filter.ts",
     "manual-recall-confidence.ts", "manual-recall-lexical-evidence.ts", "noise-prototypes.ts", "preference-slots.ts", "product-identity.ts", "self-improvement-content-policy.ts",
@@ -81,7 +81,7 @@ const ROOT_MODULES_BY_LAYER = {
     "reflection-event-store.ts", "reflection-item-store.ts",
     "reflection-store.ts", "secret-index.ts",
     "sql-authority-migration.ts", "sql-truth-store.ts", "sqlite-vector-store.ts",
-    "persisted-secret-scan.ts", "persisted-store-permissions.ts",
+    "persisted-secret-artifact-audit.ts", "persisted-secret-scan.ts", "persisted-store-permissions.ts",
     "storage-path.ts", "store.ts", "vector-scope-metadata-updater.ts",
     "workspace-boundary.ts", "markdown-mirror.ts",
   ],

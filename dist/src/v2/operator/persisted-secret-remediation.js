@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { findSecret, redactKnownSecrets } from "../../secret-redaction.js";
+import { auditPersistedSecretArtifactRoots } from "../../persisted-secret-artifact-audit.js";
 import { quoteIdentifier, scanPersistedSecretDatabase, } from "../../persisted-secret-scan.js";
 import { PERSISTED_SECRET_VECTOR_FIELDS } from "../../persisted-secret-policy.js";
 import { inspectOwnerOnlySqliteFamily, inspectOwnerOnlyTree, tightenOwnerOnlySqliteFamily, tightenOwnerOnlyTree, } from "../../persisted-store-permissions.js";
@@ -118,16 +119,30 @@ export async function buildPersistedSecretRemediationPlan(input) {
     try {
         const memoryScan = scanPersistedSecretDatabase(memory, "memory");
         const conversationScan = scanPersistedSecretDatabase(conversation, "conversation");
-        const vectorRows = await input.vector.listRows();
         const vectorHits = [];
-        for (const row of vectorRows) {
-            for (const field of PERSISTED_SECRET_VECTOR_FIELDS) {
-                const value = String(row[field] ?? "");
-                const secret = value ? findSecret(value) : null;
-                if (secret)
-                    vectorHits.push({ id: row.id, field, pattern: secret.name, payloadSha256: sha256(value) });
+        const vectorScan = await input.vector.scanRows((rows) => {
+            for (const row of rows) {
+                for (const field of PERSISTED_SECRET_VECTOR_FIELDS) {
+                    const value = String(row[field] ?? "");
+                    const secret = value ? findSecret(value) : null;
+                    if (secret) {
+                        vectorHits.push({
+                            id: row.id,
+                            field,
+                            pattern: secret.name,
+                            payloadSha256: sha256(value),
+                        });
+                    }
+                }
             }
+        });
+        if (vectorScan.truncated) {
+            throw new Error("CLAWLORE_LANCE_SCAN_LIMIT_EXCEEDED:persisted-secret-remediation");
         }
+        const artifactRoots = input.artifactRoots ?? [];
+        const artifactAudit = artifactRoots.length > 0
+            ? await auditPersistedSecretArtifactRoots(artifactRoots)
+            : null;
         const v1Ids = new Set(vectorHits.map((hit) => hit.id));
         const v2Ids = new Set();
         const redactions = [];
@@ -139,8 +154,7 @@ export async function buildPersistedSecretRemediationPlan(input) {
         for (const hit of conversationScan.hits)
             redactions.push(redactionTarget("conversation", hit));
         expandMirrorIdentities(memory, v1Ids, v2Ids);
-        const vectorRowIds = new Set(vectorRows.map((row) => row.id));
-        const vectorIds = [...v1Ids].filter((id) => vectorRowIds.has(id)).sort();
+        const vectorIds = (await input.vector.existingIds([...v1Ids])).sort();
         const sortedV1 = [...v1Ids].sort();
         const sortedV2 = [...v2Ids].sort();
         redactions.sort((left, right) => `${left.kind}\0${left.table}\0${left.rowid}\0${left.field}`
@@ -149,6 +163,9 @@ export async function buildPersistedSecretRemediationPlan(input) {
             ...memoryScan.hits.map((hit) => `memory\0${hit.table}\0${hit.rowid}\0${hit.field}\0${hit.payloadSha256}`),
             ...conversationScan.hits.map((hit) => `conversation\0${hit.table}\0${hit.rowid}\0${hit.field}\0${hit.payloadSha256}`),
             ...vectorHits.map((hit) => `vector\0${sha256(hit.id)}\0${hit.field}\0${hit.payloadSha256}`),
+            ...(artifactAudit
+                ? [`artifacts\0${artifactAudit.sourceStateDigest}`]
+                : ["artifacts\0missing"]),
         ].sort();
         const sourceStateDigest = sha256(JSON.stringify(stateMaterial));
         const targets = {
@@ -179,17 +196,54 @@ export async function buildPersistedSecretRemediationPlan(input) {
                 afterSha256: entry.afterSha256,
             })),
         }));
+        const blockers = [];
+        if (!artifactAudit)
+            blockers.push("persisted_artifact_roots_not_supplied");
+        if (artifactAudit && !artifactAudit.coverage.complete) {
+            blockers.push("persisted_artifact_inventory_incomplete");
+        }
+        if ((artifactAudit?.secretBearingFields ?? 0) > 0) {
+            blockers.push("persisted_artifact_secret_material_requires_separate_remediation");
+        }
+        if (artifactAudit?.ownerOnlyMode === false) {
+            blockers.push("persisted_artifact_not_owner_only");
+        }
+        const permissionStates = [
+            inspectOwnerOnlySqliteFamily(input.memoryDbPath).ownerOnly,
+            inspectOwnerOnlySqliteFamily(input.conversationDbPath).ownerOnly,
+            inspectOwnerOnlyTree(input.vectorPath).ownerOnly,
+            artifactAudit?.ownerOnlyMode,
+        ];
+        if (permissionStates.some((value) => value === null)) {
+            blockers.push("owner_only_permission_verification_unavailable");
+        }
+        const permissionFixRequired = permissionStates.some((value) => value === false);
+        const artifactCoverage = {
+            complete: Boolean(artifactAudit?.coverage.complete),
+            roots: artifactAudit?.coverage.roots ?? 0,
+            discoveredFiles: artifactAudit?.coverage.discoveredFiles ?? 0,
+            scannedFiles: artifactAudit?.coverage.scannedFiles ?? 0,
+            encryptedFiles: artifactAudit?.coverage.encryptedFiles ?? 0,
+            unsupportedFiles: artifactAudit?.coverage.unsupportedFiles ?? 0,
+        };
         const planDigest = sha256(JSON.stringify({
             sourceStateDigest,
             targetIdentityDigest,
             targets,
             patternCounts,
+            artifactCoverage,
+            permissionFixRequired,
+            blockers,
         }));
         const receipt = {
-            schemaVersion: 1,
+            schemaVersion: 2,
             phase: "clawlore-persisted-secret-remediation-plan",
             plannedAt: (input.now?.() ?? new Date()).toISOString(),
-            status: Object.values(targets).some((value) => value > 0) ? "ready" : "clean",
+            status: blockers.length > 0
+                ? "blocked"
+                : Object.values(targets).some((value) => value > 0)
+                    ? "ready"
+                    : "clean",
             readOnly: true,
             emitsSecretValues: false,
             emitsMemoryContent: false,
@@ -198,22 +252,22 @@ export async function buildPersistedSecretRemediationPlan(input) {
                 memory: opaquePath(input.memoryDbPath),
                 conversation: opaquePath(input.conversationDbPath),
                 vector: opaquePath(input.vectorPath),
+                artifacts: artifactAudit?.rootRefs ?? [],
             },
             preAudit: {
                 memoryFields: memoryScan.summary.secretBearingFields,
                 conversationFields: conversationScan.summary.secretBearingFields,
                 vectorFields: vectorHits.length,
+                artifactFields: artifactAudit?.secretBearingFields ?? 0,
             },
+            artifactCoverage,
+            blockers,
             targets,
             patternCounts,
             sourceStateDigest,
             targetIdentityDigest,
             planDigest,
-            permissionFixRequired: [
-                inspectOwnerOnlySqliteFamily(input.memoryDbPath).ownerOnly,
-                inspectOwnerOnlySqliteFamily(input.conversationDbPath).ownerOnly,
-                inspectOwnerOnlyTree(input.vectorPath).ownerOnly,
-            ].some((value) => value === false),
+            permissionFixRequired,
             decision: {
                 authorizesApply: false,
                 requiresExplicitApproval: true,
@@ -320,6 +374,9 @@ export async function executePersistedSecretRemediation(input) {
     if (input.tightenPermissions !== true)
         throw new Error("persisted secret remediation requires permission tightening");
     const plan = await buildPersistedSecretRemediationPlan(input);
+    if (plan.receipt.status === "blocked") {
+        throw new Error(`persisted secret remediation is blocked: ${plan.receipt.blockers.join(",")}`);
+    }
     if (!/^[a-f0-9]{64}$/.test(input.expectedPlanDigest)
         || input.expectedPlanDigest !== plan.receipt.planDigest) {
         throw new Error("persisted secret remediation plan digest mismatch");
@@ -348,9 +405,17 @@ export async function executePersistedSecretRemediation(input) {
         if (vectorDeleted !== plan.internal.vectorIds.length) {
             throw new Error("vector remediation did not delete every planned item");
         }
-        const residualVector = (await input.vector.listRows()).flatMap((row) => PERSISTED_SECRET_VECTOR_FIELDS.map((field) => findSecret(String(row[field] ?? ""))).filter(Boolean));
-        if (residualVector.length !== 0)
+        let residualVectorFields = 0;
+        const residualScan = await input.vector.scanRows((rows) => {
+            for (const row of rows) {
+                residualVectorFields += PERSISTED_SECRET_VECTOR_FIELDS
+                    .map((field) => findSecret(String(row[field] ?? "")))
+                    .filter(Boolean).length;
+            }
+        });
+        if (residualScan.truncated || residualVectorFields !== 0) {
             throw new Error("vector post-remediation persisted-secret audit is not clean");
+        }
         const memoryIntegrity = verifyDatabase(memory, "memory");
         const conversationIntegrity = verifyDatabase(conversation, "conversation");
         const fk = foreignKeyViolations(memory) + foreignKeyViolations(conversation);
@@ -369,7 +434,7 @@ export async function executePersistedSecretRemediation(input) {
         if (post.receipt.status !== "clean")
             throw new Error("persisted secret remediation post-plan is not clean");
         return {
-            schemaVersion: 1,
+            schemaVersion: 2,
             phase: "clawlore-persisted-secret-remediation-apply",
             appliedAt,
             status: "pass",
@@ -382,7 +447,13 @@ export async function executePersistedSecretRemediation(input) {
             credentialsRotatedBeforeApply: true,
             permissionsTightened: true,
             applied: plan.receipt.targets,
-            postAudit: { memoryFields: 0, conversationFields: 0, vectorFields: 0 },
+            postAudit: {
+                memoryFields: 0,
+                conversationFields: 0,
+                vectorFields: 0,
+                artifactFields: 0,
+                artifactCoverageComplete: true,
+            },
             integrity: { memory: memoryIntegrity, conversation: conversationIntegrity, foreignKeyViolations: 0 },
             rollbackRequired: false,
         };

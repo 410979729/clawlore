@@ -53,3 +53,28 @@ test("LLM failure diagnostics omit unknown codes even when they look syntactical
     { category: "unknown" },
   );
 });
+
+test("LLM failure diagnostics are total for cyclic and hostile response objects", () => {
+  const first = {};
+  const second = {};
+  first.response = second;
+  second.response = first;
+  assert.deepEqual(diagnoseLlmFailure(first), { category: "unknown" });
+
+  const hostile = {};
+  Object.defineProperties(hostile, {
+    status: { get() { throw new Error("status getter must not escape"); } },
+    code: { get() { throw new Error("code getter must not escape"); } },
+    message: { get() { throw new Error("message getter must not escape"); } },
+    response: { get() { throw new Error("response getter must not escape"); } },
+  });
+  assert.deepEqual(diagnoseLlmFailure(hostile), { category: "unknown" });
+
+  assert.deepEqual(diagnoseLlmFailure({
+    status: { valueOf() { throw new Error("coercion must not run"); } },
+    code: "rate_limit_error",
+  }), {
+    category: "unknown",
+    code: "rate_limit_error",
+  });
+});

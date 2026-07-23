@@ -28,7 +28,7 @@ test("plugin config preserves privacy-first defaults and local embedding default
   assert.equal(parsed.autoBackup, false);
   assert.equal(parsed.autoRecall, false);
   assert.equal(parsed.recallMode, "full");
-  assert.equal(parsed.allowAgentMemoryWriteTools, true);
+  assert.equal(parsed.agentToolProfile, "memory-write");
   assert.deepEqual(parsed.principalIsolation, {
     enabled: true,
     groupMemory: "deny",
@@ -54,10 +54,37 @@ test("plugin config preserves privacy-first defaults and local embedding default
 test("plugin config can put the Agent memory surface into read-only mode", () => {
   const parsed = parsePluginConfig({
     embedding: {},
-    allowAgentMemoryWriteTools: false,
+    agentToolProfile: "read-only",
   });
 
-  assert.equal(parsed.allowAgentMemoryWriteTools, false);
+  assert.equal(parsed.agentToolProfile, "read-only");
+  assert.throws(
+    () => parsePluginConfig({ embedding: {}, agentToolProfile: "write-everything" }),
+    /agentToolProfile is invalid/,
+  );
+});
+
+test("plugin config rejects every deprecated boolean Agent tool gate", () => {
+  for (const [key, value] of [
+    ["allowAgentMemoryWriteTools", false],
+    ["enableManagementTools", true],
+    ["allowAgentOperatorTools", true],
+    ["secretIndexToolsEnabled", true],
+  ]) {
+    assert.throws(
+      () => parsePluginConfig({ embedding: {}, [key]: value }),
+      /deprecated Agent tool gates are not supported/,
+      key,
+    );
+  }
+  assert.throws(
+    () => parsePluginConfig({
+      embedding: {},
+      agentToolProfile: "operator",
+      enableManagementTools: true,
+    }),
+    /deprecated Agent tool gates are not supported/,
+  );
 });
 
 test("plugin config preserves numeric normalization and legacy session compatibility", () => {

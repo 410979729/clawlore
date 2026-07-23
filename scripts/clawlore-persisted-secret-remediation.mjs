@@ -2,16 +2,27 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { chmod, readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import * as lancedb from "@lancedb/lancedb";
 import {
   buildPersistedSecretRemediationPlan,
   executePersistedSecretRemediation,
 } from "../dist/src/v2/operator/persisted-secret-remediation.js";
+import {
+  DEFAULT_LANCE_SCAN_MAX_ROWS,
+  scanLanceRows,
+} from "../dist/src/lance-row-scan.js";
+import { withMemoryWriteLock } from "../dist/src/memory-write-lock.js";
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function pathIsInside(root, candidate) {
+  const relation = relative(resolve(root), resolve(candidate));
+  return relation === ""
+    || (relation !== ".." && !relation.startsWith(`..${sep}`) && !isAbsolute(relation));
 }
 
 function escapeSql(value) {
@@ -31,24 +42,50 @@ class LanceVectorPort {
     return this.table;
   }
 
-  async listRows() {
+  async scanRows(consume) {
     const table = await this.open();
-    return (await table.query().select(["id", "text", "metadata"]).toArray()).map((row) => ({
-      id: String(row.id),
-      text: String(row.text ?? ""),
-      metadata: String(row.metadata ?? ""),
-    }));
+    return scanLanceRows(
+      () => table.query().select(["id", "text", "metadata"]),
+      (rows) => consume(rows.map((row) => ({
+        id: String(row.id),
+        text: String(row.text ?? ""),
+        metadata: String(row.metadata ?? ""),
+      }))),
+      { maxRows: DEFAULT_LANCE_SCAN_MAX_ROWS },
+    );
+  }
+
+  async existingIds(ids) {
+    if (ids.length === 0) return [];
+    const table = await this.open();
+    const existing = new Set();
+    for (let offset = 0; offset < ids.length; offset += 256) {
+      const batch = ids.slice(offset, offset + 256);
+      const scan = await scanLanceRows(
+        () => table.query()
+          .where(`id IN (${batch.map((id) => `'${escapeSql(id)}'`).join(",")})`)
+          .select(["id"]),
+        (rows) => {
+          for (const row of rows) existing.add(String(row.id));
+        },
+        { maxRows: batch.length },
+      );
+      if (scan.truncated) throw new Error("vector identity query exceeded its bounded input");
+    }
+    return [...existing].sort();
   }
 
   async deleteIds(ids) {
     if (ids.length === 0) return 0;
     const table = await this.open();
-    const before = new Set((await table.query().select(["id"]).toArray()).map((row) => String(row.id)));
-    const existing = ids.filter((id) => before.has(id));
+    const existing = await this.existingIds(ids);
     if (existing.length !== ids.length) throw new Error("planned vector item disappeared before apply");
-    await table.delete(`id IN (${ids.map((id) => `'${escapeSql(id)}'`).join(",")})`);
-    const after = new Set((await table.query().select(["id"]).toArray()).map((row) => String(row.id)));
-    return ids.filter((id) => !after.has(id)).length;
+    for (let offset = 0; offset < ids.length; offset += 256) {
+      const batch = ids.slice(offset, offset + 256);
+      await table.delete(`id IN (${batch.map((id) => `'${escapeSql(id)}'`).join(",")})`);
+    }
+    const remaining = new Set(await this.existingIds(ids));
+    return ids.filter((id) => !remaining.has(id)).length;
   }
 
   async close() {
@@ -59,10 +96,18 @@ class LanceVectorPort {
 
 function parseArgs(argv) {
   const args = {};
+  const artifactRoots = [];
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
     if (!token.startsWith("--")) throw new Error(`unexpected argument: ${token}`);
     const key = token.slice(2);
+    if (key === "artifact-root") {
+      const value = argv[index + 1];
+      if (!value || value.startsWith("--")) throw new Error(`missing value for ${token}`);
+      artifactRoots.push(value);
+      index += 1;
+      continue;
+    }
     if (["apply", "approved", "credentials-rotated", "tighten-permissions"].includes(key)) {
       args[key] = true;
       continue;
@@ -75,6 +120,8 @@ function parseArgs(argv) {
   for (const required of ["memory-db", "conversation-db", "lancedb-dir", "receipt"]) {
     if (!args[required]) throw new Error(`--${required} is required`);
   }
+  if (artifactRoots.length === 0) throw new Error("--artifact-root is required");
+  args["artifact-roots"] = artifactRoots;
   return args;
 }
 
@@ -99,39 +146,52 @@ async function main() {
     memoryDbPath: resolve(args["memory-db"]),
     conversationDbPath: resolve(args["conversation-db"]),
     vectorPath: resolve(args["lancedb-dir"]),
+    artifactRoots: args["artifact-roots"].map((path) => resolve(path)),
   };
+  const receiptPath = resolve(args.receipt);
+  if (
+    [paths.memoryDbPath, paths.conversationDbPath].includes(receiptPath)
+    || [paths.vectorPath, ...paths.artifactRoots]
+      .some((root) => pathIsInside(root, receiptPath))
+  ) {
+    throw new Error("receipt must be outside every remediated persisted-secret surface");
+  }
   const vector = new LanceVectorPort(paths.vectorPath);
   try {
-    let receipt;
-    if (args.apply === true) {
-      for (const required of [
-        "expected-plan-digest",
-        "memory-snapshot-receipt",
-        "conversation-snapshot-receipt",
-        "vector-snapshot-receipt",
-      ]) {
-        if (!args[required]) throw new Error(`--${required} is required with --apply`);
+    const receipt = await withMemoryWriteLock(paths.vectorPath, async () => {
+      if (args.apply === true) {
+        for (const required of [
+          "expected-plan-digest",
+          "memory-snapshot-receipt",
+          "conversation-snapshot-receipt",
+          "vector-snapshot-receipt",
+        ]) {
+          if (!args[required]) throw new Error(`--${required} is required with --apply`);
+        }
+        const snapshotsVerified = await verifySnapshotReceipt(
+          args["memory-snapshot-receipt"],
+          paths.memoryDbPath,
+        ) && await verifySnapshotReceipt(
+          args["conversation-snapshot-receipt"],
+          paths.conversationDbPath,
+        );
+        const vectorSnapshotVerified = await verifySnapshotReceipt(
+          args["vector-snapshot-receipt"],
+          paths.vectorPath,
+        );
+        return executePersistedSecretRemediation({
+          ...paths,
+          vector,
+          expectedPlanDigest: args["expected-plan-digest"],
+          approved: args.approved === true,
+          snapshotsVerified,
+          vectorSnapshotVerified,
+          credentialsRotated: args["credentials-rotated"] === true,
+          tightenPermissions: args["tighten-permissions"] === true,
+        });
       }
-      const snapshotsVerified = await verifySnapshotReceipt(args["memory-snapshot-receipt"], paths.memoryDbPath)
-        && await verifySnapshotReceipt(args["conversation-snapshot-receipt"], paths.conversationDbPath);
-      const vectorSnapshotVerified = await verifySnapshotReceipt(
-        args["vector-snapshot-receipt"],
-        paths.vectorPath,
-      );
-      receipt = await executePersistedSecretRemediation({
-        ...paths,
-        vector,
-        expectedPlanDigest: args["expected-plan-digest"],
-        approved: args.approved === true,
-        snapshotsVerified,
-        vectorSnapshotVerified,
-        credentialsRotated: args["credentials-rotated"] === true,
-        tightenPermissions: args["tighten-permissions"] === true,
-      });
-    } else {
-      receipt = (await buildPersistedSecretRemediationPlan({ ...paths, vector })).receipt;
-    }
-    const receiptPath = resolve(args.receipt);
+      return (await buildPersistedSecretRemediationPlan({ ...paths, vector })).receipt;
+    });
     await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, { flag: "wx", mode: 0o600 });
     await chmod(receiptPath, 0o600);
     process.stdout.write(`${JSON.stringify({

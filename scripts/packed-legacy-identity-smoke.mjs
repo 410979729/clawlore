@@ -26,7 +26,7 @@ const pluginConfig = {
   autoRecallTimeoutMs: 5000,
   dbPath,
   embedding: { provider: "local-hash", dimensions: 64 },
-  enableManagementTools: true,
+  agentToolProfile: "operator",
   extractMaxChars: 12000,
   extractMinMessages: 4,
   extractionThrottle: { skipLowValue: true },

@@ -6,35 +6,36 @@ function boundedInteger(value, fallback, maximum) {
     return Math.max(1, Math.min(maximum, Math.floor(value)));
 }
 /**
- * Scan a Lance query in bounded pages and probe one row beyond the total
- * budget. Callers can fail closed instead of silently treating a partial scan
- * as complete.
+ * Scan one Lance query snapshot with bounded consumer pages and one overflow
+ * row. Reissuing offset queries is unsafe because a concurrent delete before
+ * the current offset can silently skip a row while still reporting a complete
+ * scan. A single async query keeps LanceDB's read snapshot stable and applies
+ * backpressure without collecting the full table.
  */
 export async function scanLanceRows(createQuery, consume, options = {}) {
     const maxRows = boundedInteger(options.maxRows, DEFAULT_LANCE_SCAN_MAX_ROWS, DEFAULT_LANCE_SCAN_MAX_ROWS);
     const pageSize = boundedInteger(options.pageSize, DEFAULT_LANCE_SCAN_PAGE_SIZE, Math.min(DEFAULT_LANCE_SCAN_MAX_ROWS, maxRows));
+    const query = createQuery().limit(maxRows + 1);
+    let page = [];
     let scannedRows = 0;
-    while (scannedRows < maxRows) {
-        const requested = Math.min(pageSize, maxRows - scannedRows);
-        const rows = await createQuery()
-            .limit(requested)
-            .offset(scannedRows)
-            .toArray();
-        if (rows.length > requested) {
-            throw new Error("CLAWLORE_LANCE_SCAN_PAGE_LIMIT_IGNORED");
+    let truncated = false;
+    scan: for await (const batch of query) {
+        for (const row of batch.toArray()) {
+            if (scannedRows >= maxRows) {
+                truncated = true;
+                break scan;
+            }
+            page.push(row);
+            scannedRows += 1;
+            if (page.length >= pageSize) {
+                await consume(page);
+                page = [];
+            }
         }
-        if (rows.length === 0)
-            return { scannedRows, truncated: false };
-        await consume(rows);
-        scannedRows += rows.length;
-        if (rows.length < requested)
-            return { scannedRows, truncated: false };
     }
-    const overflow = await createQuery()
-        .limit(1)
-        .offset(scannedRows)
-        .toArray();
-    return { scannedRows, truncated: overflow.length > 0 };
+    if (page.length > 0)
+        await consume(page);
+    return { scannedRows, truncated };
 }
 export async function collectLanceRows(createQuery, options = {}) {
     const rows = [];

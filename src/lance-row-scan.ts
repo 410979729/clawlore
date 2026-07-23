@@ -1,10 +1,12 @@
 export const DEFAULT_LANCE_SCAN_PAGE_SIZE = 1_000;
 export const DEFAULT_LANCE_SCAN_MAX_ROWS = 100_000;
 
-export interface LancePageQuery<Row> {
+export interface LanceRecordBatch<Row> {
+  toArray(): Iterable<Row>;
+}
+
+export interface LanceStreamingQuery<Row> extends AsyncIterable<LanceRecordBatch<Row>> {
   limit(value: number): this;
-  offset(value: number): this;
-  toArray(): Promise<Row[]>;
 }
 
 export interface LanceScanResult {
@@ -23,12 +25,14 @@ function boundedInteger(value: number | undefined, fallback: number, maximum: nu
 }
 
 /**
- * Scan a Lance query in bounded pages and probe one row beyond the total
- * budget. Callers can fail closed instead of silently treating a partial scan
- * as complete.
+ * Scan one Lance query snapshot with bounded consumer pages and one overflow
+ * row. Reissuing offset queries is unsafe because a concurrent delete before
+ * the current offset can silently skip a row while still reporting a complete
+ * scan. A single async query keeps LanceDB's read snapshot stable and applies
+ * backpressure without collecting the full table.
  */
 export async function scanLanceRows<Row>(
-  createQuery: () => LancePageQuery<Row>,
+  createQuery: () => LanceStreamingQuery<Row>,
   consume: (rows: Row[]) => void | Promise<void>,
   options: LanceScanOptions = {},
 ): Promise<LanceScanResult> {
@@ -42,32 +46,32 @@ export async function scanLanceRows<Row>(
     DEFAULT_LANCE_SCAN_PAGE_SIZE,
     Math.min(DEFAULT_LANCE_SCAN_MAX_ROWS, maxRows),
   );
+  const query = createQuery().limit(maxRows + 1);
+  let page: Row[] = [];
   let scannedRows = 0;
+  let truncated = false;
 
-  while (scannedRows < maxRows) {
-    const requested = Math.min(pageSize, maxRows - scannedRows);
-    const rows = await createQuery()
-      .limit(requested)
-      .offset(scannedRows)
-      .toArray();
-    if (rows.length > requested) {
-      throw new Error("CLAWLORE_LANCE_SCAN_PAGE_LIMIT_IGNORED");
+  scan: for await (const batch of query) {
+    for (const row of batch.toArray()) {
+      if (scannedRows >= maxRows) {
+        truncated = true;
+        break scan;
+      }
+      page.push(row);
+      scannedRows += 1;
+      if (page.length >= pageSize) {
+        await consume(page);
+        page = [];
+      }
     }
-    if (rows.length === 0) return { scannedRows, truncated: false };
-    await consume(rows);
-    scannedRows += rows.length;
-    if (rows.length < requested) return { scannedRows, truncated: false };
   }
 
-  const overflow = await createQuery()
-    .limit(1)
-    .offset(scannedRows)
-    .toArray();
-  return { scannedRows, truncated: overflow.length > 0 };
+  if (page.length > 0) await consume(page);
+  return { scannedRows, truncated };
 }
 
 export async function collectLanceRows<Row>(
-  createQuery: () => LancePageQuery<Row>,
+  createQuery: () => LanceStreamingQuery<Row>,
   options: LanceScanOptions = {},
 ): Promise<LanceScanResult & { rows: Row[] }> {
   const rows: Row[] = [];

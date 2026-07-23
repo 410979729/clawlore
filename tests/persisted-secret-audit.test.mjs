@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -12,6 +12,7 @@ test("persisted-secret audit is read-only and emits only counts", async () => {
   const memoryPath = join(root, "memory.sqlite3");
   const conversationPath = join(root, "conversation.sqlite3");
   const vectorPath = join(root, "vectors");
+  const artifactPath = join(root, "artifacts");
   const secret = "SyntheticBraveCredentialValue123456";
   try {
     const memory = new DatabaseSync(memoryPath);
@@ -32,6 +33,7 @@ test("persisted-secret audit is read-only and emits only counts", async () => {
     conversation.close();
     await chmod(memoryPath, 0o600);
     await chmod(conversationPath, 0o600);
+    await mkdir(artifactPath, { mode: 0o700 });
     await writeFile(`${conversationPath}-wal`, "", { mode: 0o644 });
     await mkdir(vectorPath, { mode: 0o755 });
     const vectorDb = await lancedb.connect(vectorPath);
@@ -49,6 +51,7 @@ test("persisted-secret audit is read-only and emits only counts", async () => {
       memoryDb: memoryPath,
       conversationDb: conversationPath,
       lancedbDir: vectorPath,
+      artifactRoots: [artifactPath],
     });
     assert.equal(report.status, "fail");
     assert.equal(report.readOnly, true);
@@ -72,12 +75,71 @@ test("persisted-secret audit is read-only and emits only counts", async () => {
     conversationCleanup.close();
     await chmod(`${conversationPath}-wal`, 0o600);
 
+    await writeFile(
+      join(artifactPath, "history.jsonl"),
+      `{"databasePassword":"${secret}"}\n`,
+      { mode: 0o600 },
+    );
+    const dirtyArtifact = await auditPersistedSecrets({
+      memoryDb: memoryPath,
+      conversationDb: conversationPath,
+      artifactRoots: [artifactPath],
+    });
+    assert.equal(dirtyArtifact.status, "fail");
+    assert.equal(dirtyArtifact.artifacts.secretBearingRows, 1);
+    assert.equal(dirtyArtifact.coverage.complete, true);
+    assert.equal(JSON.stringify(dirtyArtifact).includes(secret), false);
+
+    await writeFile(
+      join(artifactPath, "history.jsonl"),
+      "{\"summary\":\"Credentials are stored only in the controlled vault.\"}\n",
+      { mode: 0o600 },
+    );
+    const disguisedPlaintext = join(artifactPath, "renamed-plaintext.enc");
+    await writeFile(
+      disguisedPlaintext,
+      `{"databasePassword":"${secret}"}\n`,
+      { mode: 0o600 },
+    );
+    const incomplete = await auditPersistedSecrets({
+      memoryDb: memoryPath,
+      conversationDb: conversationPath,
+      artifactRoots: [artifactPath],
+    });
+    assert.equal(incomplete.status, "fail");
+    assert.equal(incomplete.artifacts.coverage.complete, false);
+    assert.ok(incomplete.blockers.includes("persisted_artifact_inventory_incomplete"));
+    assert.equal(JSON.stringify(incomplete).includes(secret), false);
+    await unlink(disguisedPlaintext);
+
+    const randomOpaque = join(artifactPath, "random-binary.backup");
+    await writeFile(randomOpaque, Buffer.from([0x80, 0x01, 0x02, 0x03]), { mode: 0o600 });
+    const unknownBinary = await auditPersistedSecrets({
+      memoryDb: memoryPath,
+      conversationDb: conversationPath,
+      artifactRoots: [artifactPath],
+    });
+    assert.equal(unknownBinary.status, "fail");
+    assert.equal(unknownBinary.artifacts.coverage.complete, false);
+    assert.ok(unknownBinary.blockers.includes("persisted_artifact_inventory_incomplete"));
+    await unlink(randomOpaque);
+
     const clean = await auditPersistedSecrets({
       memoryDb: memoryPath,
       conversationDb: conversationPath,
+      artifactRoots: [artifactPath],
     });
     assert.equal(clean.status, "pass");
     assert.equal(clean.totals.secretBearingRows, 0);
+    assert.deepEqual(clean.coverage, {
+      databaseSurfaces: 2,
+      artifactRoots: 1,
+      artifactFilesDiscovered: 1,
+      artifactFilesScanned: 1,
+      artifactEncryptedFiles: 0,
+      artifactUnsupportedFiles: 0,
+      complete: true,
+    });
   } finally {
     await rm(root, { recursive: true, force: true });
   }

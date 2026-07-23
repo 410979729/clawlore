@@ -125,8 +125,7 @@ export class SubagentExperienceServiceV2 {
             status: "active",
             createdAt: this.clock.now().toISOString(),
         };
-        this.store.saveSnapshot(snapshot);
-        this.event("snapshot", snapshot.snapshotId, "subagent_snapshot_created", `session:${parentSessionId}`, input.mode);
+        this.store.saveSnapshot(snapshot, this.buildEvent("snapshot", snapshot.snapshotId, "subagent_snapshot_created", `session:${parentSessionId}`, input.mode));
         return snapshot;
     }
     recordChildScratch(input) {
@@ -139,8 +138,7 @@ export class SubagentExperienceServiceV2 {
             childSessionId: snapshot.childSessionId, content, retention: input.retention,
             lifecycle: "candidate", createdAt: this.clock.now().toISOString(),
         };
-        this.store.saveScratch(scratch);
-        this.event("scratch", scratch.scratchId, "child_candidate_recorded", `session:${snapshot.childSessionId}`, input.retention);
+        this.store.saveScratch(scratch, this.buildEvent("scratch", scratch.scratchId, "child_candidate_recorded", `session:${snapshot.childSessionId}`, input.retention));
         return scratch;
     }
     onSubagentEnded(input) {
@@ -164,8 +162,7 @@ export class SubagentExperienceServiceV2 {
             createdAt: now,
             updatedAt: now,
         };
-        this.store.finalizeSnapshot({ ...snapshot, status: "revoked" }, episode);
-        this.event("episode", episode.episodeId, "child_episode_candidate_created", `session:${snapshot.childSessionId}`, input.outcome);
+        this.store.finalizeSnapshot({ ...snapshot, status: "revoked" }, episode, this.buildEvent("episode", episode.episodeId, "child_episode_candidate_created", `session:${snapshot.childSessionId}`, input.outcome));
         return episode;
     }
     verifyByParent(input) {
@@ -182,8 +179,7 @@ export class SubagentExperienceServiceV2 {
             verificationReason: reason,
             updatedAt: this.clock.now().toISOString(),
         };
-        this.store.updateEpisode(updated, episode);
-        this.event("episode", updated.episodeId, accepted ? "parent_verified" : "episode_quarantined", `session:${input.parentSessionId}`, reason);
+        this.store.updateEpisode(updated, episode, this.buildEvent("episode", updated.episodeId, accepted ? "parent_verified" : "episode_quarantined", `session:${input.parentSessionId}`, reason));
         return updated;
     }
     createPlaybookCandidate(input) {
@@ -227,8 +223,7 @@ export class SubagentExperienceServiceV2 {
             createdAt: now,
             updatedAt: now,
         };
-        this.store.savePlaybook(playbook);
-        this.event("playbook", playbook.playbookId, "playbook_candidate_created", "parent", `${episodeIds.length}_episodes`);
+        this.store.savePlaybook(playbook, this.buildEvent("playbook", playbook.playbookId, "playbook_candidate_created", "parent", `${episodeIds.length}_episodes`));
         return playbook;
     }
     promotePlaybook(input) {
@@ -250,8 +245,7 @@ export class SubagentExperienceServiceV2 {
             operatorReviewed: playbook.operatorReviewed || input.operatorReviewed === true,
             updatedAt: this.clock.now().toISOString(),
         };
-        this.store.updatePlaybook(updated, playbook);
-        this.event("playbook", updated.playbookId, "playbook_promoted", actor, reason);
+        this.store.updatePlaybook(updated, playbook, this.buildEvent("playbook", updated.playbookId, "playbook_promoted", actor, reason));
         return updated;
     }
     quarantinePlaybook(input) {
@@ -259,8 +253,7 @@ export class SubagentExperienceServiceV2 {
         const actor = requiredIdentifierText(input.actor, "quarantine actor", 512);
         const reason = requiredSemanticText(input.reason, "quarantine reason");
         const updated = { ...playbook, lifecycle: "quarantined", updatedAt: this.clock.now().toISOString() };
-        this.store.updatePlaybook(updated, playbook);
-        this.event("playbook", updated.playbookId, "playbook_quarantined", actor, reason);
+        this.store.updatePlaybook(updated, playbook, this.buildEvent("playbook", updated.playbookId, "playbook_quarantined", actor, reason));
         return updated;
     }
     supersedePlaybook(input) {
@@ -285,15 +278,7 @@ export class SubagentExperienceServiceV2 {
             createdAt: now,
             updatedAt: now,
         };
-        this.store.supersedePlaybook(previous, next, {
-            eventId: this.clock.id("event"),
-            entityType: "playbook",
-            entityId: previous.playbookId,
-            eventType: "playbook_superseded",
-            actor,
-            reason,
-            createdAt: now,
-        });
+        this.store.supersedePlaybook(previous, next, this.buildEvent("playbook", previous.playbookId, "playbook_superseded", actor, reason, now));
         return next;
     }
     evaluateReplay(input) {
@@ -354,9 +339,17 @@ export class SubagentExperienceServiceV2 {
         return playbook;
     }
     event(entityType, entityId, eventType, actor, reason) {
-        this.store.appendEvent({
-            eventId: this.clock.id("event"), entityType, entityId, eventType,
-            actor, reason, createdAt: this.clock.now().toISOString(),
-        });
+        this.store.appendEvent(this.buildEvent(entityType, entityId, eventType, actor, reason));
+    }
+    buildEvent(entityType, entityId, eventType, actor, reason, createdAt = this.clock.now().toISOString()) {
+        return {
+            eventId: this.clock.id("event"),
+            entityType,
+            entityId,
+            eventType,
+            actor,
+            reason,
+            createdAt,
+        };
     }
 }

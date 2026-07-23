@@ -31,7 +31,7 @@ assert.equal(
   ).maxItems,
   8,
 );
-assert.equal(manifest.configSchema.properties.allowAgentOperatorTools.default, false);
+assert.equal(manifest.configSchema.properties.agentToolProfile.default, "memory-write");
 assert.equal(
   manifest.configSchema.properties.memoryCompaction.properties.startupMode.default,
   "off",

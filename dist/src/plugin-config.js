@@ -2,6 +2,7 @@ import { normalizeAdmissionControlConfig, } from "./admission-control.js";
 import { isCanonicalPrincipalKey, } from "./runtime-memory-boundary.js";
 import { resolveClawLoreRuntimeRequestConfig, } from "./runtime-config.js";
 import { DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG, } from "./task-experience.js";
+import { DEFAULT_AGENT_TOOL_PROFILE, isAgentToolProfile, } from "./agent-tool-profile.js";
 export const DEFAULT_REFLECTION_MESSAGE_COUNT = 120;
 export const DEFAULT_REFLECTION_MAX_INPUT_CHARS = 24_000;
 export const DEFAULT_REFLECTION_TIMEOUT_MS = 20_000;
@@ -111,6 +112,21 @@ export function parsePluginConfig(value) {
         throw new Error("clawlore config required");
     }
     const cfg = value;
+    const legacyToolGates = [
+        "allowAgentMemoryWriteTools",
+        "enableManagementTools",
+        "allowAgentOperatorTools",
+        "secretIndexToolsEnabled",
+    ].filter((key) => cfg[key] !== undefined);
+    if (legacyToolGates.length > 0) {
+        throw new Error(`deprecated Agent tool gates are not supported (${legacyToolGates.join(", ")}); use agentToolProfile`);
+    }
+    if (cfg.agentToolProfile !== undefined && !isAgentToolProfile(cfg.agentToolProfile)) {
+        throw new Error("agentToolProfile is invalid");
+    }
+    const agentToolProfile = isAgentToolProfile(cfg.agentToolProfile)
+        ? cfg.agentToolProfile
+        : DEFAULT_AGENT_TOOL_PROFILE;
     const embedding = cfg.embedding;
     if (!embedding) {
         throw new Error("embedding config is required");
@@ -233,9 +249,7 @@ export function parsePluginConfig(value) {
         extractMinMessages: parsePositiveInt(cfg.extractMinMessages) ?? 4,
         extractMaxChars: parsePositiveInt(cfg.extractMaxChars) ?? 8_000,
         scopes: typeof cfg.scopes === "object" && cfg.scopes !== null ? cfg.scopes : undefined,
-        allowAgentMemoryWriteTools: cfg.allowAgentMemoryWriteTools !== false,
-        enableManagementTools: cfg.enableManagementTools === true,
-        allowAgentOperatorTools: cfg.allowAgentOperatorTools === true,
+        agentToolProfile,
         sessionStrategy,
         selfImprovement: typeof cfg.selfImprovement === "object" && cfg.selfImprovement !== null
             ? {

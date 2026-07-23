@@ -2,10 +2,24 @@
 
 ## Unreleased
 
-- Added an independent `allowAgentMemoryWriteTools` containment gate so
-  operators can keep `memory_recall` available while removing
-  `memory_store`, `memory_update`, `memory_forget`, and secret-index writes
-  from the Agent tool surface.
+- Replaced the four overlapping Agent-tool booleans with one authoritative
+  `agentToolProfile`. Manifest discovery and runtime registration now share the
+  same profile matrix, including a read-only containment profile that preserves
+  recall and query-safe Experience tools.
+- Made persisted-secret coverage include explicitly supplied backup, export,
+  and restore artifact roots. Unencrypted or unsupported artifacts, incomplete
+  inventory, unsafe permissions, or omitted roots now block both a green audit
+  and remediation planning.
+- Made legacy migration fail closed on unreadable sources and stream a pinned
+  LanceDB snapshot within a fixed row budget. Bounded LanceDB scans no longer
+  use mutation-sensitive offset pagination.
+- Extended the canonical cross-process memory-write fence to initialization,
+  schema, FTS, and the persisted-secret remediation CLI; legacy migration now
+  reads a pinned source snapshot while its target imports keep the existing
+  per-write fence.
+- Made all Experience episode and Playbook state/event pairs atomic, not only
+  supersede, and hardened failure diagnostics against cycles, hostile getters,
+  and excessive nesting.
 - Corrected OpenClaw SecretRef compatibility for embedding-key arrays by
   enumerating bounded array leaves instead of treating SecretRef object fields
   as plaintext wildcard values; runtime configuration rejects more keys than

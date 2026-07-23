@@ -7,7 +7,7 @@ import { join } from "node:path";
 import fs from "node:fs/promises";
 import { loadLanceDB } from "./store.js";
 import { diagnosticErrorSummary, diagnosticIdentifier } from "./diagnostic-redaction.js";
-import { collectLanceRows, DEFAULT_LANCE_SCAN_MAX_ROWS, } from "./lance-row-scan.js";
+import { DEFAULT_LANCE_SCAN_MAX_ROWS, scanLanceRows, } from "./lance-row-scan.js";
 function normalizeLegacyVector(value) {
     if (Array.isArray(value)) {
         return value.map((n) => Number(n));
@@ -55,26 +55,31 @@ export class MemoryMigrator {
                 return result;
             }
             console.log(`Migrating from: ${sourceDbPath}`);
-            // Load legacy data
-            const legacyEntries = await this.loadLegacyData(sourceDbPath);
-            if (legacyEntries.length === 0) {
+            let sourceCount = 0;
+            const aggregate = { migrated: 0, skipped: 0, errors: [] };
+            await this.scanLegacyData(sourceDbPath, async (legacyEntries) => {
+                sourceCount += legacyEntries.length;
+                if (options.dryRun)
+                    return;
+                const page = await this.migrateEntries(legacyEntries, options);
+                aggregate.migrated += page.migrated;
+                aggregate.skipped += page.skipped;
+                aggregate.errors.push(...page.errors);
+            });
+            if (sourceCount === 0) {
                 result.summary = "Migration completed: No data to migrate";
                 result.success = true;
                 return result;
             }
-            console.log(`Found ${legacyEntries.length} entries to migrate`);
-            // Migrate entries
-            if (!options.dryRun) {
-                const migrationStats = await this.migrateEntries(legacyEntries, options);
-                result.migratedCount = migrationStats.migrated;
-                result.skippedCount = migrationStats.skipped;
-                result.errors.push(...migrationStats.errors);
-            }
-            else {
-                result.summary = `Dry run: Would migrate ${legacyEntries.length} entries`;
+            console.log(`Found ${sourceCount} entries to migrate`);
+            if (options.dryRun) {
+                result.summary = `Dry run: Would migrate ${sourceCount} entries`;
                 result.success = true;
                 return result;
             }
+            result.migratedCount = aggregate.migrated;
+            result.skippedCount = aggregate.skipped;
+            result.errors.push(...aggregate.errors);
             result.success = result.errors.length === 0;
             result.summary = `Migration ${result.success ? 'completed' : 'completed with errors'}: ` +
                 `${result.migratedCount} migrated, ${result.skippedCount} skipped`;
@@ -111,16 +116,20 @@ export class MemoryMigrator {
         }
         return null;
     }
-    async loadLegacyData(sourceDbPath, limit) {
+    async scanLegacyData(sourceDbPath, consume, limit) {
         const lancedb = await loadLanceDB();
         const db = await lancedb.connect(sourceDbPath);
+        let table = null;
         try {
-            const table = await db.openTable("memories");
-            const scan = await collectLanceRows(() => table.query(), { maxRows: limit ?? DEFAULT_LANCE_SCAN_MAX_ROWS });
-            if (!limit && scan.truncated) {
+            const sourceTable = await db.openTable("memories");
+            table = sourceTable;
+            const version = await sourceTable.version();
+            await sourceTable.checkout(version);
+            const sourceCount = await sourceTable.countRows();
+            if (!limit && sourceCount > DEFAULT_LANCE_SCAN_MAX_ROWS) {
                 throw new Error("CLAWLORE_LANCE_SCAN_LIMIT_EXCEEDED:legacy-migration");
             }
-            return scan.rows.map((row) => ({
+            const scan = await scanLanceRows(() => sourceTable.query(), (rows) => consume(rows.map((row) => ({
                 id: row.id,
                 text: row.text,
                 vector: normalizeLegacyVector(row.vector),
@@ -128,15 +137,32 @@ export class MemoryMigrator {
                 category: row.category || "other",
                 createdAt: Number(row.createdAt),
                 scope: row.scope,
-            }));
+            }))), { maxRows: limit ?? DEFAULT_LANCE_SCAN_MAX_ROWS });
+            if (!limit && scan.truncated) {
+                throw new Error("CLAWLORE_LANCE_SCAN_LIMIT_EXCEEDED:legacy-migration");
+            }
+            return scan.scannedRows;
         }
         catch (error) {
             if (error instanceof Error
                 && error.message.startsWith("CLAWLORE_LANCE_SCAN_LIMIT_EXCEEDED:")) {
                 throw error;
             }
-            console.warn(`clawlore: legacy migration source read failed: ${diagnosticErrorSummary(error)}`);
-            return [];
+            throw new Error(`CLAWLORE_LEGACY_SOURCE_READ_FAILED: ${diagnosticErrorSummary(error)}`, { cause: error });
+        }
+        finally {
+            try {
+                await table?.checkoutLatest();
+            }
+            catch { }
+            try {
+                table?.close();
+            }
+            catch { }
+            try {
+                db.close();
+            }
+            catch { }
         }
     }
     async migrateEntries(legacyEntries, options) {
@@ -176,7 +202,7 @@ export class MemoryMigrator {
                 await this.targetStore.importEntry(newEntry);
                 migrated++;
                 if (migrated % 100 === 0) {
-                    console.log(`Migrated ${migrated}/${legacyEntries.length} entries...`);
+                    console.log(`Migrated ${migrated} entries...`);
                 }
             }
             catch (error) {
@@ -195,17 +221,22 @@ export class MemoryMigrator {
             };
         }
         try {
-            const entries = await this.loadLegacyData(sourcePath, 1);
+            let entryCount = 0;
+            await this.scanLegacyData(sourcePath, (entries) => {
+                entryCount += entries.length;
+            }, 1);
             return {
-                needed: entries.length > 0,
+                needed: entryCount > 0,
                 sourceFound: true,
                 sourceDbPath: sourcePath,
-                entryCount: entries.length > 0 ? undefined : 0,
+                entryCount: entryCount > 0 ? undefined : 0,
             };
         }
-        catch (error) {
+        catch {
             return {
-                needed: false,
+                // An unreadable source is migration debt, never evidence that no
+                // migration is needed.
+                needed: true,
                 sourceFound: true,
                 sourceDbPath: sourcePath,
             };
@@ -223,9 +254,11 @@ export class MemoryMigrator {
                     issues: ["Source database not found"],
                 };
             }
-            const sourceEntries = await this.loadLegacyData(sourcePath);
+            let sourceCount = 0;
+            await this.scanLegacyData(sourcePath, (entries) => {
+                sourceCount += entries.length;
+            });
             const targetStats = await this.targetStore.stats();
-            const sourceCount = sourceEntries.length;
             const targetCount = targetStats.totalCount;
             if (targetCount < sourceCount) {
                 issues.push(`Target has fewer entries (${targetCount}) than source (${sourceCount})`);

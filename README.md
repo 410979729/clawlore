@@ -44,10 +44,13 @@ ClawLore is the OpenClaw runtime implementation of the same storage philosophy u
 This package is not a one-for-one Hermes plugin copy and does not currently claim full Yuheng/Hermes 1.6.0 feature parity. It adopts the contracts that already have OpenClaw-native behavior, tests, and operator documentation, then tracks the remaining commercial-memory work in [`docs/commercial-memory-plugin-plan-2026-06-30.md`](docs/commercial-memory-plugin-plan-2026-06-30.md). OpenClaw-specific capabilities include:
 
 - OpenClaw dynamic tools: `memory_recall`, `memory_store`, `memory_forget`, and
-  `memory_update`. Set `allowAgentMemoryWriteTools: false` to keep recall
-  available while removing the three durable-write tools from the Agent
-  surface.
-- Optional operator and inspection tools when enabled: `memory_stats`, `memory_debug`, `memory_list`, `memory_context`, `memory_inspect`, `memory_promote`, `memory_archive`, `memory_compact`, and `memory_explain_rank`.
+  `memory_update`. Set `agentToolProfile: "read-only"` to keep recall available
+  while removing durable writes from the Agent surface.
+- The single `agentToolProfile` matrix is authoritative for both manifest
+  discovery and runtime registration: `memory-write` is the compatibility
+  default, `self-improvement` adds learning-file tools, `operator` adds
+  management/inspection tools, and `operator-secret-index` additionally exposes
+  the credential-index write schema.
 - OpenClaw-native governance review with `memory_govern`, including conflict-review rows, legacy/working scratch rows, inactive lifecycle rows, archived rows, and low-confidence capture candidates.
 - Partial OpenClaw-native adoption of the Hermes 1.5/1.6 governance line: `scope_recall_governance_cleanup_*`, `scope_recall_memory_candidate_promotion_*`, `scope_recall_graph_hygiene_*`, `scope_recall_journal_recovery_*`, `scope_recall_digest_*`, and `scope_recall_operator_dashboard` provide dry-run-first cleanup, candidate promotion planning, graph-companion hygiene visibility, journal-recovery visibility, candidate-only digest distillation, and one-page operator health. The same surfaces are also available as `openclaw clawlore` operator CLI routes.
 - Experience Kernel tools for task episodes, procedural playbooks, preflight packets, replay, forgetting reports, and review-gated promotion. The operator CLI can run replay fixtures against a playbook for release checks.

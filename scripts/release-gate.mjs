@@ -429,11 +429,12 @@ for (const toolName of requiredExperienceTools) {
   const signal = manifest.toolMetadata?.[toolName]?.configSignals?.[0];
   if (
     signal?.rootPath !== "plugins.entries.clawlore.config" ||
-    signal?.mode?.path !== "enableManagementTools" ||
+    signal?.mode?.path !== "agentToolProfile" ||
     !Array.isArray(signal?.mode?.allowed) ||
-    !signal.mode.allowed.includes("true")
+    !signal.mode.allowed.includes("operator") ||
+    !signal.mode.allowed.includes("operator-secret-index")
   ) {
-    throw new Error(`release gate failed: management Experience tool ${toolName} missing enableManagementTools signal`);
+    throw new Error(`release gate failed: management Experience tool ${toolName} missing operator profile signal`);
   }
 }
 
@@ -635,6 +636,9 @@ for (const marker of [
   "emitsSecretValues: false",
   "persisted_secret_material_detected",
   "lancedbDir",
+  "artifactRoots",
+  "persisted_artifact_roots_not_supplied",
+  "scanLanceRows",
   "inspectOwnerOnlyTree",
 ]) {
   if (!persistedSecretAuditSource.includes(marker)) {
@@ -647,6 +651,8 @@ const persistedSecretRemediationSource = await readFile(
 );
 for (const marker of [
   "targetIdentityDigest",
+  "artifactCoverage",
+  "persisted_artifact_inventory_incomplete",
   "requiresVerifiedVectorSnapshot",
   "credentialsRotated",
   "CLAWLORE_PERSISTED_SECRET_REMEDIATION_RECOVERY_REQUIRED",
@@ -666,6 +672,9 @@ for (const marker of [
   "memory-snapshot-receipt",
   "conversation-snapshot-receipt",
   "vector-snapshot-receipt",
+  "--artifact-root",
+  "scanLanceRows",
+  "withMemoryWriteLock",
 ]) {
   if (!persistedSecretRemediationCli.includes(marker)) {
     throw new Error(`release gate failed: persisted-secret remediation CLI missing ${marker}`);
@@ -930,6 +939,10 @@ try {
   if (!(await exists(openClawPackage))) {
     throw new Error(`release gate failed: OpenClaw package missing for packed runtime smoke: ${openClawPackage}`);
   }
+  run("node", [
+    "scripts/clawlore-agent-tool-profile-host-smoke.mjs",
+    openClawPackage,
+  ]);
   const installedOpenClaw = resolve(installRoot, "node_modules", "openclaw");
   await rm(installedOpenClaw, { recursive: true, force: true });
   await symlink(await realpath(openClawPackage), installedOpenClaw, "dir");
@@ -965,7 +978,7 @@ try {
       embedding: { provider: "local-hash", dimensions: 64 },
       vectorBackend: "sqlite-bruteforce",
       dbPath: resolve(isolatedState, "memory/clawlore"),
-      enableManagementTools: true,
+      agentToolProfile: "operator",
     },
   });
   runOpenClawCapture(

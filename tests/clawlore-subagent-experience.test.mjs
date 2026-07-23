@@ -391,3 +391,121 @@ test("V2 Experience rejects stale multi-connection reviews and scratch after rev
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("V2 Experience rolls back every state mutation when its audit event fails", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clawlore-experience-event-atomicity-"));
+  const store = new SqliteExperienceStoreV2(join(root, "experience.sqlite"));
+  store.open();
+  const originalInsertEvent = store.insertEvent.bind(store);
+  let failNextEvent = false;
+  store.insertEvent = (event) => {
+    if (failNextEvent) throw new Error("INJECTED_EVENT_FAILURE");
+    return originalInsertEvent(event);
+  };
+  const count = (table) => Number(
+    store.db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count,
+  );
+  const withEventFailure = (action) => {
+    failNextEvent = true;
+    try {
+      assert.throws(action, /INJECTED_EVENT_FAILURE/);
+    } finally {
+      failNextEvent = false;
+    }
+  };
+  try {
+    const service = new SubagentExperienceServiceV2(store, clock());
+    const spawnInput = {
+      mode: "fork",
+      parentSessionId: "parent",
+      childSessionId: "event-child",
+      runId: "event-run",
+      taskGoal: "Deploy fixture",
+      actor: actor(),
+      contextPack: pack(),
+    };
+
+    withEventFailure(() => service.prepareSpawn(spawnInput));
+    assert.equal(count("subagent_snapshots_v2"), 0);
+    assert.equal(count("experience_events_v2"), 0);
+
+    const snapshot = service.prepareSpawn(spawnInput);
+    assert.equal(count("subagent_snapshots_v2"), 1);
+    assert.equal(count("experience_events_v2"), 1);
+
+    withEventFailure(() => service.recordChildScratch({
+      snapshotId: snapshot.snapshotId,
+      childSessionId: snapshot.childSessionId,
+      content: "Candidate observation",
+      retention: "working",
+    }));
+    assert.equal(count("subagent_scratch_v2"), 0);
+    assert.equal(count("experience_events_v2"), 1);
+
+    const endInput = {
+      snapshotId: snapshot.snapshotId,
+      childSessionId: snapshot.childSessionId,
+      taskClass: "deployment",
+      outcome: "success",
+      toolReceiptIds: ["event-receipt"],
+      evidence: ["event-health-ok"],
+    };
+    withEventFailure(() => service.onSubagentEnded(endInput));
+    assert.equal(store.getSnapshot(snapshot.snapshotId).status, "active");
+    assert.equal(count("experience_episodes_v2"), 0);
+    assert.equal(count("experience_events_v2"), 1);
+
+    const episode = service.onSubagentEnded(endInput);
+    assert.equal(store.getSnapshot(snapshot.snapshotId).status, "revoked");
+    assert.equal(count("experience_episodes_v2"), 1);
+    assert.equal(count("experience_events_v2"), 2);
+
+    const reviewInput = {
+      episodeId: episode.episodeId,
+      parentSessionId: "parent",
+      accepted: true,
+      reason: "verified event evidence",
+    };
+    withEventFailure(() => service.verifyByParent(reviewInput));
+    assert.equal(store.getEpisode(episode.episodeId).parentVerification, "pending");
+    assert.equal(count("experience_events_v2"), 2);
+
+    const verified = service.verifyByParent(reviewInput);
+    assert.equal(verified.parentVerification, "parent_verified");
+    assert.equal(count("experience_events_v2"), 3);
+
+    const candidateInput = playbookInput([verified.episodeId]);
+    withEventFailure(() => service.createPlaybookCandidate(candidateInput));
+    assert.equal(count("procedural_playbooks_v2"), 0);
+    assert.equal(count("experience_events_v2"), 3);
+
+    const playbook = service.createPlaybookCandidate(candidateInput);
+    assert.equal(store.getPlaybook(playbook.playbookId).lifecycle, "candidate");
+    assert.equal(count("experience_events_v2"), 4);
+
+    const promoteInput = {
+      playbookId: playbook.playbookId,
+      operatorReviewed: true,
+      actor: "operator",
+      reason: "manual event review complete",
+    };
+    withEventFailure(() => service.promotePlaybook(promoteInput));
+    assert.equal(store.getPlaybook(playbook.playbookId).lifecycle, "candidate");
+    assert.equal(count("experience_events_v2"), 4);
+
+    service.promotePlaybook(promoteInput);
+    assert.equal(store.getPlaybook(playbook.playbookId).lifecycle, "promoted");
+    assert.equal(count("experience_events_v2"), 5);
+
+    withEventFailure(() => service.quarantinePlaybook({
+      playbookId: playbook.playbookId,
+      actor: "operator",
+      reason: "event-backed quarantine",
+    }));
+    assert.equal(store.getPlaybook(playbook.playbookId).lifecycle, "promoted");
+    assert.equal(count("experience_events_v2"), 5);
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});

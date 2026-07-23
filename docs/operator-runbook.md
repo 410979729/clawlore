@@ -146,22 +146,28 @@ feedback belongs to a separate, explicit governance action with actor and
 reason evidence.
 
 Before any rollout, run the source-checkout persisted-secret audit against
-every memory-bearing SQLite authority and companion database:
+every memory-bearing SQLite authority, companion database, and every declared
+backup/export/restore root:
 
 ```bash
 node scripts/clawlore-persisted-secret-audit.mjs \
   --memory-db /private/live/memory.sqlite3 \
   --conversation-db /private/live/conversation-memory.sqlite3 \
   --lancedb-dir /private/live/lancedb-root \
+  --artifact-root /private/live/backups \
+  --artifact-root /private/live/exports \
   --receipt /private/receipts/persisted-secret-audit.json
 ```
 
 The receipt is owner-only and content-free: it contains counts, pattern names,
-and path hashes, never row text, identifiers, or secret values. Any finding or
-non-private mode on a SQLite database/WAL/SHM or anywhere inside the LanceDB
-tree is a deployment blocker. The audit covers ClawLore-owned derived stores;
-the OpenClaw transcript database remains read-only source evidence, and
-controlled OpenClaw auth stores are never generic-redaction targets.
+path hashes, and bounded inventory coverage, never row text, identifiers, or
+secret values. Artifact roots are mandatory and repeatable. Unsupported files,
+unrecognized encrypted containers, omitted artifact roots, any finding, or
+non-private mode on a SQLite database/WAL/SHM, artifact tree, or anywhere
+inside the LanceDB tree is a deployment blocker. Merely renaming plaintext
+with an encrypted-looking extension does not satisfy the gate. The OpenClaw
+transcript database remains read-only source evidence, and controlled OpenClaw
+auth stores are never generic-redaction targets.
 
 Quiesce every automatic writer, rotate potentially exposed credentials outside
 ClawLore, and create three fresh encrypted recovery points. Each workflow
@@ -199,6 +205,8 @@ node scripts/clawlore-persisted-secret-remediation.mjs \
   --memory-db /private/live/memory.sqlite3 \
   --conversation-db /private/live/conversation-memory.sqlite3 \
   --lancedb-dir /private/live/lancedb-root \
+  --artifact-root /private/live/backups \
+  --artifact-root /private/live/exports \
   --receipt /private/receipts/remediation-plan.json
 ```
 
@@ -209,6 +217,8 @@ node scripts/clawlore-persisted-secret-remediation.mjs \
   --memory-db /private/live/memory.sqlite3 \
   --conversation-db /private/live/conversation-memory.sqlite3 \
   --lancedb-dir /private/live/lancedb-root \
+  --artifact-root /private/live/backups \
+  --artifact-root /private/live/exports \
   --receipt /private/receipts/remediation-apply.json \
   --apply --approved --credentials-rotated --tighten-permissions \
   --expected-plan-digest <reviewed-digest> \

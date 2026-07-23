@@ -80,21 +80,33 @@ export class SqliteExperienceStoreV2 {
         this.db = null;
         enforcePrivateSqliteFamily(this.path);
     }
-    saveSnapshot(snapshot) {
+    saveSnapshot(snapshot, event) {
         assertSubagentSnapshotSafeForPersistence(snapshot);
         if (snapshot.status !== "active")
             throw new Error("new subagent snapshot must be active");
-        this.requireDb().prepare(`INSERT INTO subagent_snapshots_v2
-      (snapshot_id,parent_session_id,child_session_id,run_id,mode,status,payload_json,created_at)
-      VALUES (?,?,?,?,?,?,?,?)`).run(snapshot.snapshotId, snapshot.parentSessionId, snapshot.childSessionId, snapshot.runId, snapshot.mode, snapshot.status, JSON.stringify(snapshot), snapshot.createdAt);
+        if (event)
+            this.assertLinkedEvent(event, "snapshot", snapshot.snapshotId);
+        const action = () => {
+            this.requireDb().prepare(`INSERT INTO subagent_snapshots_v2
+        (snapshot_id,parent_session_id,child_session_id,run_id,mode,status,payload_json,created_at)
+        VALUES (?,?,?,?,?,?,?,?)`).run(snapshot.snapshotId, snapshot.parentSessionId, snapshot.childSessionId, snapshot.runId, snapshot.mode, snapshot.status, JSON.stringify(snapshot), snapshot.createdAt);
+            if (event)
+                this.insertEvent(event);
+        };
+        if (event)
+            this.transaction(action);
+        else
+            action();
     }
     getSnapshot(snapshotId) {
         const row = this.requireDb().prepare("SELECT payload_json FROM subagent_snapshots_v2 WHERE snapshot_id=?")
             .get(snapshotId);
         return row ? parseJson(row.payload_json) : null;
     }
-    saveScratch(scratch) {
+    saveScratch(scratch, event) {
         assertChildScratchSafeForPersistence(scratch);
+        if (event)
+            this.assertLinkedEvent(event, "scratch", scratch.scratchId);
         const db = this.requireDb();
         this.transaction(() => {
             const result = db.prepare(`INSERT INTO subagent_scratch_v2
@@ -105,11 +117,15 @@ export class SqliteExperienceStoreV2 {
             if (Number(result.changes) !== 1) {
                 throw new Error("active child-owned snapshot is required for scratch persistence");
             }
+            if (event)
+                this.insertEvent(event);
         });
     }
-    finalizeSnapshot(snapshot, episode) {
+    finalizeSnapshot(snapshot, episode, event) {
         assertSubagentSnapshotSafeForPersistence(snapshot);
         assertExperienceEpisodeSafeForPersistence(episode);
+        if (event)
+            this.assertLinkedEvent(event, "episode", episode.episodeId);
         const current = this.getSnapshot(snapshot.snapshotId);
         if (!current || current.status !== "active" || snapshot.status !== "revoked") {
             throw new Error("active snapshot must transition to revoked");
@@ -136,6 +152,8 @@ export class SqliteExperienceStoreV2 {
         (episode_id,snapshot_id,parent_session_id,child_session_id,run_id,task_class,outcome,
          parent_verification,lifecycle,payload_json,created_at,updated_at)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(episode.episodeId, episode.snapshotId, episode.parentSessionId, episode.childSessionId, episode.runId, episode.taskClass, episode.outcome, episode.parentVerification, episode.lifecycle, JSON.stringify(episode), episode.createdAt, episode.updatedAt);
+            if (event)
+                this.insertEvent(event);
             db.exec("COMMIT");
         }
         catch (error) {
@@ -151,9 +169,11 @@ export class SqliteExperienceStoreV2 {
             .get(episodeId);
         return row ? parseJson(row.payload_json) : null;
     }
-    updateEpisode(episode, expected) {
+    updateEpisode(episode, expected, event) {
         assertExperienceEpisodeSafeForPersistence(episode);
         assertExperienceEpisodeSafeForPersistence(expected);
+        if (event)
+            this.assertLinkedEvent(event, "episode", episode.episodeId);
         const db = this.requireDb();
         this.transaction(() => {
             const current = this.getEpisode(episode.episodeId);
@@ -172,6 +192,8 @@ export class SqliteExperienceStoreV2 {
         WHERE episode_id=? AND parent_verification=? AND lifecycle=?`).run(episode.parentVerification, episode.lifecycle, JSON.stringify(episode), episode.updatedAt, episode.episodeId, expected.parentVerification, expected.lifecycle);
             if (Number(result.changes) !== 1)
                 throw new Error("experience episode compare-and-set failed");
+            if (event)
+                this.insertEvent(event);
         });
     }
     listEpisodes(episodeIds) {
@@ -184,14 +206,18 @@ export class SqliteExperienceStoreV2 {
       WHERE episode_id IN (${placeholders})`).all(...episodeIds);
         return rows.map((row) => parseJson(row.payload_json));
     }
-    savePlaybook(playbook) {
+    savePlaybook(playbook, event) {
         assertProceduralPlaybookSafeForPersistence(playbook);
+        if (event)
+            this.assertLinkedEvent(event, "playbook", playbook.playbookId);
         if (playbook.lifecycle !== "candidate" || playbook.operatorReviewed || playbook.supersededBy != null) {
             throw new Error("new procedural playbook must begin as an unreviewed candidate");
         }
         this.transaction(() => {
             this.assertPlaybookEvidence(playbook);
             this.insertPlaybook(playbook);
+            if (event)
+                this.insertEvent(event);
         });
     }
     getPlaybook(playbookId) {
@@ -199,9 +225,11 @@ export class SqliteExperienceStoreV2 {
             .get(playbookId);
         return row ? parseJson(row.payload_json) : null;
     }
-    updatePlaybook(playbook, expected) {
+    updatePlaybook(playbook, expected, event) {
         assertProceduralPlaybookSafeForPersistence(playbook);
         assertProceduralPlaybookSafeForPersistence(expected);
+        if (event)
+            this.assertLinkedEvent(event, "playbook", playbook.playbookId);
         const db = this.requireDb();
         this.transaction(() => {
             const current = this.getPlaybook(playbook.playbookId);
@@ -238,6 +266,8 @@ export class SqliteExperienceStoreV2 {
         WHERE playbook_id=? AND version=? AND lifecycle=? AND operator_reviewed=? AND payload_json=?`).run(playbook.version, playbook.lifecycle, playbook.operatorReviewed ? 1 : 0, playbook.supersededBy ?? null, JSON.stringify(playbook), playbook.updatedAt, playbook.playbookId, expected.version, expected.lifecycle, expected.operatorReviewed ? 1 : 0, JSON.stringify(expected));
             if (Number(result.changes) !== 1)
                 throw new Error("procedural playbook compare-and-set failed");
+            if (event)
+                this.insertEvent(event);
         });
     }
     supersedePlaybook(expectedPrevious, successor, event) {
@@ -311,6 +341,12 @@ export class SqliteExperienceStoreV2 {
     appendEvent(event) {
         assertExperienceEventSafeForPersistence(event);
         this.insertEvent(event);
+    }
+    assertLinkedEvent(event, entityType, entityId) {
+        assertExperienceEventSafeForPersistence(event);
+        if (event.entityType !== entityType || event.entityId !== entityId) {
+            throw new Error("experience mutation event does not match its entity boundary");
+        }
     }
     assertPlaybookEvidence(playbook) {
         const episodes = this.listEpisodes(playbook.evidenceEpisodeIds);

@@ -59,7 +59,7 @@ function liveLikePluginConfig() {
     autoRecallTimeoutMs: 5000,
     dbPath: "/private/live-memory",
     embedding: { provider: "local-hash" },
-    enableManagementTools: true,
+    agentToolProfile: "operator",
     extractMaxChars: 12000,
     extractMinMessages: 4,
     extractionThrottle: { skipLowValue: true },

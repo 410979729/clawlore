@@ -41,6 +41,7 @@ import { registerAutoCaptureHooks } from "./src/auto-capture-hooks.js";
 import { registerTaskExperienceHooks } from "./src/task-experience-hooks.js";
 import { registerSelfImprovementHooks } from "./src/self-improvement-hooks.js";
 import { registerReflectionHooks } from "./src/reflection-hooks.js";
+import { agentToolCapabilities } from "./src/agent-tool-profile.js";
 // ============================================================================
 // Default Configuration
 // ============================================================================
@@ -273,7 +274,7 @@ const clawLorePlugin = {
         // ========================================================================
         // Register Tools
         // ========================================================================
-        const agentOperatorToolsEnabled = config.enableManagementTools === true && config.allowAgentOperatorTools === true;
+        const agentTools = agentToolCapabilities(config.agentToolProfile);
         registerAllMemoryTools(api, {
             retriever,
             store,
@@ -285,36 +286,32 @@ const clawLorePlugin = {
             workspaceBoundary: config.workspaceBoundary,
             principalIsolation: config.principalIsolation,
         }, {
-            allowAgentMemoryWriteTools: config.allowAgentMemoryWriteTools !== false,
-            enableManagementTools: agentOperatorToolsEnabled,
-            enableSelfImprovementTools: config.selfImprovement?.enabled === true,
-            secretIndexToolsEnabled: config.secretIndexToolsEnabled === true,
+            allowAgentMemoryWriteTools: agentTools.memoryWrites,
+            enableManagementTools: agentTools.operator,
+            enableSelfImprovementTools: agentTools.selfImprovement,
+            secretIndexToolsEnabled: agentTools.secretIndex,
         });
-        if (agentOperatorToolsEnabled || config.taskExperienceCapture?.enabled === true) {
-            registerExperienceTools(api, {
-                retriever,
-                store,
-                scopeManager,
-                embedder,
-                agentId: undefined,
-                workspaceDir: getDefaultWorkspaceDir(),
-                mdMirror,
-                workspaceBoundary: config.workspaceBoundary,
-                principalIsolation: config.principalIsolation,
-                db: () => store.getSqlTruthDb(),
-            }, {
-                enableManagementTools: agentOperatorToolsEnabled,
-            });
-            logReg("clawlore: Experience Kernel tools registered");
-            void store.getSqlTruthDb()
-                .then((db) => {
-                if (db)
-                    ensureExperienceSchema(db);
-            })
-                .catch((err) => {
-                api.logger.warn(`clawlore: Experience Kernel schema initialization failed: ${diagnosticErrorSummary(err)}`);
-            });
-        }
+        registerExperienceTools(api, {
+            retriever,
+            store,
+            scopeManager,
+            embedder,
+            agentId: undefined,
+            workspaceDir: getDefaultWorkspaceDir(),
+            mdMirror,
+            workspaceBoundary: config.workspaceBoundary,
+            principalIsolation: config.principalIsolation,
+            db: () => store.getSqlTruthDb(),
+        }, { enableManagementTools: agentTools.operator });
+        logReg("clawlore: Experience Kernel tools registered");
+        void store.getSqlTruthDb()
+            .then((db) => {
+            if (db)
+                ensureExperienceSchema(db);
+        })
+            .catch((err) => {
+            api.logger.warn(`clawlore: Experience Kernel schema initialization failed: ${diagnosticErrorSummary(err)}`);
+        });
         // Startup compaction is never destructive. Legacy `enabled: true` alone no
         // longer opts a deployment into mutation during Gateway startup.
         if (config.memoryCompaction?.enabled === true

@@ -135,7 +135,7 @@ class MemoryStoreRuntime implements MemoryStorePorts {
       return this.initPromise;
     }
 
-    this.initPromise = this.doInitialize().catch(async (err) => {
+    this.initPromise = this.runWithFileLock(() => this.doInitialize()).catch(async (err) => {
       await this.releaseInitializationResources();
       const stableError = err instanceof Error ? err : new Error(String(err));
       this.initializationFailure = stableError;
@@ -1840,28 +1840,30 @@ class MemoryStoreRuntime implements MemoryStorePorts {
     if (this.sqliteVectorStore) {
       return { success: true };
     }
-    try {
-      const indices = await this.table!.listIndices();
-      for (const idx of indices) {
-        if (idx.indexType === "FTS" || idx.columns?.includes("text")) {
-          try {
-            await this.table!.dropIndex((idx as any).name || "text");
-          } catch (err) {
-            console.warn(`clawlore: dropIndex(${(idx as any).name || "text"}) failed: ${diagnosticErrorSummary(err)}`);
+    return this.runWithFileLock(async () => {
+      try {
+        const indices = await this.table!.listIndices();
+        for (const idx of indices) {
+          if (idx.indexType === "FTS" || idx.columns?.includes("text")) {
+            try {
+              await this.table!.dropIndex((idx as any).name || "text");
+            } catch (err) {
+              console.warn(`clawlore: dropIndex(${(idx as any).name || "text"}) failed: ${diagnosticErrorSummary(err)}`);
+            }
           }
         }
+        // Recreate
+        await this.createFtsIndex(this.table!);
+        this.ftsIndexCreated = true;
+        this._lastFtsError = null;
+        return { success: true };
+      } catch (err) {
+        const msg = diagnosticErrorSummary(err);
+        this._lastFtsError = msg;
+        this.ftsIndexCreated = false;
+        return { success: false, error: msg };
       }
-      // Recreate
-      await this.createFtsIndex(this.table!);
-      this.ftsIndexCreated = true;
-      this._lastFtsError = null;
-      return { success: true };
-    } catch (err) {
-      const msg = diagnosticErrorSummary(err);
-      this._lastFtsError = msg;
-      this.ftsIndexCreated = false;
-      return { success: false, error: msg };
-    }
+    });
   }
 
   /**

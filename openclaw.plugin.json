@@ -110,10 +110,13 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "allowAgentMemoryWriteTools",
-            "default": "true",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "memory-write",
+              "self-improvement",
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -124,10 +127,13 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "allowAgentMemoryWriteTools",
-            "default": "true",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "memory-write",
+              "self-improvement",
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -138,10 +144,13 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "allowAgentMemoryWriteTools",
-            "default": "true",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "memory-write",
+              "self-improvement",
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -152,10 +161,10 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "secretIndexToolsEnabled",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator-secret-index"
             ]
           }
         }
@@ -166,10 +175,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -180,10 +190,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -194,10 +205,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -208,10 +220,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -222,10 +235,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -236,10 +250,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -250,10 +265,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -264,10 +280,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -278,10 +295,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -292,10 +310,27 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
+            ]
+          }
+        }
+      ]
+    },
+    "self_improvement_log": {
+      "configSignals": [
+        {
+          "rootPath": "plugins.entries.clawlore.config",
+          "mode": {
+            "path": "agentToolProfile",
+            "default": "memory-write",
+            "allowed": [
+              "self-improvement",
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -306,10 +341,12 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "self-improvement",
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -320,10 +357,12 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "self-improvement",
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -344,9 +383,12 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
-            "allowed": ["true"]
+            "path": "agentToolProfile",
+            "default": "memory-write",
+            "allowed": [
+              "operator",
+              "operator-secret-index"
+            ]
           }
         }
       ]
@@ -357,9 +399,12 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
-            "allowed": ["true"]
+            "path": "agentToolProfile",
+            "default": "memory-write",
+            "allowed": [
+              "operator",
+              "operator-secret-index"
+            ]
           }
         }
       ]
@@ -370,10 +415,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -385,10 +431,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -400,10 +447,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -415,10 +463,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -430,10 +479,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -445,10 +495,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -460,10 +511,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -475,10 +527,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -490,10 +543,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -505,10 +559,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -520,10 +575,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -535,10 +591,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -550,10 +607,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -565,10 +623,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -580,10 +639,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -595,10 +655,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -610,10 +671,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -625,10 +687,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -640,10 +703,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -655,10 +719,11 @@
         {
           "rootPath": "plugins.entries.clawlore.config",
           "mode": {
-            "path": "enableManagementTools",
-            "default": "false",
+            "path": "agentToolProfile",
+            "default": "memory-write",
             "allowed": [
-              "true"
+              "operator",
+              "operator-secret-index"
             ]
           }
         }
@@ -796,25 +861,17 @@
         "default": "lancedb",
         "description": "Vector companion backend. Use lancedb for production semantic search; use sqlite-bruteforce when native dependencies are unsafe."
       },
-      "allowAgentMemoryWriteTools": {
-        "type": "boolean",
-        "default": true,
-        "description": "Expose memory_store, memory_update, memory_forget, and secret-index writes to Agents. Set false for read-only containment while preserving memory_recall."
-      },
-      "enableManagementTools": {
-        "type": "boolean",
-        "default": false,
-        "description": "Enable operator services for CLI/UI use. Agent discovery additionally requires allowAgentOperatorTools."
-      },
-      "allowAgentOperatorTools": {
-        "type": "boolean",
-        "default": false,
-        "description": "Second explicit gate required before operator tools may enter the Agent tool surface."
-      },
-      "secretIndexToolsEnabled": {
-        "type": "boolean",
-        "default": false,
-        "description": "Expose the low-frequency secret-index tool. Default is off so credential-index schemas stay hidden unless an operator explicitly enables them."
+      "agentToolProfile": {
+        "type": "string",
+        "enum": [
+          "read-only",
+          "memory-write",
+          "self-improvement",
+          "operator",
+          "operator-secret-index"
+        ],
+        "default": "memory-write",
+        "description": "Single authoritative Agent tool-surface profile. read-only exposes recall and query-safe Experience tools; higher profiles add durable memory writes, self-improvement writes, operator tools, and finally secret-index writes."
       },
       "sessionStrategy": {
         "type": "string",
@@ -2443,19 +2500,9 @@
       "help": "Define which scopes each agent can access",
       "advanced": true
     },
-    "enableManagementTools": {
-      "label": "Management Tools",
-      "help": "Expose operator tools such as memory_list, memory_stats, memory_compact, and self-improvement review/extract actions.",
-      "advanced": true
-    },
-    "allowAgentMemoryWriteTools": {
-      "label": "Agent Memory Writes",
-      "help": "Expose durable memory write tools to Agents. Turn off for read-only containment while keeping memory_recall available.",
-      "advanced": true
-    },
-    "secretIndexToolsEnabled": {
-      "label": "Secret Index Tools",
-      "help": "Expose the low-frequency secret-index tool. Leave off unless an operator explicitly needs credential index writes.",
+    "agentToolProfile": {
+      "label": "Agent Tool Profile",
+      "help": "Choose one authoritative tool surface: read-only, memory-write, self-improvement, operator, or operator-secret-index.",
       "advanced": true
     },
     "mdMirror.enabled": {
@@ -2533,7 +2580,7 @@
     },
     "memoryCompaction.enabled": {
       "label": "Auto Compaction",
-      "help": "Automatically consolidate similar old memories at gateway startup. Also available on-demand via the memory_compact tool (requires enableManagementTools)."
+      "help": "Automatically consolidate similar old memories at gateway startup. Also available on-demand via the memory_compact tool (requires agentToolProfile=operator or operator-secret-index)."
     },
     "memoryCompaction.minAgeDays": {
       "label": "Min Age (days)",

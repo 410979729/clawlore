@@ -202,7 +202,10 @@ export function registerExperienceTool(
 
 export function managementDisabledResponse(toolName: string): ToolTextResult {
   return {
-    content: [{ type: "text", text: `${toolName} requires enableManagementTools=true.` }],
+    content: [{
+      type: "text",
+      text: `${toolName} requires agentToolProfile=operator or operator-secret-index.`,
+    }],
     details: { error: "management_tools_disabled", tool: toolName },
     isError: true,
   };

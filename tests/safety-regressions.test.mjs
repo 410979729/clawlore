@@ -799,20 +799,25 @@ test("manifest declares all owned tools and marks management tools with config a
   for (const toolName of ["memory_store", "memory_forget", "memory_update"]) {
     const writeSignal = manifest.toolMetadata[toolName].configSignals[0];
     assert.equal(writeSignal.rootPath, "plugins.entries.clawlore.config");
-    assert.equal(writeSignal.mode.path, "allowAgentMemoryWriteTools");
-    assert.equal(writeSignal.mode.default, "true");
-    assert.deepEqual(writeSignal.mode.allowed, ["true"]);
+    assert.equal(writeSignal.mode.path, "agentToolProfile");
+    assert.equal(writeSignal.mode.default, "memory-write");
+    assert.deepEqual(writeSignal.mode.allowed, [
+      "memory-write",
+      "self-improvement",
+      "operator",
+      "operator-secret-index",
+    ]);
   }
 
   const secretSignal = manifest.toolMetadata.memory_store_secret_index.configSignals[0];
   assert.equal(secretSignal.rootPath, "plugins.entries.clawlore.config");
-  assert.equal(secretSignal.mode.path, "secretIndexToolsEnabled");
-  assert.deepEqual(secretSignal.mode.allowed, ["true"]);
+  assert.equal(secretSignal.mode.path, "agentToolProfile");
+  assert.deepEqual(secretSignal.mode.allowed, ["operator-secret-index"]);
 
   const governSignal = manifest.toolMetadata.memory_govern.configSignals[0];
   assert.equal(governSignal.rootPath, "plugins.entries.clawlore.config");
-  assert.equal(governSignal.mode.path, "enableManagementTools");
-  assert.deepEqual(governSignal.mode.allowed, ["true"]);
+  assert.equal(governSignal.mode.path, "agentToolProfile");
+  assert.deepEqual(governSignal.mode.allowed, ["operator", "operator-secret-index"]);
 
   const alwaysAvailableExperienceTools = new Set([
     "scope_recall_playbook_search",
@@ -829,8 +834,8 @@ test("manifest declares all owned tools and marks management tools with config a
     if (!alwaysAvailableExperienceTools.has(toolName)) {
       const signal = manifest.toolMetadata[toolName].configSignals?.[0];
       assert.equal(signal?.rootPath, "plugins.entries.clawlore.config", toolName);
-      assert.equal(signal?.mode?.path, "enableManagementTools", toolName);
-      assert.deepEqual(signal?.mode?.allowed, ["true"], toolName);
+      assert.equal(signal?.mode?.path, "agentToolProfile", toolName);
+      assert.deepEqual(signal?.mode?.allowed, ["operator", "operator-secret-index"], toolName);
     }
   }
 
@@ -858,14 +863,14 @@ test("manifest declares all owned tools and marks management tools with config a
       (entry) => entry.type === "object",
     ),
   );
-  assert.equal(
-    manifest.configSchema.properties.allowAgentMemoryWriteTools.default,
-    true,
-  );
-  assert.equal(
-    manifest.configSchema.properties.allowAgentOperatorTools.default,
-    false,
-  );
+  assert.equal(manifest.configSchema.properties.agentToolProfile.default, "memory-write");
+  assert.deepEqual(manifest.configSchema.properties.agentToolProfile.enum, [
+    "read-only",
+    "memory-write",
+    "self-improvement",
+    "operator",
+    "operator-secret-index",
+  ]);
   assert.deepEqual(
     manifest.configSchema.properties.memoryCompaction.properties.startupMode.enum,
     ["off", "dry-run"],
@@ -912,8 +917,7 @@ test("legacy plaintext backup and destructive startup compaction are disabled", 
   assert.match(entry, /startupMode === "dry-run"/);
   assert.match(entry, /dryRun: true/);
   assert.doesNotMatch(entry, /recordCompactionRun\(compactionStateFile\)/);
-  assert.match(entry, /config\.allowAgentMemoryWriteTools !== false/);
-  assert.match(entry, /config\.allowAgentOperatorTools === true/);
+  assert.match(entry, /agentToolCapabilities\(config\.agentToolProfile\)/);
 });
 
 test("vector repair CLI is dry-run-first and SQLite stores use busy timeout", () => {
@@ -1051,6 +1055,7 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
   assert.match(gate, /"rev-parse",\s*"--show-toplevel"/);
   assert.match(gate, /CLAWLORE_ALLOW_NESTED_GIT_ROOT/);
   assert.match(gate, /packed-lancedb-smoke\.mjs/);
+  assert.match(gate, /clawlore-agent-tool-profile-host-smoke\.mjs/);
   assert.equal(packageJson.files.includes("scripts/packed-lancedb-smoke.mjs"), true);
   assert.match(gate, /packed-legacy-identity-smoke\.mjs/);
   assert.equal(packageJson.files.includes("scripts/packed-legacy-identity-smoke.mjs"), true);
