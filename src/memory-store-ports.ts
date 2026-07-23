@@ -45,6 +45,59 @@ export interface MetadataPatch {
   [key: string]: unknown;
 }
 
+export interface MemoryEntrySnapshot {
+  id: string;
+  text: string;
+  category: MemoryEntry["category"];
+  scope: string;
+  importance: number;
+  timestamp: number;
+  metadata: string;
+}
+
+export interface MemoryUpdateOptions {
+  expected?: MemoryEntrySnapshot;
+}
+
+export class MemoryUpdateConflictError extends Error {
+  readonly code = "CLAWLORE_MEMORY_UPDATE_CONFLICT";
+
+  constructor() {
+    super("memory changed after it was read");
+    this.name = "MemoryUpdateConflictError";
+  }
+}
+
+export function snapshotMemoryEntry(entry: MemoryEntry): MemoryEntrySnapshot {
+  return {
+    id: entry.id,
+    text: entry.text,
+    category: entry.category,
+    scope: entry.scope,
+    importance: entry.importance,
+    timestamp: entry.timestamp,
+    metadata: entry.metadata ?? "{}",
+  };
+}
+
+export function memoryEntryMatchesSnapshot(
+  entry: MemoryEntry,
+  snapshot: MemoryEntrySnapshot,
+): boolean {
+  const current = snapshotMemoryEntry(entry);
+  return Object.keys(current).every(
+    (key) => current[key as keyof MemoryEntrySnapshot] === snapshot[key as keyof MemoryEntrySnapshot],
+  );
+}
+
+export function isMemoryUpdateConflict(error: unknown): boolean {
+  return Boolean(
+    error
+    && typeof error === "object"
+    && (error as { code?: unknown }).code === "CLAWLORE_MEMORY_UPDATE_CONFLICT",
+  );
+}
+
 export interface AtomicSupersedeInput {
   text: string;
   vector: number[];
@@ -151,6 +204,7 @@ export interface MemoryTruthPort {
       metadata?: string;
     },
     scopeFilter?: string[],
+    options?: MemoryUpdateOptions,
   ): Promise<MemoryEntry | null>;
   supersede(id: string, replacement: AtomicSupersedeInput, scopeFilter?: string[]): Promise<MemoryEntry>;
   patchMetadata(id: string, patch: MetadataPatch, scopeFilter?: string[]): Promise<MemoryEntry | null>;

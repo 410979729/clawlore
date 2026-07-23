@@ -29,6 +29,7 @@ test("plugin config preserves privacy-first defaults and local embedding default
   assert.equal(parsed.autoRecall, false);
   assert.equal(parsed.recallMode, "full");
   assert.equal(parsed.agentToolProfile, "memory-write");
+  assert.deepEqual(parsed.outboundEndpointPolicy, { allowedPrivateHosts: [] });
   assert.deepEqual(parsed.principalIsolation, {
     enabled: true,
     groupMemory: "deny",
@@ -49,6 +50,34 @@ test("plugin config preserves privacy-first defaults and local embedding default
     errorReminderMaxEntries: 3,
     dedupeErrorSignals: true,
   });
+});
+
+test("plugin config applies the shared fail-closed provider endpoint policy", () => {
+  assert.throws(
+    () => parsePluginConfig({
+      embedding: { provider: "openai-compatible", apiKey: "fixture", baseURL: "http://127.0.0.1:11434/v1" },
+    }),
+    /PRIVATE_ADDRESS_BLOCKED|HTTPS_REQUIRED/u,
+  );
+  const local = parsePluginConfig({
+    outboundEndpointPolicy: { allowedPrivateHosts: ["127.0.0.1"] },
+    embedding: { provider: "openai-compatible", apiKey: "fixture", baseURL: "http://127.0.0.1:11434/v1" },
+  });
+  assert.deepEqual(local.outboundEndpointPolicy, { allowedPrivateHosts: ["127.0.0.1"] });
+  assert.throws(
+    () => parsePluginConfig({
+      embedding: { provider: "openai-compatible", apiKey: "fixture" },
+      retrieval: { rerankEndpoint: "https://169.254.169.254/latest/meta-data" },
+    }),
+    /PRIVATE_ADDRESS_BLOCKED/u,
+  );
+  assert.throws(
+    () => parsePluginConfig({
+      embedding: { provider: "openai-compatible", apiKey: "fixture" },
+      llm: { baseURL: "file:///etc/passwd" },
+    }),
+    /UNSAFE_URL/u,
+  );
 });
 
 test("plugin config can put the Agent memory surface into read-only mode", () => {

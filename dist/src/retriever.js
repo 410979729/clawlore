@@ -607,7 +607,9 @@ export class MemoryRetriever {
                 const timeout = setTimeout(() => controller.abort(), 5000);
                 let response;
                 try {
-                    response = await fetch(endpoint, {
+                    if (!this.config.outboundFetch)
+                        throw new Error("Rerank transport is not configured");
+                    response = await this.config.outboundFetch(endpoint, {
                         method: "POST",
                         headers,
                         body: JSON.stringify(body),

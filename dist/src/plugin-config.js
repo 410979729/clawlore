@@ -3,6 +3,7 @@ import { isCanonicalPrincipalKey, } from "./runtime-memory-boundary.js";
 import { resolveClawLoreRuntimeRequestConfig, } from "./runtime-config.js";
 import { DEFAULT_TASK_EXPERIENCE_CAPTURE_CONFIG, } from "./task-experience.js";
 import { DEFAULT_AGENT_TOOL_PROFILE, isAgentToolProfile, } from "./agent-tool-profile.js";
+import { parseOutboundEndpointPolicy, validateOutboundEndpointSyntax, } from "./outbound-endpoint-policy.js";
 export const DEFAULT_REFLECTION_MESSAGE_COUNT = 120;
 export const DEFAULT_REFLECTION_MAX_INPUT_CHARS = 24_000;
 export const DEFAULT_REFLECTION_TIMEOUT_MS = 20_000;
@@ -127,6 +128,7 @@ export function parsePluginConfig(value) {
     const agentToolProfile = isAgentToolProfile(cfg.agentToolProfile)
         ? cfg.agentToolProfile
         : DEFAULT_AGENT_TOOL_PROFILE;
+    const outboundEndpointPolicy = parseOutboundEndpointPolicy(cfg.outboundEndpointPolicy);
     const embedding = cfg.embedding;
     if (!embedding) {
         throw new Error("embedding config is required");
@@ -165,6 +167,21 @@ export function parsePluginConfig(value) {
             (Array.isArray(embeddingAuthMaterial) && embeddingAuthMaterial.length === 0))) {
         throw new Error("embedding.apiKey is required for hosted embedding providers");
     }
+    const embeddingBaseURL = asNonEmptyString(embedding.baseURL);
+    if (embeddingBaseURL)
+        validateOutboundEndpointSyntax(embeddingBaseURL, outboundEndpointPolicy);
+    const retrievalRaw = typeof cfg.retrieval === "object" && cfg.retrieval !== null
+        ? cfg.retrieval
+        : null;
+    const rerankEndpoint = asNonEmptyString(retrievalRaw?.rerankEndpoint);
+    if (rerankEndpoint)
+        validateOutboundEndpointSyntax(rerankEndpoint, outboundEndpointPolicy);
+    const llmRaw = typeof cfg.llm === "object" && cfg.llm !== null
+        ? cfg.llm
+        : null;
+    const llmBaseURL = asNonEmptyString(llmRaw?.baseURL);
+    if (llmBaseURL)
+        validateOutboundEndpointSyntax(llmBaseURL, outboundEndpointPolicy);
     const memoryReflectionRaw = typeof cfg.memoryReflection === "object" && cfg.memoryReflection !== null
         ? cfg.memoryReflection
         : null;
@@ -196,6 +213,7 @@ export function parsePluginConfig(value) {
         : "inheritance+derived";
     const reflectionStoreToLanceDB = sessionStrategy === "memoryReflection" && memoryReflectionRaw?.storeToLanceDB !== false;
     return {
+        outboundEndpointPolicy,
         embedding: {
             provider: embeddingProvider,
             [OPENAI_CLIENT_AUTH_FIELD]: embeddingAuthMaterial,
@@ -206,9 +224,7 @@ export function parsePluginConfig(value) {
                     : embeddingProvider === "minimax"
                         ? "embo-01"
                         : "text-embedding-3-small",
-            baseURL: typeof embedding.baseURL === "string"
-                ? resolveConfigString(embedding.baseURL)
-                : undefined,
+            baseURL: embeddingBaseURL ? resolveConfigString(embeddingBaseURL) : undefined,
             dimensions: parsePositiveInt(embedding.dimensions ?? cfg.dimensions),
             omitDimensions: typeof embedding.omitDimensions === "boolean" ? embedding.omitDimensions : undefined,
             taskQuery: typeof embedding.taskQuery === "string" ? embedding.taskQuery : undefined,

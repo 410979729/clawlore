@@ -15,6 +15,7 @@ import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
 import { createEmbedder, getVectorDimensions } from "./embedder.js";
 import { createLlmClient } from "./llm-client.js";
 import { createMigrator } from "./migrate.js";
+import { createSafeOutboundFetch } from "./outbound-endpoint-policy.js";
 import {
   assignOpenAiClientCredential,
   parsePluginConfig,
@@ -112,6 +113,7 @@ export function createConfiguredLlmRuntime(
     oauthProvider: llmAuth === "oauth" ? config.llm?.oauthProvider : undefined,
     oauthPath,
     timeoutMs,
+    outboundEndpointPolicy: config.outboundEndpointPolicy,
     log: (message: string) => api.logger.debug(message),
   } as Parameters<typeof createLlmClient>[0];
   return {
@@ -166,6 +168,7 @@ export function createCoreMemoryRuntime(
     taskPassage: config.embedding.taskPassage,
     normalized: config.embedding.normalized,
     chunking: config.embedding.chunking,
+    outboundEndpointPolicy: config.outboundEndpointPolicy,
   } as Parameters<typeof createEmbedder>[0];
   const embedder = createEmbedder(
     assignOpenAiClientCredential(embedderConfig, config.embedding.apiKey),
@@ -175,7 +178,11 @@ export function createCoreMemoryRuntime(
   const retriever = createRetriever(
     store,
     embedder,
-    { ...DEFAULT_RETRIEVAL_CONFIG, ...config.retrieval },
+    {
+      ...DEFAULT_RETRIEVAL_CONFIG,
+      ...config.retrieval,
+      outboundFetch: createSafeOutboundFetch(config.outboundEndpointPolicy),
+    },
     { decayEngine },
   );
   const scopeManager = createScopeManager(config.scopes);

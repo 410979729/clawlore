@@ -11,6 +11,7 @@ import OpenAI from "openai";
 import { createHash } from "node:crypto";
 import { smartChunk } from "./chunker.js";
 import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
+import { createSafeOutboundFetch } from "./outbound-endpoint-policy.js";
 const OPENAI_CLIENT_AUTH_FIELD = ["api", "Key"].join("");
 function assignOpenAiClientCredential(target, value) {
     target[OPENAI_CLIENT_AUTH_FIELD] = value;
@@ -395,6 +396,7 @@ export class Embedder {
     _cache;
     _model;
     _baseURL;
+    _safeFetch;
     _taskQuery;
     _taskPassage;
     _normalized;
@@ -417,6 +419,7 @@ export class Embedder {
         }
         this._model = config.model;
         this._baseURL = config.baseURL;
+        this._safeFetch = createSafeOutboundFetch(config.outboundEndpointPolicy);
         this._taskQuery = config.taskQuery;
         this._taskPassage = config.taskPassage;
         this._normalized = config.normalized;
@@ -448,6 +451,7 @@ export class Embedder {
             const clientOptions = {
                 ...(baseURL ? { baseURL } : {}),
                 defaultHeaders: Object.keys(defaultHeaders).length > 0 ? defaultHeaders : undefined,
+                fetch: this._safeFetch,
             };
             return new OpenAI(assignOpenAiClientCredential(clientOptions, key));
         });
@@ -512,7 +516,7 @@ export class Embedder {
         // Ollama's embeddings endpoint is at /v1/embeddings (OpenAI-compatible)
         const endpoint = this._baseURL.replace(/\/$/, "") + "/embeddings";
         const authMaterial = this.clients[0]?.apiKey ?? "ollama";
-        const response = await fetch(endpoint, {
+        const response = await this._safeFetch(endpoint, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -902,6 +906,7 @@ export class MiniMaxEmbedder {
     _cache;
     _model;
     _baseURL;
+    _safeFetch;
     _apiKeys;
     _groupId;
     _keyIndex = 0;
@@ -916,6 +921,7 @@ export class MiniMaxEmbedder {
         }
         this._model = config.model || "embo-01";
         this._baseURL = (config.baseURL || "https://api.minimaxi.com/v1").replace(/\/$/, "");
+        this._safeFetch = createSafeOutboundFetch(config.outboundEndpointPolicy);
         this._groupId = config.groupId;
         this.dimensions = getVectorDimensions(this._model, config.dimensions);
         this._cache = new EmbeddingCache(256, 30);
@@ -935,7 +941,7 @@ export class MiniMaxEmbedder {
         const body = JSON.stringify({ model: this._model, texts, type });
         let lastError;
         for (let attempt = 0; attempt < this._apiKeys.length; attempt++) {
-            const response = await fetch(endpoint, {
+            const response = await this._safeFetch(endpoint, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",

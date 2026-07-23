@@ -47,6 +47,8 @@ export interface RetrievalConfig extends ManualRecallConfidenceConfig {
   rerankModel?: string;
   /** Reranker API endpoint (default: https://api.jina.ai/v1/rerank). */
   rerankEndpoint?: string;
+  /** Composition-injected SSRF-safe transport. Cross-encoder calls fail closed when absent. */
+  outboundFetch?: typeof globalThis.fetch;
   /** Reranker provider format. Determines request/response shape and auth header.
    *  - "jina" (default): Authorization: Bearer, string[] documents, results[].relevance_score
    *  - "siliconflow": same format as jina (alias, for clarity)
@@ -907,7 +909,8 @@ export class MemoryRetriever {
 
         let response: Response;
         try {
-          response = await fetch(endpoint, {
+          if (!this.config.outboundFetch) throw new Error("Rerank transport is not configured");
+          response = await this.config.outboundFetch(endpoint, {
             method: "POST",
             headers,
             body: JSON.stringify(body),

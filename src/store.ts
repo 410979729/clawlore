@@ -15,6 +15,10 @@ import { withMemoryWriteLock } from "./memory-write-lock.js";
 import { assertMemoryEntrySafeForPersistence } from "./memory-entry-write-policy.js";
 import { isMemoryEntrySafeForEgress } from "./memory-egress-policy.js";
 import { MemoryStoreFacade } from "./memory-store-facade.js";
+import {
+  memoryEntryMatchesSnapshot,
+  MemoryUpdateConflictError,
+} from "./memory-store-ports.js";
 import { validateStoragePath } from "./storage-path.js";
 import { collectLanceRows, scanLanceRows } from "./lance-row-scan.js";
 
@@ -29,6 +33,7 @@ import type {
   MemoryStorePorts,
   MemoryTruthStats,
   MetadataPatch,
+  MemoryUpdateOptions,
   StoreConfig,
   VectorCompanionDriftReport,
   VectorCompanionEmbedder,
@@ -47,6 +52,7 @@ export type {
   MemoryRetrievalPort,
   MemoryProjectionPort,
   MetadataPatch,
+  MemoryUpdateOptions,
   StoreConfig,
   VectorCompanionDriftReport,
   VectorCompanionEmbedder,
@@ -1254,6 +1260,7 @@ class MemoryStoreRuntime implements MemoryStorePorts {
       metadata?: string;
     },
     scopeFilter?: string[],
+    options?: MemoryUpdateOptions,
   ): Promise<MemoryEntry | null> {
     await this.ensureInitialized();
 
@@ -1265,6 +1272,9 @@ class MemoryStoreRuntime implements MemoryStorePorts {
       return this.runWithFileLock(() => this.runSerializedUpdate(async () => {
         const original = this.resolveSqlEntry(id, scopeFilter);
         if (!original) return null;
+        if (options?.expected && !memoryEntryMatchesSnapshot(original, options.expected)) {
+          throw new MemoryUpdateConflictError();
+        }
 
         const vectorOriginal = await this.getVectorEntryById(original.id).catch(() => null);
         const updated: MemoryEntry = {
@@ -1361,6 +1371,9 @@ class MemoryStoreRuntime implements MemoryStorePorts {
         timestamp: Number(row.timestamp),
         metadata: (row.metadata as string) || "{}",
       };
+      if (options?.expected && !memoryEntryMatchesSnapshot(original, options.expected)) {
+        throw new MemoryUpdateConflictError();
+      }
 
       const updated: MemoryEntry = {
         ...original,

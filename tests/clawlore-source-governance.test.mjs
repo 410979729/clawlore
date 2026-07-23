@@ -55,7 +55,7 @@ const ROOT_MODULES_BY_LAYER = {
     "digest-boundary-policy.ts", "experience-governance.ts", "experience-promotion-batch.ts", "experience-promotion.ts",
     "experience-replay.ts", "forgetting.ts", "governance-cleanup.ts",
     "graph-hygiene.ts", "identity-addressing.ts", "intent-analyzer.ts",
-    "knowledge-skill-bridge.ts", "memory-upgrader.ts",
+    "knowledge-skill-bridge.ts", "llm-memory-merge.ts", "memory-upgrader.ts",
     "memory-store-facade.ts", "memory-store-ports.ts",
     "reflection-retry.ts", "retrieval-stats.ts", "retrieval-trace.ts",
     "retriever.ts", "session-compressor.ts", "smart-extractor.ts",
@@ -76,7 +76,7 @@ const ROOT_MODULES_BY_LAYER = {
   ],
   infrastructure: [
     "artifacts.ts", "embedder.ts", "experience-store.ts", "file-privacy.ts",
-    "journal-recovery.ts", "lance-row-scan.ts", "lancedb-loader.ts", "llm-client.ts", "llm-oauth.ts", "memory-write-lock.ts",
+    "journal-recovery.ts", "lance-row-scan.ts", "lancedb-loader.ts", "llm-client.ts", "llm-oauth.ts", "memory-write-lock.ts", "outbound-endpoint-policy.ts",
     "oauth-session-storage.ts", "private-file-lock.ts", "private-lock-file.ts", "proper-lockfile.d.ts",
     "reflection-event-store.ts", "reflection-item-store.ts",
     "reflection-store.ts", "secret-index.ts",

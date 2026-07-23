@@ -22,6 +22,11 @@ import {
   isAgentToolProfile,
   type AgentToolProfile,
 } from "./agent-tool-profile.js";
+import {
+  parseOutboundEndpointPolicy,
+  validateOutboundEndpointSyntax,
+  type OutboundEndpointPolicy,
+} from "./outbound-endpoint-policy.js";
 export type { ReflectionThinkLevel } from "./reflection-contracts.js";
 
 export type SessionStrategy = "memoryReflection" | "systemSessionMemory" | "none";
@@ -35,6 +40,7 @@ export type ReflectionInjectMode = "inheritance-only" | "inheritance+derived";
  * configuration into this type.
  */
 export interface PluginConfig {
+  outboundEndpointPolicy: OutboundEndpointPolicy;
   embedding: {
     provider: "openai-compatible" | "azure-openai" | "local-hash" | "local-debug" | "minimax";
     apiKey?: string | string[];
@@ -313,6 +319,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
   const agentToolProfile = isAgentToolProfile(cfg.agentToolProfile)
     ? cfg.agentToolProfile
     : DEFAULT_AGENT_TOOL_PROFILE;
+  const outboundEndpointPolicy = parseOutboundEndpointPolicy(cfg.outboundEndpointPolicy);
 
   const embedding = cfg.embedding as Record<string, unknown> | undefined;
   if (!embedding) {
@@ -362,6 +369,18 @@ export function parsePluginConfig(value: unknown): PluginConfig {
   ) {
     throw new Error("embedding.apiKey is required for hosted embedding providers");
   }
+  const embeddingBaseURL = asNonEmptyString(embedding.baseURL);
+  if (embeddingBaseURL) validateOutboundEndpointSyntax(embeddingBaseURL, outboundEndpointPolicy);
+  const retrievalRaw = typeof cfg.retrieval === "object" && cfg.retrieval !== null
+    ? cfg.retrieval as Record<string, unknown>
+    : null;
+  const rerankEndpoint = asNonEmptyString(retrievalRaw?.rerankEndpoint);
+  if (rerankEndpoint) validateOutboundEndpointSyntax(rerankEndpoint, outboundEndpointPolicy);
+  const llmRaw = typeof cfg.llm === "object" && cfg.llm !== null
+    ? cfg.llm as Record<string, unknown>
+    : null;
+  const llmBaseURL = asNonEmptyString(llmRaw?.baseURL);
+  if (llmBaseURL) validateOutboundEndpointSyntax(llmBaseURL, outboundEndpointPolicy);
 
   const memoryReflectionRaw = typeof cfg.memoryReflection === "object" && cfg.memoryReflection !== null
     ? cfg.memoryReflection as Record<string, unknown>
@@ -400,6 +419,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
     sessionStrategy === "memoryReflection" && memoryReflectionRaw?.storeToLanceDB !== false;
 
   return {
+    outboundEndpointPolicy,
     embedding: {
       provider: embeddingProvider,
       [OPENAI_CLIENT_AUTH_FIELD]: embeddingAuthMaterial,
@@ -411,10 +431,7 @@ export function parsePluginConfig(value: unknown): PluginConfig {
             : embeddingProvider === "minimax"
               ? "embo-01"
               : "text-embedding-3-small",
-      baseURL:
-        typeof embedding.baseURL === "string"
-          ? resolveConfigString(embedding.baseURL)
-          : undefined,
+      baseURL: embeddingBaseURL ? resolveConfigString(embeddingBaseURL) : undefined,
       dimensions: parsePositiveInt(embedding.dimensions ?? cfg.dimensions),
       omitDimensions:
         typeof embedding.omitDimensions === "boolean" ? embedding.omitDimensions : undefined,

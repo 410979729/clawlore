@@ -10,7 +10,8 @@ import { ALWAYS_MERGE_CATEGORIES, MERGE_SUPPORTED_CATEGORIES, TEMPORAL_VERSIONED
 import { isNoise } from "./noise-filter.js";
 import { evaluateCaptureSafety, sanitizeCaptureText } from "./capture-safety.js";
 import { filterUnsafeMemoryResults, isMemoryEntrySafeForEgress, } from "./memory-egress-policy.js";
-import { evaluateMemoryMergePayload } from "./memory-merge-policy.js";
+import { applyLlmMemoryMergeWithCas } from "./llm-memory-merge.js";
+import { isMemoryUpdateConflict, snapshotMemoryEntry, } from "./memory-store-ports.js";
 import { normalizeProviderAnnotation } from "./provider-output-policy.js";
 import { filterEmbeddingNoiseInputs } from "./embedding-noise-filter.js";
 import { appendRelation, buildSmartMetadata, deriveFactKey, parseSmartMetadata, stringifySmartMetadata, parseSupportInfo, updateSupportStats, } from "./smart-metadata.js";
@@ -539,58 +540,49 @@ export class SmartExtractor {
             await this.storeCandidate(candidate, candidateVector, "merge-fallback", targetScope, admissionAudit, runtimeMetadata);
             return "created";
         };
-        let existing;
-        try {
-            existing = await this.store.getById(matchId, scopeFilter);
-        }
-        catch {
-            return storeFallback("source read failed");
-        }
-        if (!existing || !isMemoryEntrySafeForEgress(existing)) {
-            return storeFallback("source missing or unsafe");
-        }
-        const existingMeta = parseSmartMetadata(existing.metadata, existing);
-        const prompt = buildMergePrompt(existingMeta.l0_abstract || existing.text, existingMeta.l1_overview || "", existingMeta.l2_content || existing.text, candidate.abstract, candidate.overview, candidate.content, candidate.category);
-        let untrustedMerged;
-        try {
-            untrustedMerged = await this.llm.completeJson(prompt, "merge-memory");
-        }
-        catch {
-            return storeFallback("provider failed");
-        }
-        const mergeDecision = evaluateMemoryMergePayload(untrustedMerged);
-        if (!mergeDecision.allowed)
-            return storeFallback(`output rejected (${mergeDecision.reason})`);
-        const merged = mergeDecision.value;
-        const mergedText = `${merged.abstract} ${merged.content}`;
-        const newVector = await this.embedder.embed(mergedText);
-        const metadata = stringifySmartMetadata(this.withAdmissionAudit(buildSmartMetadata(existing ?? { text: merged.abstract }, {
-            ...runtimeMetadata,
-            l0_abstract: merged.abstract,
-            l1_overview: merged.overview,
-            l2_content: merged.content,
-            memory_category: candidate.category,
-            tier: "working",
-            confidence: 0.8,
-        }), admissionAudit));
-        await this.store.update(matchId, {
-            text: merged.abstract,
-            vector: newVector,
-            metadata,
-        }, scopeFilter);
+        const merge = await applyLlmMemoryMergeWithCas({
+            store: this.store,
+            memoryId: matchId,
+            scopeFilter,
+            completeJson: (prompt) => this.llm.completeJson(prompt, "merge-memory"),
+            embed: (text) => this.embedder.embed(text),
+            buildPrompt: (existing) => {
+                const meta = parseSmartMetadata(existing.metadata, existing);
+                return buildMergePrompt(meta.l0_abstract || existing.text, meta.l1_overview || "", meta.l2_content || existing.text, candidate.abstract, candidate.overview, candidate.content, candidate.category);
+            },
+            buildUpdates: (existing, merged, vector) => ({
+                text: merged.abstract,
+                vector,
+                metadata: stringifySmartMetadata(this.withAdmissionAudit(buildSmartMetadata(existing, {
+                    ...runtimeMetadata,
+                    l0_abstract: merged.abstract,
+                    l1_overview: merged.overview,
+                    l2_content: merged.content,
+                    memory_category: candidate.category,
+                    tier: "working",
+                    confidence: 0.8,
+                }), admissionAudit)),
+            }),
+        });
+        if (merge.status === "fallback")
+            return storeFallback(merge.reason);
         // Update support stats on the merged memory
-        try {
-            const updatedEntry = await this.store.getById(matchId, scopeFilter);
-            if (updatedEntry) {
-                const meta = parseSmartMetadata(updatedEntry.metadata, updatedEntry);
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+            try {
+                const current = await this.store.getById(matchId, scopeFilter);
+                if (!current || !isMemoryEntrySafeForEgress(current))
+                    break;
+                const meta = parseSmartMetadata(current.metadata, current);
                 const supportInfo = parseSupportInfo(meta.support_info);
-                const updated = updateSupportStats(supportInfo, contextLabel, "support");
-                const finalMetadata = stringifySmartMetadata({ ...meta, support_info: updated });
-                await this.store.update(matchId, { metadata: finalMetadata }, scopeFilter);
+                const support = updateSupportStats(supportInfo, contextLabel, "support");
+                await this.store.update(matchId, { metadata: stringifySmartMetadata({ ...meta, support_info: support }) }, scopeFilter, { expected: snapshotMemoryEntry(current) });
+                break;
             }
-        }
-        catch {
-            // Non-critical: merge succeeded, support stats update is best-effort
+            catch (error) {
+                if (isMemoryUpdateConflict(error))
+                    continue;
+                break;
+            }
         }
         this.log(`clawlore: smart-extractor: merged [${candidate.category}] ` +
             `context=${diagnosticTextSummary(contextLabel)} into=${diagnosticIdentifier(matchId)}`);

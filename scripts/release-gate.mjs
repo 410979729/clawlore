@@ -443,6 +443,50 @@ if (!indexSource.includes("registerExperienceTools(") || !indexSource.includes("
   throw new Error("release gate failed: index.ts does not initialize/register Experience Kernel");
 }
 
+const endpointPolicySource = await readFile("src/outbound-endpoint-policy.ts", "utf8");
+for (const marker of [
+  "allowedPrivateHosts",
+  "PRIVATE_ADDRESS_BLOCKED",
+  "DNS_FAILED",
+  "REDIRECT_BLOCKED",
+  "redirect: \"manual\"",
+  "createValidatedLookup",
+]) {
+  if (!endpointPolicySource.includes(marker)) {
+    throw new Error(`release gate failed: outbound endpoint policy missing ${marker}`);
+  }
+}
+if (!manifest.configSchema?.properties?.outboundEndpointPolicy) {
+  throw new Error("release gate failed: manifest missing outbound endpoint policy");
+}
+for (const path of ["src/embedder.ts", "src/llm-client.ts"]) {
+  const source = await readFile(path, "utf8");
+  if (!source.includes("createSafeOutboundFetch") || /\bawait\s+fetch\s*\(/u.test(source)) {
+    throw new Error(`release gate failed: configurable provider path bypasses endpoint policy: ${path}`);
+  }
+}
+const retrieverTransportSource = await readFile("src/retriever.ts", "utf8");
+const coreRuntimeSource = await readFile("src/core-memory-runtime.ts", "utf8");
+if (
+  !retrieverTransportSource.includes("outboundFetch")
+  || /\bawait\s+fetch\s*\(/u.test(retrieverTransportSource)
+  || !coreRuntimeSource.includes("outboundFetch: createSafeOutboundFetch")
+) {
+  throw new Error("release gate failed: reranker transport bypasses endpoint policy");
+}
+const mergeCasSource = await readFile("src/llm-memory-merge.ts", "utf8");
+const storeSource = await readFile("src/store.ts", "utf8");
+for (const marker of ["snapshotMemoryEntry", "isMemoryUpdateConflict", "source changed concurrently"]) {
+  if (!mergeCasSource.includes(marker)) {
+    throw new Error(`release gate failed: LLM merge CAS missing ${marker}`);
+  }
+}
+for (const marker of ["memoryEntryMatchesSnapshot", "MemoryUpdateConflictError"]) {
+  if (!storeSource.includes(marker)) {
+    throw new Error(`release gate failed: storage CAS boundary missing ${marker}`);
+  }
+}
+
 // CLI capabilities are deliberately split; release policy must audit the whole
 // published command surface instead of treating the compatibility facade as
 // the implementation owner.

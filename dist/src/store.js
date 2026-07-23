@@ -10,6 +10,7 @@ import { withMemoryWriteLock } from "./memory-write-lock.js";
 import { assertMemoryEntrySafeForPersistence } from "./memory-entry-write-policy.js";
 import { isMemoryEntrySafeForEgress } from "./memory-egress-policy.js";
 import { MemoryStoreFacade } from "./memory-store-facade.js";
+import { memoryEntryMatchesSnapshot, MemoryUpdateConflictError, } from "./memory-store-ports.js";
 import { collectLanceRows, scanLanceRows } from "./lance-row-scan.js";
 export { loadLanceDB } from "./lancedb-loader.js";
 export { validateStoragePath } from "./storage-path.js";
@@ -1027,7 +1028,7 @@ class MemoryStoreRuntime {
             lifecycleScopeCounts,
         };
     }
-    async update(id, updates, scopeFilter) {
+    async update(id, updates, scopeFilter, options) {
         await this.ensureInitialized();
         if (isExplicitDenyAllScopeFilter(scopeFilter)) {
             throw new Error(`Memory ${id} is outside accessible scopes`);
@@ -1037,6 +1038,9 @@ class MemoryStoreRuntime {
                 const original = this.resolveSqlEntry(id, scopeFilter);
                 if (!original)
                     return null;
+                if (options?.expected && !memoryEntryMatchesSnapshot(original, options.expected)) {
+                    throw new MemoryUpdateConflictError();
+                }
                 const vectorOriginal = await this.getVectorEntryById(original.id).catch(() => null);
                 const updated = {
                     ...original,
@@ -1112,6 +1116,9 @@ class MemoryStoreRuntime {
                 timestamp: Number(row.timestamp),
                 metadata: row.metadata || "{}",
             };
+            if (options?.expected && !memoryEntryMatchesSnapshot(original, options.expected)) {
+                throw new MemoryUpdateConflictError();
+            }
             const updated = {
                 ...original,
                 text: updates.text ?? original.text,

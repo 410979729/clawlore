@@ -51,6 +51,15 @@ use the new value. Standalone CLI commands read current config on each run.
 | `embedding.normalized` | unset | medium | yes | Only supported by some providers. |
 | `embedding.chunking` | `true` | medium | yes | Splits long text before embedding. |
 | `embedding.apiVersion` | unset | medium | yes | Azure OpenAI compatibility. |
+| `outboundEndpointPolicy.allowedPrivateHosts` | `[]` | high | yes | Exact private/loopback provider hosts intentionally trusted by the operator. Wildcards are rejected; add `127.0.0.1` or `localhost` explicitly for local Ollama. |
+
+All embedding, reranking, and LLM requests are checked at dispatch time. The
+default permits HTTPS endpoints only when DNS resolves exclusively to public
+addresses. DNS validation occurs in the socket lookup, so the connection uses
+the same validated address rather than resolving a second time. URL
+credentials, non-HTTP schemes, private/link-local destinations, mixed
+public/private DNS answers, and HTTP redirects are rejected. Private or
+loopback endpoints require an exact `allowedPrivateHosts` entry.
 
 ## Recall Injection
 

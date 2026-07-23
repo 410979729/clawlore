@@ -7,6 +7,7 @@ import type {
   MemoryStorePorts,
   MemoryTruthStats,
   MetadataPatch,
+  MemoryUpdateOptions,
   VectorCompanionDriftReport,
   VectorCompanionEmbedder,
   VectorCompanionRebuildOptions,
@@ -88,8 +89,9 @@ export class MemoryStoreFacade implements MemoryStorePorts {
       metadata?: string;
     },
     scopeFilter?: string[],
+    options?: MemoryUpdateOptions,
   ): Promise<MemoryEntry | null> {
-    return this.ports.update(id, updates, scopeFilter);
+    return this.ports.update(id, updates, scopeFilter, options);
   }
   supersede(
     id: string,

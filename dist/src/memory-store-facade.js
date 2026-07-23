@@ -48,8 +48,8 @@ export class MemoryStoreFacade {
     stats(scopeFilter) {
         return this.ports.stats(scopeFilter);
     }
-    update(id, updates, scopeFilter) {
-        return this.ports.update(id, updates, scopeFilter);
+    update(id, updates, scopeFilter, options) {
+        return this.ports.update(id, updates, scopeFilter, options);
     }
     supersede(id, replacement, scopeFilter) {
         return this.ports.supersede(id, replacement, scopeFilter);

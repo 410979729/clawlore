@@ -12,6 +12,7 @@ import OpenAI from "openai";
 import { createHash } from "node:crypto";
 import { smartChunk } from "./chunker.js";
 import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
+import { createSafeOutboundFetch, type OutboundEndpointPolicy } from "./outbound-endpoint-policy.js";
 
 const OPENAI_CLIENT_AUTH_FIELD = ["api", "Key"].join("");
 
@@ -98,6 +99,7 @@ export interface EmbeddingConfig {
   apiKey?: string | string[];
   model: string;
   baseURL?: string;
+  outboundEndpointPolicy?: OutboundEndpointPolicy;
   dimensions?: number;
   groupId?: string;
 
@@ -515,6 +517,7 @@ export class Embedder {
 
   private readonly _model: string;
   private readonly _baseURL?: string;
+  private readonly _safeFetch: typeof globalThis.fetch;
   private readonly _taskQuery?: string;
   private readonly _taskPassage?: string;
   private readonly _normalized?: boolean;
@@ -540,6 +543,7 @@ export class Embedder {
 
     this._model = config.model;
     this._baseURL = config.baseURL;
+    this._safeFetch = createSafeOutboundFetch(config.outboundEndpointPolicy);
     this._taskQuery = config.taskQuery;
     this._taskPassage = config.taskPassage;
     this._normalized = config.normalized;
@@ -579,6 +583,7 @@ export class Embedder {
       const clientOptions = {
         ...(baseURL ? { baseURL } : {}),
         defaultHeaders: Object.keys(defaultHeaders).length > 0 ? defaultHeaders : undefined,
+        fetch: this._safeFetch,
       } as NonNullable<ConstructorParameters<typeof OpenAI>[0]>;
       return new OpenAI(assignOpenAiClientCredential(clientOptions, key));
     });
@@ -651,7 +656,7 @@ export class Embedder {
 
     const authMaterial = this.clients[0]?.apiKey ?? "ollama";
 
-    const response = await fetch(endpoint, {
+    const response = await this._safeFetch(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1131,6 +1136,7 @@ export class MiniMaxEmbedder {
   private readonly _cache: EmbeddingCache;
   private readonly _model: string;
   private readonly _baseURL: string;
+  private readonly _safeFetch: typeof globalThis.fetch;
   private readonly _apiKeys: string[];
   private readonly _groupId?: string;
   private _keyIndex = 0;
@@ -1146,6 +1152,7 @@ export class MiniMaxEmbedder {
     }
     this._model = config.model || "embo-01";
     this._baseURL = (config.baseURL || "https://api.minimaxi.com/v1").replace(/\/$/, "");
+    this._safeFetch = createSafeOutboundFetch(config.outboundEndpointPolicy);
     this._groupId = config.groupId;
     this.dimensions = getVectorDimensions(this._model, config.dimensions);
     this._cache = new EmbeddingCache(256, 30);
@@ -1168,7 +1175,7 @@ export class MiniMaxEmbedder {
     let lastError: Error | undefined;
 
     for (let attempt = 0; attempt < this._apiKeys.length; attempt++) {
-      const response = await fetch(endpoint, {
+      const response = await this._safeFetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

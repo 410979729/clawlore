@@ -849,6 +849,24 @@
           }
         }
       },
+      "outboundEndpointPolicy": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Fail-closed SSRF policy shared by embedding, reranking, and LLM requests. HTTPS public endpoints work by default; private or loopback hosts require an exact explicit allowlist entry.",
+        "properties": {
+          "allowedPrivateHosts": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "maxItems": 32,
+            "uniqueItems": true,
+            "default": [],
+            "description": "Exact private or loopback hostnames/IPs intentionally used by an operator. Wildcards are rejected."
+          }
+        }
+      },
       "dbPath": {
         "type": "string"
       },
@@ -2056,7 +2074,13 @@
     "embedding.baseURL": {
       "label": "Base URL",
       "placeholder": "https://api.openai.com/v1",
-      "help": "Custom base URL for OpenAI-compatible embedding endpoints (e.g. https://generativelanguage.googleapis.com/v1beta/openai/ for Gemini, http://localhost:11434/v1 for Ollama)",
+      "help": "Custom base URL for OpenAI-compatible embedding endpoints. HTTPS public endpoints work by default; local Ollama also requires its exact host in outboundEndpointPolicy.allowedPrivateHosts.",
+      "advanced": true
+    },
+    "outboundEndpointPolicy.allowedPrivateHosts": {
+      "label": "Allowed Private Provider Hosts",
+      "placeholder": "[\"127.0.0.1\"]",
+      "help": "Exact private or loopback provider hosts intentionally trusted by the operator. Do not use wildcards.",
       "advanced": true
     },
     "embedding.dimensions": {

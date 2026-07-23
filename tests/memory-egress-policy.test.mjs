@@ -113,6 +113,12 @@ test("retrieval keeps secret queries local and filters legacy secret rows before
   const safe = entry("safe", "Verified release evidence");
   const unsafe = entry("unsafe", `serviceToken: ${secret}`);
   const calls = { embed: 0, bm25: 0, fetch: 0 };
+  let requestBody = "";
+  const outboundFetch = async (_url, init) => {
+    calls.fetch += 1;
+    requestBody = String(init?.body ?? "");
+    return { ok: true, json: async () => ({ results: [{ index: 0, relevance_score: 0.99 }] }) };
+  };
   const store = {
     hasFtsSupport: true,
     vectorSearch: async () => [{ entry: unsafe, score: 0.99 }, { entry: safe, score: 0.95 }],
@@ -127,36 +133,30 @@ test("retrieval keeps secret queries local and filters legacy secret rows before
       calls.embed += 1;
       return [0.2, 0.4, 0.6];
     },
-  }, retrievalConfig({ rerank: "cross-encoder", rerankApiKey: "test-placeholder" }));
-  const originalFetch = globalThis.fetch;
-  let requestBody = "";
-  globalThis.fetch = async (_url, init) => {
-    calls.fetch += 1;
-    requestBody = String(init?.body ?? "");
-    return { ok: true, json: async () => ({ results: [{ index: 0, relevance_score: 0.99 }] }) };
-  };
-  try {
-    const safeResults = await retriever.retrieve({ query: "release evidence", limit: 5, source: "manual" });
-    assert.deepEqual(safeResults.map((result) => result.entry.id), ["safe"]);
-    assert.equal(requestBody.includes(secret), false);
+  }, retrievalConfig({
+    rerank: "cross-encoder",
+    rerankApiKey: "test-placeholder",
+    outboundFetch,
+  }));
 
-    const secretQuery = `databasePassword: ${secret}`;
-    const { results, trace } = await retriever.retrieveWithTrace({ query: secretQuery, limit: 5, source: "manual" });
-    assert.deepEqual(results.map((result) => result.entry.id), ["safe"]);
-    assert.equal(trace.query.includes(secret), false);
-    assert.equal(trace.finalCount, 1);
-    assert.equal(calls.embed, 1, "secret query must not invoke the embedder");
-    assert.equal(calls.fetch, 1, "secret query must not invoke the reranker");
-    assert.equal(calls.bm25 >= 2, true);
+  const safeResults = await retriever.retrieve({ query: "release evidence", limit: 5, source: "manual" });
+  assert.deepEqual(safeResults.map((result) => result.entry.id), ["safe"]);
+  assert.equal(requestBody.includes(secret), false);
 
-    const attachmentQuery = "release evidence [Image attached at: /tmp/clawlore-query-private.png]";
-    const attachmentResults = await retriever.retrieve({ query: attachmentQuery, limit: 5, source: "manual" });
-    assert.deepEqual(attachmentResults.map((result) => result.entry.id), ["safe"]);
-    assert.equal(calls.embed, 1, "attachment-bearing query must not invoke the embedder");
-    assert.equal(calls.fetch, 1, "attachment-bearing query must not invoke the reranker");
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+  const secretQuery = `databasePassword: ${secret}`;
+  const { results, trace } = await retriever.retrieveWithTrace({ query: secretQuery, limit: 5, source: "manual" });
+  assert.deepEqual(results.map((result) => result.entry.id), ["safe"]);
+  assert.equal(trace.query.includes(secret), false);
+  assert.equal(trace.finalCount, 1);
+  assert.equal(calls.embed, 1, "secret query must not invoke the embedder");
+  assert.equal(calls.fetch, 1, "secret query must not invoke the reranker");
+  assert.equal(calls.bm25 >= 2, true);
+
+  const attachmentQuery = "release evidence [Image attached at: /tmp/clawlore-query-private.png]";
+  const attachmentResults = await retriever.retrieve({ query: attachmentQuery, limit: 5, source: "manual" });
+  assert.deepEqual(attachmentResults.map((result) => result.entry.id), ["safe"]);
+  assert.equal(calls.embed, 1, "attachment-bearing query must not invoke the embedder");
+  assert.equal(calls.fetch, 1, "attachment-bearing query must not invoke the reranker");
 });
 
 test("legacy upgrader rejects secret rows before any LLM or store mutation", async () => {

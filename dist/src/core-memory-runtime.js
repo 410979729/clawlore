@@ -9,6 +9,7 @@ import { diagnosticErrorSummary } from "./diagnostic-redaction.js";
 import { createEmbedder, getVectorDimensions } from "./embedder.js";
 import { createLlmClient } from "./llm-client.js";
 import { createMigrator } from "./migrate.js";
+import { createSafeOutboundFetch } from "./outbound-endpoint-policy.js";
 import { assignOpenAiClientCredential, parsePluginConfig, resolveConfigString, resolveFirstApiKey, resolveLlmTimeoutMs, } from "./plugin-config.js";
 import { CLAWLORE_LEGACY_DEFAULTS, CLAWLORE_PLUGIN_ID, } from "./product-identity.js";
 import { createRetriever, DEFAULT_RETRIEVAL_CONFIG } from "./retriever.js";
@@ -62,6 +63,7 @@ export function createConfiguredLlmRuntime(api, config) {
         oauthProvider: llmAuth === "oauth" ? config.llm?.oauthProvider : undefined,
         oauthPath,
         timeoutMs,
+        outboundEndpointPolicy: config.outboundEndpointPolicy,
         log: (message) => api.logger.debug(message),
     };
     return {
@@ -109,11 +111,16 @@ export function createCoreMemoryRuntime(api, config) {
         taskPassage: config.embedding.taskPassage,
         normalized: config.embedding.normalized,
         chunking: config.embedding.chunking,
+        outboundEndpointPolicy: config.outboundEndpointPolicy,
     };
     const embedder = createEmbedder(assignOpenAiClientCredential(embedderConfig, config.embedding.apiKey));
     const decayEngine = createDecayEngine({ ...DEFAULT_DECAY_CONFIG, ...(config.decay || {}) });
     const tierManager = createTierManager({ ...DEFAULT_TIER_CONFIG, ...(config.tier || {}) });
-    const retriever = createRetriever(store, embedder, { ...DEFAULT_RETRIEVAL_CONFIG, ...config.retrieval }, { decayEngine });
+    const retriever = createRetriever(store, embedder, {
+        ...DEFAULT_RETRIEVAL_CONFIG,
+        ...config.retrieval,
+        outboundFetch: createSafeOutboundFetch(config.outboundEndpointPolicy),
+    }, { decayEngine });
     const scopeManager = createScopeManager(config.scopes);
     const clawteamScopes = parseClawteamScopes(process.env.CLAWTEAM_MEMORY_SCOPE);
     if (clawteamScopes.length > 0) {

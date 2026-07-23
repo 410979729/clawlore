@@ -18,6 +18,7 @@ import {
   diagnoseLlmFailure,
   type LlmFailureDiagnostic,
 } from "./llm-failure-diagnostic.js";
+import { createSafeOutboundFetch, type OutboundEndpointPolicy } from "./outbound-endpoint-policy.js";
 
 const OPENAI_CLIENT_AUTH_FIELD = ["api", "Key"].join("");
 
@@ -34,6 +35,7 @@ export interface LlmClientConfig {
   oauthPath?: string;
   oauthProvider?: string;
   timeoutMs?: number;
+  outboundEndpointPolicy?: OutboundEndpointPolicy;
   log?: (msg: string) => void;
 }
 
@@ -188,6 +190,7 @@ function createApiKeyClient(config: LlmClientConfig, log: (msg: string) => void)
   const clientOptions = {
     baseURL: config.baseURL,
     timeout: config.timeoutMs ?? 30000,
+    fetch: createSafeOutboundFetch(config.outboundEndpointPolicy),
   } as NonNullable<ConstructorParameters<typeof OpenAI>[0]>;
   const client = new OpenAI(assignOpenAiClientCredential(clientOptions, config.apiKey));
   let lastError: string | null = null;
@@ -286,6 +289,7 @@ function createOauthClient(config: LlmClientConfig, log: (msg: string) => void):
   let cachedSessionPromise: Promise<Awaited<ReturnType<typeof loadOAuthSession>>> | null = null;
   let lastError: string | null = null;
   let lastFailure: LlmFailureDiagnostic | null = null;
+  const safeFetch = createSafeOutboundFetch(config.outboundEndpointPolicy);
 
   async function getSession() {
     if (!cachedSessionPromise) {
@@ -312,7 +316,7 @@ function createOauthClient(config: LlmClientConfig, log: (msg: string) => void):
         const { signal, dispose } = createTimeoutSignal(config.timeoutMs);
         const endpoint = buildOauthEndpoint(config.baseURL, config.oauthProvider);
         try {
-          const response = await fetch(endpoint, {
+          const response = await safeFetch(endpoint, {
             method: "POST",
             headers: {
               Authorization: `Bearer ${session.accessToken}`,
