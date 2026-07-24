@@ -10,6 +10,9 @@ const {
   CLAWLORE_PRINCIPAL_SCOPE_CONTRACT,
   resolvePrincipalWriteTarget,
 } = jiti("../src/principal-write-boundary.ts");
+const {
+  resolveRuntimeMemoryBoundary,
+} = jiti("../src/runtime-memory-boundary.ts");
 
 const joyPrincipal = "telegram:default:8176453077";
 const joySession = "agent:main:telegram:default:direct:8176453077";
@@ -25,6 +28,57 @@ test("principal and runtime session entry points resolve the same versioned priv
   assert.equal(direct.contract, "openclaw-scope-v1");
   assert.equal(direct.scope, expectedScope(joyPrincipal));
   assert.deepEqual(runtime, direct);
+});
+
+test("real OpenClaw Telegram hook context keeps provider and peer id in separate fields", () => {
+  const boundary = resolveRuntimeMemoryBoundary({
+    runtimeContext: {
+      sessionKey: joySession,
+      chatType: "direct",
+      channel: "telegram",
+      messageProvider: "telegram",
+      channelId: "8176453077",
+      chatId: "8176453077",
+      accountId: "default",
+      senderId: "8176453077",
+    },
+  });
+
+  assert.equal(boundary.kind, "private");
+  assert.equal(boundary.platform, "telegram");
+  assert.equal(boundary.principalKey, joyPrincipal);
+  assert.equal(boundary.scope, expectedScope(joyPrincipal));
+});
+
+test("session provider wins when a hook exposes only a numeric channelId", () => {
+  const boundary = resolveRuntimeMemoryBoundary({
+    runtimeContext: {
+      sessionKey: joySession,
+      chatType: "direct",
+      channelId: "8176453077",
+      accountId: "default",
+      senderId: "8176453077",
+    },
+  });
+
+  assert.equal(boundary.platform, "telegram");
+  assert.equal(boundary.principalKey, joyPrincipal);
+  assert.equal(boundary.scope, expectedScope(joyPrincipal));
+});
+
+test("legacy channelId-as-provider contexts remain supported without a session key", () => {
+  const boundary = resolveRuntimeMemoryBoundary({
+    runtimeContext: {
+      chatType: "direct",
+      channelId: "telegram",
+      accountId: "default",
+      senderId: "8176453077",
+    },
+  });
+
+  assert.equal(boundary.platform, "telegram");
+  assert.equal(boundary.principalKey, joyPrincipal);
+  assert.equal(boundary.scope, expectedScope(joyPrincipal));
 });
 
 test("resolution is deterministic across repeated process-style restarts", () => {
