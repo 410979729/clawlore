@@ -114,5 +114,19 @@ test("V1 manual write mirror commits V2 truth and local projections atomically",
   assert.equal(preflight.cutoverReady, true);
   assert.equal(preflight.v1RetirementReady, true);
   assert.deepEqual(preflight.blockers, []);
+
+  const archiveCheck = new DatabaseSync(path);
+  try {
+    archiveCheck.prepare("UPDATE memory_items SET lifecycle='archived' WHERE item_id=?")
+      .run(first.itemId);
+  } finally {
+    archiveCheck.close();
+  }
+  const archivedPreflight = inspectRuntimeV2CutoverPreflightV1(path);
+  assert.equal(
+    archivedPreflight.blockers.includes("current_fts_projection_mismatch"),
+    false,
+    "archived current revisions intentionally retain FTS projections",
+  );
   await rm(root, { recursive: true, force: true });
 });

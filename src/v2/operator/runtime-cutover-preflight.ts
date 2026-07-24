@@ -93,7 +93,10 @@ export function inspectRuntimeV2CutoverPreflightV1(sqlitePath: string): RuntimeC
       )`),
       pendingOutbox: scalar(db, "SELECT COUNT(*) FROM projection_outbox WHERE processed_at IS NULL"),
       currentFts: scalar(db, "SELECT COUNT(*) FROM memory_fts_v2"),
-      expectedCurrentFts: scalar(db, "SELECT COUNT(*) FROM memory_items WHERE lifecycle NOT IN ('archived','purged')"),
+      // V2 keeps one current-revision FTS row for archived items so audit and
+      // rollback remain reconstructable. Retrieval enforces lifecycle after
+      // the FTS match; projection completeness therefore equals all items.
+      expectedCurrentFts: scalar(db, "SELECT COUNT(*) FROM memory_items"),
       contentDivergence: scalar(db, `SELECT COUNT(*) FROM memory_items i
         JOIN memory_sources s ON s.revision_id=i.current_revision_id AND s.source_type='legacy'
         JOIN memory_truth l ON l.id=s.external_id WHERE i.content<>l.text`),
