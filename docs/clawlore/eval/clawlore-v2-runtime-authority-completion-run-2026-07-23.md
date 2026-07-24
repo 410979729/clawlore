@@ -3,7 +3,7 @@
 - Date: 2026-07-23
 - Candidate: `fix/clawlore-v2-cutover-20260723`
 - Base: `aa95b9be6a954dd62b092c6cdce664df555700ad`
-- Verified candidate commit: `780b6674b2a77ca9f496099d5a06768e7a86ae91`
+- Verified candidate commit: `0f37ad1915403669398b2d309f5e28743f266707`
 - Candidate version: 1.2.3
 - Scope: source, tests, package, and operator contract only
 - Live/config/service/GitHub mutation: none
@@ -57,7 +57,7 @@ The complete pre-push gate reports:
 - release input: 870 files,
   `f2007ad0e86ab2f4a19c2751c7ae7774f1b7cb248c7ece6c955e771ba2ff9da5`;
 - runtime digest:
-  `bc071f8c389b7329d99580dc90e93c2e8e1551d7f65582f9c73e280b7758abd4`;
+  `c7a939a88afab2bf142612d9edee70136739dd5a4174a40d7c2b63147ba30317`;
 - package lock:
   `aee57492e4f54a54156b0a4d8f2ff2a70225ccd63bc3bbfc8188e1b4333b004f`;
 - 303 packaged files and all packed runtime/LanceDB/legacy/OpenClaw CLI
@@ -90,3 +90,18 @@ access is explicit migration/archive tooling.
 
 The candidate is clean and committed locally. External publication and live
 activation remain separate authorized operations.
+
+## Final archived-FTS correction
+
+The final candidate includes the follow-up correction that archived V2 items
+retain their current-revision FTS projection for audit and rollback. Retrieval
+still filters archived lifecycle rows after the FTS match. A focused
+regression proves an archived row does not create
+`current_fts_projection_mismatch`; the complete release gate was rerun against
+the final commit and remained green.
+
+The live read-only preflight after this correction reports 991/991 V2 FTS
+projection rows with SQLite integrity and foreign keys clean. Production
+cutover remains blocked by 87 unmirrored V1 rows, 991 unresolved V2
+principals, zero active verified V2 rows, 45 current-content divergences, and
+566 undisposed candidates.
