@@ -77,6 +77,7 @@ const ROOT_MODULES_BY_LAYER = {
   ],
   infrastructure: [
     "artifacts.ts", "embedder.ts", "experience-store.ts", "file-privacy.ts",
+    "fresh-install-v2-authority.ts",
     "journal-recovery.ts", "lance-row-scan.ts", "lancedb-loader.ts", "llm-client.ts", "llm-oauth.ts", "memory-write-lock.ts", "outbound-endpoint-policy.ts",
     "oauth-session-storage.ts", "private-file-lock.ts", "private-lock-file.ts", "proper-lockfile.d.ts",
     "reflection-event-store.ts", "reflection-item-store.ts",

@@ -10,6 +10,7 @@ import { composeClawLoreRuntimeV1, normalizeClawLoreRuntimeConfigV1, } from "./a
 import { loadRuntimeRolloutControlsV1 } from "./adapters/openclaw/runtime-rollout-control.js";
 import { filterUserMdExclusiveRecallResults } from "./workspace-boundary.js";
 import { runtimeTransitionPolicyBlocksV1 } from "./application/runtime-transition-policy.js";
+import { ensureFreshInstallV2AuthorityV1 } from "./fresh-install-v2-authority.js";
 async function sleep(ms) {
     await new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -73,7 +74,19 @@ export function registerClawLoreShadowRuntime(params) {
         }
         return results;
     };
-    const runtimeConfig = normalizeClawLoreRuntimeConfigV1(config.runtime);
+    const requestedRuntimeConfig = normalizeClawLoreRuntimeConfigV1(config.runtime);
+    const freshAuthority = requestedRuntimeConfig.mode === "auto"
+        ? ensureFreshInstallV2AuthorityV1(join(resolvedDbPath, "memory.sqlite3"))
+        : undefined;
+    const runtimeConfig = requestedRuntimeConfig.mode === "auto"
+        ? {
+            ...requestedRuntimeConfig,
+            mode: freshAuthority?.mayActivateWithoutMigrationReceipt ? "cutover" : "disabled",
+            contextEngine: freshAuthority?.mayActivateWithoutMigrationReceipt
+                ? "native-opt-in"
+                : "compatibility",
+        }
+        : requestedRuntimeConfig;
     let releaseBinding;
     const bindingErrors = [];
     if (runtimeConfig.mode !== "disabled") {
@@ -136,16 +149,21 @@ export function registerClawLoreShadowRuntime(params) {
     nativeBlocks.push(...runtimeTransitionPolicyBlocksV1({
         mode: runtimeConfig.mode,
         contextEngine: runtimeConfig.contextEngine,
-        agentToolProfile: config.agentToolProfile,
+        agentToolProfile: requestedRuntimeConfig.mode === "auto"
+            && freshAuthority?.mayActivateWithoutMigrationReceipt
+            ? "v2-write"
+            : config.agentToolProfile,
         autoCapture: config.autoCapture === true,
         smartExtraction: config.smartExtraction === true,
         sessionStrategy: config.sessionStrategy ?? "none",
     }));
     if (runtimeConfig.mode === "cutover") {
-        if (!rolloutControls.readiness || rolloutControls.readiness.status !== "ready" || !rolloutControls.readiness.rollout.ready) {
+        if (!freshAuthority?.mayActivateWithoutMigrationReceipt
+            && (!rolloutControls.readiness || rolloutControls.readiness.status !== "ready" || !rolloutControls.readiness.rollout.ready)) {
             nativeBlocks.push("release_readiness_blocked");
         }
-        nativeBlocks.push(...rolloutControls.errors);
+        if (!freshAuthority?.mayActivateWithoutMigrationReceipt)
+            nativeBlocks.push(...rolloutControls.errors);
     }
     else if (runtimeConfig.mode === "v2-write") {
         if (!rolloutControls.readiness || rolloutControls.readiness.status !== "ready" || !rolloutControls.readiness.rollout.ready) {

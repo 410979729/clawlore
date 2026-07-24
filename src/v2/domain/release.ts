@@ -1,4 +1,4 @@
-export type ClawLoreRolloutModeV1 = "disabled" | "shadow" | "v2-write" | "cutover";
+export type ClawLoreRolloutModeV1 = "auto" | "disabled" | "shadow" | "v2-write" | "cutover";
 
 export interface CompatibilitySurfaceV1 {
   productBrand: "ClawLore";

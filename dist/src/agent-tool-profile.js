@@ -21,3 +21,14 @@ export function agentToolCapabilities(profile) {
         secretIndex: profile === "operator-secret-index",
     };
 }
+export function effectiveAgentToolCapabilities(profile, v2Authoritative) {
+    const configured = agentToolCapabilities(profile);
+    return v2Authoritative
+        ? {
+            ...configured,
+            memoryWrites: true,
+            memoryLifecycleWrites: false,
+            selfImprovement: false,
+        }
+        : configured;
+}

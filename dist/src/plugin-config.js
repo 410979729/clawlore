@@ -129,10 +129,9 @@ export function parsePluginConfig(value) {
         ? cfg.agentToolProfile
         : DEFAULT_AGENT_TOOL_PROFILE;
     const outboundEndpointPolicy = parseOutboundEndpointPolicy(cfg.outboundEndpointPolicy);
-    const embedding = cfg.embedding;
-    if (!embedding) {
-        throw new Error("embedding config is required");
-    }
+    const embedding = cfg.embedding && typeof cfg.embedding === "object" && !Array.isArray(cfg.embedding)
+        ? cfg.embedding
+        : {};
     const requestedProvider = embedding.provider === "azure-openai" ||
         embedding.provider === "local-hash" ||
         embedding.provider === "local-debug" ||

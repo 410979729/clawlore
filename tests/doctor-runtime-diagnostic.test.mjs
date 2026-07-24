@@ -15,6 +15,7 @@ const { canonicalDigest } = jiti("../src/release-provenance.ts");
 const { buildReleaseReadinessReceipt } = jiti("../src/v2/application/release-readiness.ts");
 const {
   buildRuntimeDiagnosticReceipt,
+  configuredRuntimeMode,
   writeRuntimeDiagnosticReceipt,
 } = jiti("../src/runtime-diagnostic-receipt.ts");
 
@@ -45,6 +46,11 @@ class FixtureCommand {
   option() { return this; }
   action(handler) { this.handler = handler; return this; }
 }
+
+test("runtime diagnostic mode preserves an explicit disabled CLI lane", () => {
+  assert.equal(configuredRuntimeMode({ runtime: { mode: "disabled" } }), "disabled");
+  assert.equal(configuredRuntimeMode({ runtime: { mode: "unsupported" } }), "auto");
+});
 
 test("doctor reports the persisted runtime registration truth", async () => {
   const root = await mkdtemp(join(tmpdir(), "clawlore-doctor-runtime-"));

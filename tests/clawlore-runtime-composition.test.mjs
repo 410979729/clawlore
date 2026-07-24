@@ -96,9 +96,9 @@ function dependencies(overrides = {}) {
   };
 }
 
-test("runtime composition is default-off and invalid config fails to disabled", async () => {
+test("runtime defaults to fresh-store auto while invalid explicit modes fail closed", async () => {
   const manifest = JSON.parse(await readFile("openclaw.plugin.json", "utf8"));
-  assert.equal(manifest.configSchema.properties.runtime.properties.mode.default, "disabled");
+  assert.equal(manifest.configSchema.properties.runtime.properties.mode.default, "auto");
   assert.match(
     manifest.configSchema.properties.runtime.properties.approvalFile.description,
     /Deprecated compatibility field.*ignored/,
@@ -113,15 +113,16 @@ test("runtime composition is default-off and invalid config fails to disabled", 
   for (const config of [undefined, {}]) {
     const host = new FixtureHost();
     const normalized = normalizeClawLoreRuntimeConfigV1(config);
-    assert.equal(normalized.mode, "disabled");
+    assert.equal(normalized.mode, "auto");
     const receipt = composeClawLoreRuntimeV1({ config: normalized, host, dependencies: dependencies() });
-    assert.equal(receipt.status, "disabled");
+    assert.equal(receipt.status, "blocked");
     assert.deepEqual(receipt.registeredHooks, []);
     assert.equal(receipt.toolRegistrations, 0);
     assert.equal(receipt.writeEnabled, false);
     assert.equal(receipt.contextEngineRegistered, false);
     assert.equal(host.hooks.length, 0);
   }
+  assert.equal(normalizeClawLoreRuntimeConfigV1({ mode: "invalid" }).mode, "auto");
   assert.equal(normalizeClawLoreRuntimeConfigV1({ mode: "v2-write" }).mode, "v2-write");
   assert.equal(normalizeClawLoreRuntimeConfigV1({ mode: "cutover" }).mode, "cutover");
 });

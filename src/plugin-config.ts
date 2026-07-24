@@ -321,10 +321,9 @@ export function parsePluginConfig(value: unknown): PluginConfig {
     : DEFAULT_AGENT_TOOL_PROFILE;
   const outboundEndpointPolicy = parseOutboundEndpointPolicy(cfg.outboundEndpointPolicy);
 
-  const embedding = cfg.embedding as Record<string, unknown> | undefined;
-  if (!embedding) {
-    throw new Error("embedding config is required");
-  }
+  const embedding = cfg.embedding && typeof cfg.embedding === "object" && !Array.isArray(cfg.embedding)
+    ? cfg.embedding as Record<string, unknown>
+    : {};
 
   const requestedProvider =
     embedding.provider === "azure-openai" ||

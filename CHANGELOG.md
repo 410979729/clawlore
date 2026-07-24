@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## 2.0.0 - 2026-07-24
+
+- Made fresh installations V2-native by default. A genuinely empty store gets
+  the V2 truth schema, FTS/vector/relation projection contracts, and a durable
+  `fresh-v2` authority marker before runtime activation.
+- Kept existing stores fail-closed. Ordinary startup never upgrades a store
+  containing V1 or partial V2 data; operators must use the encrypted,
+  preview-first migration and receipt flow.
+- Activated native V2 recall and ContextEngine composition automatically only
+  for stores carrying the fresh-install authority marker. Explicit shadow,
+  transition, cutover, and disabled modes remain available.
+- Restricted a V2-authoritative Agent surface to the parity-preserving store
+  path. Legacy lifecycle and self-improvement writers remain unavailable until
+  they have native V2 transaction implementations.
+- Added fresh-install/idempotency and existing-store non-mutation regressions,
+  while retaining the 1.2.3 cutover, rollback, principal-isolation, and
+  projection-convergence controls.
+- Preserved governance, journal recovery, operator dashboard, golden retrieval,
+  hard-delete protection, the release gate, SQL authority, OAuth session
+  recovery, Windows ACL enforcement, and packed-tarball installation checks.
+
 ## 1.2.3 - 2026-07-23
 
 - Added a native OpenClaw ContextEngine cutover adapter. It admits only direct

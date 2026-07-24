@@ -11,9 +11,9 @@ function boundedInteger(value, fallback, minimum, maximum) {
 }
 export function normalizeClawLoreRuntimeConfigV1(value) {
     const raw = record(value);
-    const mode = ["shadow", "v2-write", "cutover"].includes(String(raw.mode))
+    const mode = ["disabled", "shadow", "v2-write", "cutover"].includes(String(raw.mode))
         ? raw.mode
-        : "disabled";
+        : "auto";
     const contextEngine = raw.contextEngine === "native-opt-in"
         ? "native-opt-in"
         : "compatibility";

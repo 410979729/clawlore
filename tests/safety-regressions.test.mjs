@@ -919,7 +919,7 @@ test("legacy plaintext backup and destructive startup compaction are disabled", 
   assert.match(entry, /startupMode === "dry-run"/);
   assert.match(entry, /dryRun: true/);
   assert.doesNotMatch(entry, /recordCompactionRun\(compactionStateFile\)/);
-  assert.match(entry, /agentToolCapabilities\(config\.agentToolProfile\)/);
+  assert.match(entry, /effectiveAgentToolCapabilities\(config\.agentToolProfile,\s*runtimeDiagnostic\.v2WritesEnabled\)/);
 });
 
 test("vector repair CLI is dry-run-first and SQLite stores use busy timeout", () => {
@@ -1132,9 +1132,14 @@ test("release gate includes source/live separation and OpenClaw runtime smoke", 
     packageJson.clawloreRelease.scriptPolicy,
     "all-except-published-runtime-scripts-are-source-checkout-only",
   );
-  assert.deepEqual(packageJson.clawloreRelease.publishedRuntimeScripts, ["smoke:packed-runtime"]);
+  assert.deepEqual(packageJson.clawloreRelease.publishedRuntimeScripts, [
+    "smoke:packed-runtime",
+    "smoke:packed-fresh-v2",
+  ]);
   assert.equal(packageJson.scripts["smoke:packed-runtime"], "node scripts/packed-runtime-smoke.mjs");
+  assert.equal(packageJson.scripts["smoke:packed-fresh-v2"], "node scripts/packed-fresh-v2-smoke.mjs");
   assert.ok(packageJson.files.includes("scripts/packed-runtime-smoke.mjs"));
+  assert.ok(packageJson.files.includes("scripts/packed-fresh-v2-smoke.mjs"));
   assert.match(indexSource, /diagnosticBuildTag = `\$\{DIAG_BUILD_TAG_PREFIX\}-\$\{pluginVersion\}`/);
   assert.doesNotMatch(indexSource, /scope-recall-openclaw-1\.0\.24/);
 });

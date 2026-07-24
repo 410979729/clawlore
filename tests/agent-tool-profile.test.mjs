@@ -9,7 +9,22 @@ const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: fa
 const {
   AGENT_TOOL_PROFILES,
   agentToolCapabilities,
+  effectiveAgentToolCapabilities,
 } = jiti("../src/agent-tool-profile.ts");
+
+test("V2 authority narrows legacy mutation capabilities without removing store", () => {
+  assert.deepEqual(effectiveAgentToolCapabilities("operator", true), {
+    memoryWrites: true,
+    memoryLifecycleWrites: false,
+    operator: true,
+    selfImprovement: false,
+    secretIndex: false,
+  });
+  assert.deepEqual(
+    effectiveAgentToolCapabilities("memory-write", false),
+    agentToolCapabilities("memory-write"),
+  );
+});
 const { registerAllMemoryTools } = jiti("../src/tools.ts");
 const { registerExperienceTools } = jiti("../src/experience-tools.ts");
 

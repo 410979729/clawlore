@@ -78,7 +78,7 @@ import { registerAutoCaptureHooks } from "./src/auto-capture-hooks.js";
 import { registerTaskExperienceHooks } from "./src/task-experience-hooks.js";
 import { registerSelfImprovementHooks } from "./src/self-improvement-hooks.js";
 import { registerReflectionHooks } from "./src/reflection-hooks.js";
-import { agentToolCapabilities } from "./src/agent-tool-profile.js";
+import { effectiveAgentToolCapabilities } from "./src/agent-tool-profile.js";
 
 // ============================================================================
 // Default Configuration
@@ -392,7 +392,7 @@ const clawLorePlugin = {
     // Register Tools
     // ========================================================================
 
-    const agentTools = agentToolCapabilities(config.agentToolProfile);
+    const agentTools = effectiveAgentToolCapabilities(config.agentToolProfile, runtimeDiagnostic.v2WritesEnabled);
 
     registerAllMemoryTools(
       api,

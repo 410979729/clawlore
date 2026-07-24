@@ -1,5 +1,22 @@
 # ClawLore Operator Runbook
 
+## Fresh V2 install versus existing-store upgrade
+
+ClawLore 2 defaults `runtime.mode` to `auto`, but `auto` is deliberately
+asymmetric:
+
+- If `memory_truth` is empty and no V2 schema exists, startup creates the V2
+  truth/projection schema and a durable `fresh-v2` authority marker. Native V2
+  recall and ContextEngine registration may then activate without a migration
+  receipt.
+- If V1 contains any row, V2 already exists without the fresh authority
+  marker, or the store is partially migrated, startup performs no conversion
+  and keeps the runtime disabled. Use the explicit migration workflow below.
+
+Never obtain fresh-install behavior by deleting, truncating, or moving an
+existing database. A store with user data must be backed up, previewed,
+migrated, verified, and kept inside the rollback window.
+
 Status: Phase 7 commercial release hardening baseline.
 
 Use this runbook when preparing or validating a live

@@ -1,6 +1,6 @@
 {
   "name": "clawlore",
-  "version": "1.2.3",
+  "version": "2.0.0",
   "description": "ClawLore memory for OpenClaw: SQLite truth, scoped hybrid recall, conservative capture, and rebuildable vectors",
   "type": "module",
   "main": "dist/index.js",
@@ -36,6 +36,7 @@
     "package.json",
     "package-lock.json",
     "scripts/packed-runtime-smoke.mjs",
+    "scripts/packed-fresh-v2-smoke.mjs",
     "scripts/packed-lancedb-smoke.mjs",
     "scripts/packed-legacy-identity-smoke.mjs",
     "scripts/clawlore-v2-cutover-preflight.mjs"
@@ -132,6 +133,7 @@
     "smoke:clawlore-migration-drill": "node --test tests/clawlore-legacy-migration-drill.test.mjs",
     "smoke:vector-repair": "node scripts/smoke-vector-repair.mjs",
     "smoke:packed-runtime": "node scripts/packed-runtime-smoke.mjs",
+    "smoke:packed-fresh-v2": "node scripts/packed-fresh-v2-smoke.mjs",
     "preflight:dependencies": "node scripts/dependency-preflight.mjs",
     "audit:release": "node scripts/supply-chain-audit.mjs",
     "release:gate": "node scripts/run-release-gate.mjs",
@@ -170,7 +172,8 @@
     "scriptPolicy": "all-except-published-runtime-scripts-are-source-checkout-only",
     "evidenceFile": "docs/clawlore/eval/clawlore-v1-release-evidence.json",
     "publishedRuntimeScripts": [
-      "smoke:packed-runtime"
+      "smoke:packed-runtime",
+      "smoke:packed-fresh-v2"
     ]
   },
   "dependencies": {
@@ -212,5 +215,9 @@
   "devDependencies": {
     "jiti": "^2.7.0",
     "typescript": "^6.0.3"
+  },
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
   }
 }

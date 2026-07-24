@@ -27,7 +27,7 @@ const WINDOWS_PROCESS_START_SCRIPT = Buffer.from([
   "[string]$process.StartTime.ToUniversalTime().Ticks",
 ].join(";"), "utf16le").toString("base64");
 
-export type RuntimeDiagnosticModeV1 = "disabled" | "shadow" | "v2-write" | "cutover";
+export type RuntimeDiagnosticModeV1 = "auto" | "disabled" | "shadow" | "v2-write" | "cutover";
 
 export interface RuntimeInstanceIdentityV1 {
   instanceId: string;
@@ -157,7 +157,7 @@ function parseRuntimeDiagnosticReceipt(value: unknown): RuntimeDiagnosticReceipt
     || leaseDuration < 0
     || leaseDuration > MAX_RUNTIME_DIAGNOSTIC_LEASE_MS
     || !DIGEST_RE.test(String(raw.configDigest ?? ""))
-    || !["disabled", "shadow", "v2-write", "cutover"].includes(String(requestedMode))
+    || !["auto", "disabled", "shadow", "v2-write", "cutover"].includes(String(requestedMode))
     || !["disabled", "blocked", "registered"].includes(String(runtimeStatus))
     || !["not_required", "missing", "blocked", "ready"].includes(String(readinessStatus))
     || typeof readiness.bindingVerified !== "boolean"
@@ -267,9 +267,9 @@ export function configuredRuntimeMode(pluginConfig: Record<string, unknown> | un
   const mode = runtime && typeof runtime === "object"
     ? String((runtime as Record<string, unknown>).mode ?? "")
     : "";
-  return ["shadow", "v2-write", "cutover"].includes(mode)
+  return ["disabled", "auto", "shadow", "v2-write", "cutover"].includes(mode)
     ? mode as RuntimeDiagnosticModeV1
-    : "disabled";
+    : "auto";
 }
 
 export function buildRuntimeDiagnosticReceipt(input: {

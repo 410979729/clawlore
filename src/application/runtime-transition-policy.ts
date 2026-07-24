@@ -1,5 +1,5 @@
 export interface RuntimeTransitionPolicyInputV1 {
-  mode: "disabled" | "shadow" | "v2-write" | "cutover";
+  mode: "auto" | "disabled" | "shadow" | "v2-write" | "cutover";
   contextEngine: "compatibility" | "native-opt-in";
   agentToolProfile: string;
   autoCapture: boolean;

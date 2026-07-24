@@ -329,6 +329,7 @@ const requiredFiles = [
   "scripts/golden-benchmark.mjs",
   "scripts/production-retrieval-benchmark.mjs",
   "scripts/packed-runtime-smoke.mjs",
+  "scripts/packed-fresh-v2-smoke.mjs",
   "scripts/packed-lancedb-smoke.mjs",
   "scripts/packed-legacy-identity-smoke.mjs",
   "scripts/smoke-vector-repair.mjs",
@@ -905,6 +906,7 @@ const packFiles = (packInfo.files || []).map((file) => file.path);
 for (const required of [
   "dist/index.js",
   "scripts/packed-runtime-smoke.mjs",
+  "scripts/packed-fresh-v2-smoke.mjs",
   "scripts/packed-lancedb-smoke.mjs",
   "scripts/packed-legacy-identity-smoke.mjs",
   "docs/operator-runbook.md",
@@ -993,6 +995,9 @@ try {
   run("node", [resolve(installedRoot, "scripts/packed-runtime-smoke.mjs")], {
     cwd: installedRoot,
   });
+  run("node", [resolve(installedRoot, "scripts/packed-fresh-v2-smoke.mjs")], {
+    cwd: installedRoot,
+  });
   run("node", [resolve(installedRoot, "scripts/packed-lancedb-smoke.mjs")], {
     cwd: installedRoot,
   });
@@ -1023,6 +1028,7 @@ try {
       vectorBackend: "sqlite-bruteforce",
       dbPath: resolve(isolatedState, "memory/clawlore"),
       agentToolProfile: "operator",
+      runtime: { mode: "disabled", contextEngine: "compatibility" },
     },
   });
   runOpenClawCapture(
@@ -1034,6 +1040,14 @@ try {
     packedOpenClawCli,
     tarball,
     packScanRoot,
+    { env: isolatedRuntimeEnv },
+  );
+  // The real installer normalizes the plugin entry from the packaged manifest.
+  // Re-apply this CLI-only fixture's explicit offline mode after installation so
+  // doctor does not require a Gateway-produced runtime lease.
+  runOpenClawCapture(
+    packedOpenClawCli,
+    ["config", "set", "plugins.entries.clawlore", isolatedPluginEntry, "--strict-json"],
     { env: isolatedRuntimeEnv },
   );
   runOpenClawCapture(packedOpenClawCli, ["config", "set", "plugins.slots.memory", "clawlore"], { env: isolatedRuntimeEnv });

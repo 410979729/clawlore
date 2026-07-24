@@ -5,7 +5,7 @@
   ],
   "name": "ClawLore",
   "description": "ClawLore memory for OpenClaw: SQLite truth, scoped hybrid recall, conservative capture, and rebuildable vectors",
-  "version": "1.2.3",
+  "version": "2.0.0",
   "kind": "memory",
   "contracts": {
     "tools": [
@@ -1870,13 +1870,13 @@
       "runtime": {
         "type": "object",
         "additionalProperties": false,
-        "description": "Canonical ClawLore runtime request. Every active mode requires a matching verified readiness receipt.",
+        "description": "Canonical ClawLore runtime request. Auto may activate only a marker-bound fresh V2 store; controlled activation of existing data requires matching readiness evidence.",
         "properties": {
           "mode": {
             "type": "string",
-            "enum": ["disabled", "shadow", "v2-write", "cutover"],
-            "default": "disabled",
-            "description": "Request disabled, read-only shadow, V2 write transition, or native V2 cutover. This field alone never authorizes activation."
+            "enum": ["auto", "disabled", "shadow", "v2-write", "cutover"],
+            "default": "auto",
+            "description": "Auto initializes and activates V2 only for a genuinely empty fresh store. Existing data remains disabled until an explicit migration. Other values request a controlled runtime mode."
           },
           "contextEngine": {
             "type": "string",
@@ -1947,8 +1947,8 @@
         "properties": {
           "mode": {
             "type": "string",
-            "enum": ["disabled", "shadow", "v2-write", "cutover"],
-            "default": "disabled",
+            "enum": ["auto", "disabled", "shadow", "v2-write", "cutover"],
+            "default": "auto",
             "description": "Deprecated alias for runtime.mode. This field alone never authorizes activation."
           },
           "contextEngine": {
@@ -2008,15 +2008,12 @@
           }
         }
       }
-    },
-    "required": [
-      "embedding"
-    ]
+    }
   },
   "uiHints": {
     "runtime.mode": {
       "label": "ClawLore Runtime",
-      "help": "Default disabled. Every non-disabled mode requires an exact, unexpired readiness receipt; cutover also requires native ContextEngine opt-in.",
+      "help": "Auto activates native V2 only for a new empty store. Existing stores require the explicit backup-bound migration flow; controlled non-auto modes require readiness evidence.",
       "advanced": true
     },
     "runtime.contextEngine": {

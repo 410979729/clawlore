@@ -17,7 +17,7 @@ import {
   type RuntimeShadowTraceSink,
 } from "./runtime-shadow.js";
 
-export type ClawLoreRuntimeModeV1 = "disabled" | "shadow" | "v2-write" | "cutover";
+export type ClawLoreRuntimeModeV1 = "auto" | "disabled" | "shadow" | "v2-write" | "cutover";
 
 export interface ClawLoreRuntimeConfigV1 {
   mode: ClawLoreRuntimeModeV1;
@@ -91,9 +91,9 @@ function boundedInteger(value: unknown, fallback: number, minimum: number, maxim
 
 export function normalizeClawLoreRuntimeConfigV1(value: unknown): ClawLoreRuntimeConfigV1 {
   const raw = record(value);
-  const mode: ClawLoreRuntimeModeV1 = ["shadow", "v2-write", "cutover"].includes(String(raw.mode))
+  const mode: ClawLoreRuntimeModeV1 = ["disabled", "shadow", "v2-write", "cutover"].includes(String(raw.mode))
     ? raw.mode as ClawLoreRuntimeModeV1
-    : "disabled";
+    : "auto";
   const contextEngine: ContextEngineActivationV2 = raw.contextEngine === "native-opt-in"
     ? "native-opt-in"
     : "compatibility";

@@ -2,6 +2,34 @@
 
 Scoped long-term memory for OpenClaw: SQLite truth, hybrid recall, conservative capture, and rebuildable vector indexes that can survive native dependency trouble.
 
+## Install from GitHub
+
+ClawLore 2 distinguishes a fresh installation from an upgrade:
+
+Use OpenClaw's installer so the plugin resolves the host SDK correctly:
+
+```bash
+openclaw plugins install https://github.com/410979729/clawlore.git
+```
+
+ClawLore 2 requires a Node release accepted by its OpenClaw host; the verified
+release lane uses Node 24.15.x. A raw `npm install` into an unrelated directory
+does not provide `openclaw/plugin-sdk` and is not a supported plugin install.
+For source development, clone the repository, run `npm ci --include=dev` and
+`npm run build`, then use `openclaw plugins install --link /absolute/path` so
+the checkout remains attached to the host. Do not keep a second discoverable
+copy under another extension directory.
+
+- A fresh empty store initializes V2 and selects the native V2 recall/
+  ContextEngine path automatically. It does not run a V1-to-V2 migration.
+- An existing store is never converted during install or startup. Follow
+  [the operator migration runbook](docs/operator-runbook.md) and retain the
+  verified encrypted backup and migration receipt until the rollback window
+  closes.
+- Installing source code over an existing extension is not a data migration.
+  If startup reports migration required, stop and run the documented preview;
+  do not delete or recreate the database.
+
 ## Core Guarantees
 
 - Keeps SQLite as the durable source of truth.
@@ -100,7 +128,10 @@ it should contain only canonical principals that are authorized to read the
 pre-1.2 `agent:<id>` scope. Host channel policy should independently deny all
 memory tools in groups so framework and plugin enforcement remain layered.
 
-Shadow activation requires a private `0600` readiness receipt. The loader
+`auto` is the fresh-install default. It activates only when the database is
+empty and startup has durably established a `fresh-v2` authority marker; it
+never converts existing data. Shadow or transition activation for an existing
+store requires a private `0600` readiness receipt. The loader
 binds that receipt to the exact Git commit, runtime artifact, package and lock
 files, normalized plugin config, SQL truth snapshot, and test log. Receipts
 expire and any mismatch fails closed. V2 write/cutover approval additionally
@@ -110,6 +141,8 @@ zero-active or zero-parity dataset cannot produce a cutover-ready receipt.
 
 The runtime transition is intentionally staged:
 
+- `auto`: initialize native V2 only for a genuinely empty store; otherwise
+  remain disabled and require explicit migration.
 - `disabled`: no V2 runtime activity.
 - `shadow`: V1 remains authoritative while V2 is observed without writes or
   prompt mutation.

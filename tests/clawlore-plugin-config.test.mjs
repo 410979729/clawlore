@@ -8,7 +8,7 @@ const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: fa
 const { parsePluginConfig } = jiti("../src/plugin-config.ts");
 
 test("plugin config preserves privacy-first defaults and local embedding defaults", () => {
-  const parsed = parsePluginConfig({ embedding: {} });
+  const parsed = parsePluginConfig({});
 
   assert.deepEqual(parsed.embedding, {
     provider: "local-hash",
@@ -150,7 +150,6 @@ test("plugin config preserves numeric normalization and legacy session compatibi
 
 test("plugin config fails closed for missing or malformed hosted credentials", () => {
   assert.throws(() => parsePluginConfig(undefined), /clawlore config required/);
-  assert.throws(() => parsePluginConfig({}), /embedding config is required/);
   assert.throws(
     () => parsePluginConfig({ embedding: { provider: "openai-compatible" } }),
     /embedding.apiKey is required for hosted embedding providers/,
