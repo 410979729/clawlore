@@ -255,6 +255,36 @@ export function registerMemoryStoreTool(
                 ),
               ),
             });
+            let v2Mirror: { status: string; itemId: string; projectionStatus: string } | undefined;
+            if (runtimeContext.v2RuntimeMirror) {
+              if (access.boundary.kind !== "private" || !access.boundary.principalKey) {
+                await runtimeContext.store.delete(entry.id, [targetScope]);
+                throw new Error("V2 runtime writes require an exact private principal boundary");
+              }
+              try {
+                v2Mirror = runtimeContext.v2RuntimeMirror.mirror({
+                  legacyId: entry.id,
+                  content: sanitizedText,
+                  category: category as string,
+                  address: {
+                    schemaVersion: 2,
+                    tenantId: "local",
+                    principalId: access.boundary.principalKey,
+                    agentId,
+                    platform: access.boundary.platform,
+                    accountId: access.boundary.accountId,
+                    visibility: "private",
+                    retention: deriveManualMemoryLayer(category as string),
+                  },
+                  observedAt: new Date(entry.timestamp).toISOString(),
+                  actor: `agent:${agentId}`,
+                });
+              } catch (error) {
+                const compensated = await runtimeContext.store.delete(entry.id, [targetScope]);
+                if (!compensated) throw new Error("V2 mirror failed and V1 compensation failed", { cause: error });
+                throw error;
+              }
+            }
             let conflictReview: Awaited<ReturnType<typeof recordConflictReviewRelations>> | undefined;
             try {
               conflictReview = await recordConflictReviewRelations(
@@ -289,6 +319,7 @@ export function registerMemoryStoreTool(
                 importance: entry.importance,
                 dedupSkipped,
                 conflictReview,
+                v2Mirror,
               },
             };
           } catch (error) {

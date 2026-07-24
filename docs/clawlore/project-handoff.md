@@ -1,5 +1,34 @@
 # ClawLore v1 project handoff
 
+## 2026-07-23 V2 runtime authority source candidate
+
+The clean isolated candidate is now version 1.2.3. It adds the previously
+missing production-shaped V2 transition: a receipt-gated native OpenClaw
+ContextEngine, a store-only V1-to-V2 runtime mirror with V1 compensation on
+failure, and a read-only cutover/V1-retirement preflight. OpenClaw uses one
+string for both ContextEngine plugin loading and engine resolution, so the
+adapter registers the canonical engine id `clawlore`; the earlier
+`clawlore-v2` draft id was rejected during host-contract review.
+
+`v2-write` and `cutover` require `agentToolProfile: "v2-write"`, automatic
+capture/smart extraction/reflection disabled, and the mode-specific exact
+readiness receipt. The profile exposes `memory_store` but deliberately omits
+legacy update/forget writers. A successful store mirrors V2 truth and every
+local projection in one transaction; a failed mirror compensates the V1 row.
+Cutover selects V2 recall through `plugins.slots.contextEngine: "clawlore"`.
+V1 remains dual-written only for the rollback window and leaves the normal
+runtime after a fresh preflight reports `v1RetirementReady: true`.
+
+Validation before the final release gate: Node 24.15.0 typecheck/build pass;
+649 tests report 647 pass, 0 fail, and 2 platform skips; the packed 1.2.3
+inventory contains 303 files including the cutover CLI and all new runtime
+modules. The detailed run is
+`docs/clawlore/eval/clawlore-v2-runtime-authority-completion-run-2026-07-23.md`.
+
+This is source engineering completion, not a live cutover claim. Live data,
+configuration, service restart, external Tag/Release publication, and V1
+retirement were not changed by this source task.
+
 Current through Phase 9, H1-H5 production hardening, the R1 canonical identity
 transition, R2 brand/architecture bundle 5, the 2026-07-19 live rollout, and
 the eleventh through eighteenth independent audit source-remediation rounds.

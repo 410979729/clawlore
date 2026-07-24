@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## 1.2.3 - 2026-07-23
+
+- Added a native OpenClaw ContextEngine cutover adapter. It admits only direct
+  sessions with a canonical principal, injects only active policy-approved V2
+  records, leaves transcript ingestion and host compaction untouched, and
+  remains blocked without an exact cutover readiness receipt.
+- Added a readiness-gated V2-write transition. A successful manual V1 write is
+  mirrored into V2 revision, item, source, ACL, event, FTS, vector fallback,
+  relation, and outbox state in one transaction; mirror failure compensates the
+  V1 write instead of returning a false success.
+- Added a read-only V2 cutover and V1-retirement preflight covering integrity,
+  foreign keys, V1/V2 convergence, unresolved principals, lifecycle,
+  verification, projections, pending outbox work, content divergence, and
+  undisposed candidates.
+- Added a real-store write-after-visible regression for the production canary
+  and a V2 mirror regression proving immediate lexical visibility for the
+  exact private principal.
+- Defined the end state explicitly: V1 remains a migration and rollback lane
+  through shadow and V2-write transition, V2 becomes authoritative at cutover,
+  and V1 leaves the runtime only after the stricter retirement gate passes.
+- Preserved the existing governance journal, operator dashboard, 124-case
+  golden benchmark, hard-delete protections, SQL authority, OAuth session,
+  Windows ACL hardening, packed-tarball smokes, and complete release gate.
 - Replaced the four overlapping Agent-tool booleans with one authoritative
   `agentToolProfile`. Manifest discovery and runtime registration now share the
   same profile matrix, including a read-only containment profile that preserves

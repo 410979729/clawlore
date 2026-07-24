@@ -1,5 +1,6 @@
 export const AGENT_TOOL_PROFILES = [
   "read-only",
+  "v2-write",
   "memory-write",
   "self-improvement",
   "operator",
@@ -17,6 +18,7 @@ export function isAgentToolProfile(value: unknown): value is AgentToolProfile {
 
 export function agentToolCapabilities(profile: AgentToolProfile): {
   memoryWrites: boolean;
+  memoryLifecycleWrites: boolean;
   operator: boolean;
   selfImprovement: boolean;
   secretIndex: boolean;
@@ -24,6 +26,7 @@ export function agentToolCapabilities(profile: AgentToolProfile): {
   const operator = profile === "operator" || profile === "operator-secret-index";
   return {
     memoryWrites: profile !== "read-only",
+    memoryLifecycleWrites: profile !== "read-only" && profile !== "v2-write",
     operator,
     selfImprovement: profile === "self-improvement" || operator,
     secretIndex: profile === "operator-secret-index",

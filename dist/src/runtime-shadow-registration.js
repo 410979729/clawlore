@@ -5,9 +5,11 @@ import { buildRuntimeDiagnosticReceipt, createRuntimeInstanceIdentity, invalidat
 import { resolveScopeFilter } from "./scopes.js";
 import { createLegacyShadowCandidateRetrieverV1, } from "./adapters/openclaw/legacy-shadow-retrieval.js";
 import { createNativeShadowCandidateRetrieverV1, } from "./adapters/openclaw/native-shadow-retrieval.js";
+import { createClawLoreNativeContextEngineV1 } from "./adapters/openclaw/native-context-engine.js";
 import { composeClawLoreRuntimeV1, normalizeClawLoreRuntimeConfigV1, } from "./adapters/openclaw/runtime-composition-root.js";
 import { loadRuntimeRolloutControlsV1 } from "./adapters/openclaw/runtime-rollout-control.js";
 import { filterUserMdExclusiveRecallResults } from "./workspace-boundary.js";
+import { runtimeTransitionPolicyBlocksV1 } from "./application/runtime-transition-policy.js";
 async function sleep(ms) {
     await new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -56,7 +58,7 @@ export function createRuntimeDiagnosticLeaseController(params) {
         },
     };
 }
-/** Registers the read-only ClawLore shadow runtime; it never enables writes or prompt mutation. */
+/** Registers the receipt-gated ClawLore runtime. Shadow remains strictly read-only. */
 export function registerClawLoreShadowRuntime(params) {
     const { api, config, resolvedDbPath, retriever, scopeManager } = params;
     const retrieveWithRetry = async (input) => {
@@ -74,7 +76,7 @@ export function registerClawLoreShadowRuntime(params) {
     const runtimeConfig = normalizeClawLoreRuntimeConfigV1(config.runtime);
     let releaseBinding;
     const bindingErrors = [];
-    if (runtimeConfig.mode === "shadow") {
+    if (runtimeConfig.mode !== "disabled") {
         try {
             releaseBinding = computeRuntimeReleaseBinding({
                 pluginRoot: resolvePluginRoot(params.pluginEntryUrl),
@@ -86,12 +88,13 @@ export function registerClawLoreShadowRuntime(params) {
             bindingErrors.push(`release_runtime_binding_failed:${diagnosticErrorSummary(error)}`);
         }
     }
-    const rolloutControls = runtimeConfig.mode === "shadow" && releaseBinding
+    const rolloutControls = runtimeConfig.mode !== "disabled" && releaseBinding
         ? loadRuntimeRolloutControlsV1({
             readinessFile: config.runtime?.readinessFile
                 ? api.resolvePath(config.runtime.readinessFile)
                 : undefined,
             expectedBinding: releaseBinding,
+            expectedMode: runtimeConfig.mode,
         })
         : { readiness: undefined, errors: bindingErrors };
     if (rolloutControls.errors.length > 0) {
@@ -129,28 +132,100 @@ export function registerClawLoreShadowRuntime(params) {
             }));
         },
     });
-    const receipt = composeClawLoreRuntimeV1({
-        config: runtimeConfig,
-        host: {
-            on(event, handler, options) {
-                api.on(event, handler, options);
-            },
-        },
-        dependencies: {
-            tenantId: "local",
-            agentId: "main",
-            workspaceId: "tianji-main-workspace",
-            retrieveCandidates: nativeRetriever,
-            retrieveComparisonCandidates: cachedLegacyRetriever,
-            onObserverError(code) {
-                api.logger.warn(`clawlore: read-only shadow observer ${code}`);
-            },
-            onObserverMetrics(metrics) {
-                api.logger.debug?.(`clawlore: observer metrics active=${metrics.active} late=${metrics.late} timeouts=${metrics.timeouts} saturated=${metrics.saturated}`);
-            },
-        },
-        readiness: rolloutControls.readiness,
-    });
+    const nativeBlocks = [];
+    nativeBlocks.push(...runtimeTransitionPolicyBlocksV1({
+        mode: runtimeConfig.mode,
+        contextEngine: runtimeConfig.contextEngine,
+        agentToolProfile: config.agentToolProfile,
+        autoCapture: config.autoCapture === true,
+        smartExtraction: config.smartExtraction === true,
+        sessionStrategy: config.sessionStrategy ?? "none",
+    }));
+    if (runtimeConfig.mode === "cutover") {
+        if (!rolloutControls.readiness || rolloutControls.readiness.status !== "ready" || !rolloutControls.readiness.rollout.ready) {
+            nativeBlocks.push("release_readiness_blocked");
+        }
+        nativeBlocks.push(...rolloutControls.errors);
+    }
+    else if (runtimeConfig.mode === "v2-write") {
+        if (!rolloutControls.readiness || rolloutControls.readiness.status !== "ready" || !rolloutControls.readiness.rollout.ready) {
+            nativeBlocks.push("release_readiness_blocked");
+        }
+        nativeBlocks.push(...rolloutControls.errors);
+    }
+    const receipt = runtimeConfig.mode === "cutover"
+        ? (() => {
+            if (nativeBlocks.length === 0) {
+                api.registerContextEngine("clawlore", () => createClawLoreNativeContextEngineV1({
+                    version: String((rolloutControls.readiness?.provenance.sourceCommit ?? "unknown").slice(0, 12)),
+                    tenantId: "local",
+                    agentId: "main",
+                    workspaceId: "tianji-main-workspace",
+                    tokenBudget: runtimeConfig.tokenBudget,
+                    maxQueryChars: runtimeConfig.maxQueryChars,
+                    retrieveCandidates: nativeRetriever,
+                }));
+            }
+            return {
+                schemaVersion: 1,
+                status: nativeBlocks.length === 0 ? "registered" : "blocked",
+                requestedMode: runtimeConfig.mode,
+                registeredHooks: [],
+                toolRegistrations: 0,
+                writeEnabled: nativeBlocks.length === 0,
+                promptMutationEnabled: nativeBlocks.length === 0,
+                contextEngineRegistered: nativeBlocks.length === 0,
+                contextEngine: {
+                    selected: "native-opt-in",
+                    canActivateNative: nativeBlocks.length === 0,
+                    missingCapabilities: [],
+                    reason: nativeBlocks.length === 0
+                        ? "native_context_engine_registered"
+                        : "native_context_engine_blocked",
+                },
+                blockingReasons: [...new Set(nativeBlocks)].sort(),
+            };
+        })()
+        : runtimeConfig.mode === "v2-write"
+            ? {
+                schemaVersion: 1,
+                status: nativeBlocks.length === 0 ? "registered" : "blocked",
+                requestedMode: runtimeConfig.mode,
+                registeredHooks: [],
+                toolRegistrations: 0,
+                writeEnabled: nativeBlocks.length === 0,
+                promptMutationEnabled: false,
+                contextEngineRegistered: false,
+                contextEngine: {
+                    selected: "compatibility",
+                    canActivateNative: false,
+                    missingCapabilities: [],
+                    reason: "v2_write_uses_compatibility_recall",
+                },
+                blockingReasons: [...new Set(nativeBlocks)].sort(),
+            }
+            : composeClawLoreRuntimeV1({
+                config: runtimeConfig,
+                host: {
+                    on(event, handler, options) {
+                        api.on(event, handler, options);
+                    },
+                },
+                dependencies: {
+                    tenantId: "local",
+                    agentId: "main",
+                    workspaceId: "tianji-main-workspace",
+                    retrieveCandidates: nativeRetriever,
+                    retrieveComparisonCandidates: cachedLegacyRetriever,
+                    onObserverError(code) {
+                        api.logger.warn(`clawlore: read-only shadow observer ${code}`);
+                    },
+                    onObserverMetrics(metrics) {
+                        api.logger.debug?.(`clawlore: observer metrics active=${metrics.active} late=${metrics.late} timeouts=${metrics.timeouts} saturated=${metrics.saturated}`);
+                    },
+                },
+                readiness: rolloutControls.readiness,
+            });
     api.logger.info(`clawlore: runtime status=${receipt.status} mode=${receipt.requestedMode} hooks=${receipt.registeredHooks.length} writes=${receipt.writeEnabled} promptMutation=${receipt.promptMutationEnabled} contextEngine=${receipt.contextEngineRegistered} blocks=${receipt.blockingReasons.join(",") || "none"}`);
     const instance = createRuntimeInstanceIdentity();
     const diagnosticReceipt = buildRuntimeDiagnosticReceipt({
@@ -164,6 +239,8 @@ export function registerClawLoreShadowRuntime(params) {
     const file = resolveRuntimeDiagnosticFile(resolvedDbPath);
     return {
         file,
+        v2WritesEnabled: receipt.status === "registered"
+            && (receipt.requestedMode === "v2-write" || receipt.requestedMode === "cutover"),
         ...createRuntimeDiagnosticLeaseController({
             file,
             baseReceipt: diagnosticReceipt,

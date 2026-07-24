@@ -73,6 +73,7 @@ export function registerAllMemoryTools(
   context: ToolContext,
   options: {
     allowAgentMemoryWriteTools?: boolean;
+    allowAgentMemoryLifecycleTools?: boolean;
     enableManagementTools?: boolean;
     enableSelfImprovementTools?: boolean;
     secretIndexToolsEnabled?: boolean;
@@ -84,8 +85,10 @@ export function registerAllMemoryTools(
     if (options.secretIndexToolsEnabled === true) {
       registerMemoryStoreSecretIndexTool(api, context);
     }
-    registerMemoryForgetTool(api, context);
-    registerMemoryUpdateTool(api, context);
+    if (options.allowAgentMemoryLifecycleTools !== false) {
+      registerMemoryForgetTool(api, context);
+      registerMemoryUpdateTool(api, context);
+    }
   }
 
   if (options.enableManagementTools) {

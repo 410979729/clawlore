@@ -44,8 +44,9 @@ const ROOT_MODULES_BY_LAYER = {
     "task-experience-capsule.ts", "task-experience-review.ts", "task-outcome-evidence.ts",
   ],
   application: [
-    "application/context-composer.ts", "application/identity-resolver.ts",
+    "application/context-composer.ts", "application/context-engine-session-identity.ts", "application/identity-resolver.ts",
     "application/legacy-address-mapper.ts", "application/policy-decision.ts",
+    "application/runtime-transition-policy.ts",
     "application/support-bundle.ts",
     "access-tracker.ts", "adaptive-retrieval.ts", "admission-control.ts",
     "admission-stats.ts", "auto-capture-cleanup.ts", "auto-capture-governance.ts",
@@ -63,7 +64,7 @@ const ROOT_MODULES_BY_LAYER = {
   ],
   adapters: [
     "adapters/openclaw/compatibility-context-adapter.ts", "adapters/openclaw/context-engine-skeleton.ts",
-    "adapters/openclaw/legacy-shadow-retrieval.ts", "adapters/openclaw/native-shadow-retrieval.ts",
+    "adapters/openclaw/legacy-shadow-retrieval.ts", "adapters/openclaw/native-context-engine.ts", "adapters/openclaw/native-shadow-retrieval.ts",
     "adapters/openclaw/legacy-context-sources.ts",
     "experience-episode-tools.ts", "experience-operator-tools.ts", "experience-playbook-tools.ts",
     "experience-query-tools.ts", "experience-review-tools.ts", "experience-tool-runtime-policy.ts",

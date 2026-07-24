@@ -17,7 +17,7 @@ import {
   type RuntimeShadowTraceSink,
 } from "./runtime-shadow.js";
 
-export type ClawLoreRuntimeModeV1 = "disabled" | "shadow";
+export type ClawLoreRuntimeModeV1 = "disabled" | "shadow" | "v2-write" | "cutover";
 
 export interface ClawLoreRuntimeConfigV1 {
   mode: ClawLoreRuntimeModeV1;
@@ -91,7 +91,9 @@ function boundedInteger(value: unknown, fallback: number, minimum: number, maxim
 
 export function normalizeClawLoreRuntimeConfigV1(value: unknown): ClawLoreRuntimeConfigV1 {
   const raw = record(value);
-  const mode: ClawLoreRuntimeModeV1 = raw.mode === "shadow" ? "shadow" : "disabled";
+  const mode: ClawLoreRuntimeModeV1 = ["shadow", "v2-write", "cutover"].includes(String(raw.mode))
+    ? raw.mode as ClawLoreRuntimeModeV1
+    : "disabled";
   const contextEngine: ContextEngineActivationV2 = raw.contextEngine === "native-opt-in"
     ? "native-opt-in"
     : "compatibility";
@@ -201,6 +203,7 @@ function activationBlocks(input: {
   readiness?: ReleaseReadinessReceiptV1;
 }): string[] {
   if (input.config.mode === "disabled") return [];
+  if (input.config.mode !== "shadow") return ["native_runtime_requires_registration_adapter"];
   const blocks: string[] = [];
   const readiness = input.readiness;
   if (!readiness) {

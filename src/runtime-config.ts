@@ -10,7 +10,7 @@ import {
  * write, prompt-mutation, ContextEngine, lifecycle, or final-recall authority.
  */
 export interface ClawLoreRuntimeRequestConfig {
-  mode?: "disabled" | "shadow";
+  mode?: "disabled" | "shadow" | "v2-write" | "cutover";
   contextEngine?: "compatibility" | "native-opt-in";
   tokenBudget?: number;
   maxLatencyMs?: number;
@@ -40,7 +40,9 @@ function intBetween(value: unknown, min: number, max: number, fallback: number):
 
 function normalizeRuntimeRequest(raw: Record<string, unknown>): ClawLoreRuntimeRequestConfig {
   return {
-    mode: raw.mode === "shadow" ? "shadow" : "disabled",
+    mode: ["shadow", "v2-write", "cutover"].includes(String(raw.mode))
+      ? raw.mode as "shadow" | "v2-write" | "cutover"
+      : "disabled",
     contextEngine: raw.contextEngine === "native-opt-in" ? "native-opt-in" : "compatibility",
     tokenBudget: intBetween(raw.tokenBudget, 32, 32_768, 512),
     maxLatencyMs: intBetween(raw.maxLatencyMs, 25, 5_000, 750),

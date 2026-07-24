@@ -34,6 +34,10 @@ declare module "openclaw/plugin-sdk" {
       options?: Record<string, unknown>,
     ): void;
     registerService(service: Record<string, unknown>): void;
+    registerContextEngine(
+      id: string,
+      factory: (context: Record<string, unknown>) => unknown | Promise<unknown>,
+    ): void;
   }
 }
 

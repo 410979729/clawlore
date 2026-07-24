@@ -13,7 +13,9 @@ function intBetween(value, min, max, fallback) {
 }
 function normalizeRuntimeRequest(raw) {
     return {
-        mode: raw.mode === "shadow" ? "shadow" : "disabled",
+        mode: ["shadow", "v2-write", "cutover"].includes(String(raw.mode))
+            ? raw.mode
+            : "disabled",
         contextEngine: raw.contextEngine === "native-opt-in" ? "native-opt-in" : "compatibility",
         tokenBudget: intBetween(raw.tokenBudget, 32, 32_768, 512),
         maxLatencyMs: intBetween(raw.maxLatencyMs, 25, 5_000, 750),

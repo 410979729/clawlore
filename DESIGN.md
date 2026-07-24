@@ -22,6 +22,24 @@ OpenClaw integration surfaces:
 - CLI commands: `openclaw clawlore` and compatibility aliases
   `openclaw scope-recall` and `openclaw memory-pro`.
 - Session hooks for auto-recall, auto-capture, reflection, session recovery, and self-improvement review.
+- A receipt-gated native ContextEngine for final V2 recall cutover. Its
+  registered engine id is the canonical plugin id `clawlore`, matching
+  `plugins.slots.contextEngine`.
+
+## V1 to V2 authority transition
+
+V1 and V2 are not intended to remain co-authoritative. V1 is authoritative
+during shadow, remains a compatibility and rollback lane during `v2-write`,
+and stops serving normal recall when the native V2 ContextEngine enters
+receipt-gated `cutover`. V1 is retained read-only for a bounded rollback window
+while new store operations remain dual-written, and may leave the runtime only
+after the cutover preflight reports
+`v1RetirementReady: true`. Historical V1 material then remains accessible only
+through explicit migration or archive tooling.
+
+The transition never infers ownership or lifecycle from row presence. Unknown
+principals, candidate or archived rows, unverified content, V1/V2 divergence,
+projection drift, and pending outbox work all block cutover or retirement.
 
 ## Storage Layers
 

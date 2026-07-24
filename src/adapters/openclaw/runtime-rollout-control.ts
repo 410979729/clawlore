@@ -34,6 +34,7 @@ function readPrivateJson(path: string): Record<string, unknown> {
 function readiness(
   value: Record<string, unknown>,
   expectedBinding: ReleaseArtifactBindingV1,
+  expectedMode: ReleaseReadinessReceiptV1["rollout"]["requestedMode"],
   now: Date,
 ): ReleaseReadinessReceiptV1 {
   const rollout = record(value.rollout);
@@ -41,7 +42,7 @@ function readiness(
   if (
     value.schemaVersion !== 1
     || !["ready", "blocked"].includes(String(value.status))
-    || rollout.requestedMode !== "shadow"
+    || rollout.requestedMode !== expectedMode
     || typeof rollout.rolloutId !== "string"
     || typeof provenance.generatedBy !== "string"
     || typeof provenance.createdAt !== "string"
@@ -76,6 +77,7 @@ function readiness(
 export function loadRuntimeRolloutControlsV1(input: {
   readinessFile?: string;
   expectedBinding: ReleaseArtifactBindingV1;
+  expectedMode?: ReleaseReadinessReceiptV1["rollout"]["requestedMode"];
   now?: () => Date;
 }): {
   readiness?: ReleaseReadinessReceiptV1;
@@ -89,6 +91,7 @@ export function loadRuntimeRolloutControlsV1(input: {
       releaseReadiness = readiness(
         readPrivateJson(input.readinessFile),
         input.expectedBinding,
+        input.expectedMode ?? "shadow",
         input.now?.() ?? new Date(),
       );
     }

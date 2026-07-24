@@ -11,7 +11,9 @@ function boundedInteger(value, fallback, minimum, maximum) {
 }
 export function normalizeClawLoreRuntimeConfigV1(value) {
     const raw = record(value);
-    const mode = raw.mode === "shadow" ? "shadow" : "disabled";
+    const mode = ["shadow", "v2-write", "cutover"].includes(String(raw.mode))
+        ? raw.mode
+        : "disabled";
     const contextEngine = raw.contextEngine === "native-opt-in"
         ? "native-opt-in"
         : "compatibility";
@@ -101,6 +103,8 @@ function observerKey(event, context) {
 function activationBlocks(input) {
     if (input.config.mode === "disabled")
         return [];
+    if (input.config.mode !== "shadow")
+        return ["native_runtime_requires_registration_adapter"];
     const blocks = [];
     const readiness = input.readiness;
     if (!readiness) {

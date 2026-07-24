@@ -14,6 +14,9 @@ const {
   composeClawLoreRuntimeV1,
   normalizeClawLoreRuntimeConfigV1,
 } = jiti("../src/v2/adapters/openclaw/runtime-composition-root.ts");
+const {
+  createClawLoreNativeContextEngineV1,
+} = jiti("../src/adapters/openclaw/native-context-engine.ts");
 
 function evidence(overrides = {}) {
   return {
@@ -107,7 +110,7 @@ test("runtime composition is default-off and invalid config fails to disabled", 
   );
   assert.equal(normalizeClawLoreRuntimeConfigV1({ mode: "shadow" }).maxConcurrent, 2);
 
-  for (const config of [undefined, {}, { mode: "v2-write" }, { mode: "cutover" }]) {
+  for (const config of [undefined, {}]) {
     const host = new FixtureHost();
     const normalized = normalizeClawLoreRuntimeConfigV1(config);
     assert.equal(normalized.mode, "disabled");
@@ -119,6 +122,8 @@ test("runtime composition is default-off and invalid config fails to disabled", 
     assert.equal(receipt.contextEngineRegistered, false);
     assert.equal(host.hooks.length, 0);
   }
+  assert.equal(normalizeClawLoreRuntimeConfigV1({ mode: "v2-write" }).mode, "v2-write");
+  assert.equal(normalizeClawLoreRuntimeConfigV1({ mode: "cutover" }).mode, "cutover");
 });
 
 test("runtime config accepts the deprecated alias but rejects ambiguous dual input", () => {
@@ -139,6 +144,100 @@ test("runtime config accepts the deprecated alias but rejects ambiguous dual inp
     () => resolveClawLoreRuntimeRequestConfig({ runtime: "shadow" }),
     /runtime configuration must be an object/,
   );
+});
+
+test("native cutover engine injects only policy-eligible active private V2 memory", async () => {
+  let boundary;
+  const engine = createClawLoreNativeContextEngineV1({
+    version: "1.2.3",
+    tenantId: "local",
+    agentId: "main",
+    workspaceId: "workspace-1",
+    tokenBudget: 256,
+    maxQueryChars: 4000,
+    retrieveCandidates: async (request) => {
+      boundary = request.boundary;
+      const address = {
+        schemaVersion: 2,
+        ...request.boundary,
+        retention: "durable",
+      };
+      return [
+        {
+          id: "active-1",
+          section: "profile",
+          text: "Use Simplified Chinese by default",
+          targetAddress: address,
+          lifecycle: "active",
+          verification: "user_confirmed",
+          freshness: "current",
+          score: 1,
+          confidence: 1,
+        },
+        {
+          id: "candidate-1",
+          section: "profile",
+          text: "candidate must not inject",
+          targetAddress: address,
+          lifecycle: "candidate",
+          verification: "user_confirmed",
+          score: 1,
+          confidence: 1,
+        },
+      ];
+    },
+  });
+  assert.equal(engine.info.id, "clawlore");
+
+  const result = await engine.assemble({
+    sessionId: "session-1",
+    sessionKey: "agent:main:telegram:default:direct:8176453077",
+    messages: [{ role: "user", content: "hello" }],
+    prompt: "language preference",
+    tokenBudget: 128,
+  });
+  assert.equal(boundary.principalId, "telegram:default:8176453077");
+  assert.match(result.systemPromptAddition, /Use Simplified Chinese/);
+  assert.doesNotMatch(result.systemPromptAddition, /candidate must not inject/);
+  assert.deepEqual(result.messages, [{ role: "user", content: "hello" }]);
+  assert.equal(result.promptAuthority, "preassembly_may_overflow");
+  assert.deepEqual(await engine.ingest({
+    sessionId: "session-1",
+    message: { role: "user", content: "do not persist transcript implicitly" },
+  }), { ingested: false });
+  assert.deepEqual(await engine.compact(), {
+    ok: true,
+    compacted: false,
+    reason: "host_owned_compaction",
+  });
+});
+
+test("native cutover engine fails closed for group and unresolved sessions", async () => {
+  let calls = 0;
+  const engine = createClawLoreNativeContextEngineV1({
+    version: "1.2.3",
+    tenantId: "local",
+    agentId: "main",
+    tokenBudget: 128,
+    maxQueryChars: 4000,
+    retrieveCandidates: async () => {
+      calls += 1;
+      return [];
+    },
+  });
+  for (const sessionKey of [
+    "agent:main:telegram:default:group:-100123",
+    "agent:main:unknown",
+  ]) {
+    const result = await engine.assemble({
+      sessionId: "session-group",
+      sessionKey,
+      messages: [],
+      prompt: "query",
+    });
+    assert.equal(result.systemPromptAddition, undefined);
+  }
+  assert.equal(calls, 0);
 });
 
 test("shadow request registers nothing without matching readiness", () => {

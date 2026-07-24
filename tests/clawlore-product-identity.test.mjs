@@ -10,7 +10,7 @@ test("ClawLore is the canonical package, manifest, config, and command identity"
   const commands = manifest.commandAliases.map((entry) => entry.name);
 
   assert.equal(packageJson.name, "clawlore");
-  assert.equal(packageJson.version, "1.2.2");
+  assert.equal(packageJson.version, "1.2.3");
   assert.equal(packageJson.repository.url, "git+https://github.com/410979729/clawlore.git");
   assert.equal(manifest.id, "clawlore");
   assert.equal(manifest.name, "ClawLore");

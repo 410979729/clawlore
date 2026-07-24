@@ -274,6 +274,38 @@ destination and do not claim that a transaction rollback restored it. Restore
 the verified encrypted pre-write snapshot to a new location, validate that
 copy, preserve V1 fallback, and obtain a fresh bounded plan before any retry.
 
+## V2 authority cutover and V1 retirement
+
+Treat runtime modes as a one-way, evidence-gated progression:
+`disabled -> shadow -> v2-write -> cutover`. A rollback may move to an earlier
+mode by restoring the verified snapshot and configuration pointer; do not
+reverse-mutate a partially migrated database.
+
+During `v2-write`, use `agentToolProfile: "v2-write"`. It exposes
+`memory_store` but not legacy update/forget tools, and the runtime refuses to
+activate while automatic capture, smart extraction, or reflection writers are
+enabled. This prevents an unmirrored legacy writer from reopening V1/V2 drift.
+
+Before requesting cutover, stop every writer outside ClawLore and run:
+
+```bash
+npm run preflight:clawlore-v2-cutover -- /absolute/path/memory.sqlite3
+```
+
+The command is read-only and exits non-zero while `cutoverReady` is false.
+Resolve every reported blocker, generate an exact unexpired cutover readiness
+receipt, set `runtime.mode: "cutover"` and
+`runtime.contextEngine: "native-opt-in"`, and select the host engine with
+`plugins.slots.contextEngine: "clawlore"`. The plugin registers the same
+`clawlore` engine id because OpenClaw uses the slot value for both plugin
+loading and engine resolution.
+
+Do not delete or stop preserving V1 merely because cutover succeeds. Keep the
+verified rollback snapshot and read-only V1 lane for the approved observation
+window. Retire V1 from the normal runtime only when a fresh preflight reports
+both `cutoverReady: true` and `v1RetirementReady: true`; thereafter V1 is an
+offline migration/archive format, not a parallel authority.
+
 ## Live Rollout
 
 1. Record the candidate commit and recursive artifact digest.

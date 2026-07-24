@@ -59,6 +59,16 @@ export interface ToolContext {
   mdMirror?: MdMirrorWriter | null;
   workspaceBoundary?: WorkspaceBoundaryConfig;
   principalIsolation?: PrincipalIsolationConfig;
+  v2RuntimeMirror?: {
+    mirror(input: {
+      legacyId: string;
+      content: string;
+      category: string;
+      address: import("./v2/domain/memory-address.js").MemoryAddressV2;
+      observedAt: string;
+      actor: string;
+    }): { status: string; itemId: string; projectionStatus: string };
+  };
 }
 
 export type ToolTextResult = {

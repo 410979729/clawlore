@@ -18,8 +18,10 @@ export function registerAllMemoryTools(api, context, options = {}) {
         if (options.secretIndexToolsEnabled === true) {
             registerMemoryStoreSecretIndexTool(api, context);
         }
-        registerMemoryForgetTool(api, context);
-        registerMemoryUpdateTool(api, context);
+        if (options.allowAgentMemoryLifecycleTools !== false) {
+            registerMemoryForgetTool(api, context);
+            registerMemoryUpdateTool(api, context);
+        }
     }
     if (options.enableManagementTools) {
         registerMemoryStatsTool(api, context);

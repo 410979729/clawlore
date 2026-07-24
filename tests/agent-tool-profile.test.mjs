@@ -47,6 +47,7 @@ function runtimeToolNames(profile) {
   };
   registerAllMemoryTools(api, context, {
     allowAgentMemoryWriteTools: capabilities.memoryWrites,
+    allowAgentMemoryLifecycleTools: capabilities.memoryLifecycleWrites,
     enableManagementTools: capabilities.operator,
     enableSelfImprovementTools: capabilities.selfImprovement,
     secretIndexToolsEnabled: capabilities.secretIndex,

@@ -28,12 +28,12 @@ function readPrivateJson(path) {
     }
     return record(JSON.parse(readFileSync(path, "utf8")));
 }
-function readiness(value, expectedBinding, now) {
+function readiness(value, expectedBinding, expectedMode, now) {
     const rollout = record(value.rollout);
     const provenance = record(value.provenance);
     if (value.schemaVersion !== 1
         || !["ready", "blocked"].includes(String(value.status))
-        || rollout.requestedMode !== "shadow"
+        || rollout.requestedMode !== expectedMode
         || typeof rollout.rolloutId !== "string"
         || typeof provenance.generatedBy !== "string"
         || typeof provenance.createdAt !== "string"
@@ -73,7 +73,7 @@ export function loadRuntimeRolloutControlsV1(input) {
         errors.push("release_readiness_file_missing");
     else {
         try {
-            releaseReadiness = readiness(readPrivateJson(input.readinessFile), input.expectedBinding, input.now?.() ?? new Date());
+            releaseReadiness = readiness(readPrivateJson(input.readinessFile), input.expectedBinding, input.expectedMode ?? "shadow", input.now?.() ?? new Date());
         }
         catch (error) {
             errors.push(stableRolloutError(error));

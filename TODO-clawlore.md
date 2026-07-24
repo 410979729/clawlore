@@ -1,6 +1,37 @@
 # ClawLore v1 TODO
 
-Updated: 2026-07-22
+Updated: 2026-07-23
+
+## 2026-07-23 V2 runtime authority completion
+
+- [x] Add a real OpenClaw native ContextEngine. It resolves exact direct-session
+      principals, retrieves V2 truth, injects only active policy-approved rows,
+      rejects group/unknown identity, does not ingest transcripts, and leaves
+      compaction with the host.
+- [x] Add readiness-gated `v2-write` and `cutover` modes. A dedicated
+      `agentToolProfile: "v2-write"` exposes only the compensating
+      V1-to-V2 `memory_store` path; legacy update/forget and automatic writers
+      block activation so they cannot reopen parity drift.
+- [x] Mirror a successful manual write into V2 revision/item/source/ACL/event,
+      FTS, vector fallback, relation projection, and processed outbox state in
+      one transaction. If the V2 transaction fails, delete the just-written V1
+      row and return failure instead of a false success.
+- [x] Add a read-only final preflight that separately reports `cutoverReady`
+      and the stricter `v1RetirementReady`, covering integrity, foreign keys,
+      V1/V2 mapping and content, principals, lifecycle, verification,
+      projections, outbox work, and candidate disposition.
+- [x] Define the final authority model: V1 is a shadow/rollback lane, V2 becomes
+      authoritative at cutover, and V1 leaves normal runtime only after a
+      bounded observation window and a green retirement receipt.
+- [x] Promote the candidate to 1.2.3, place all prior Unreleased work under the
+      release boundary, include the cutover preflight in the package, and pass
+      typecheck, build, 649 tests (647 pass, 0 fail, 2 platform skips), and a
+      303-file package inventory.
+- [ ] Production V2 activation remains a separate high-impact rollout. It
+      requires controlled authorization, fresh encrypted snapshots, exact live
+      principal/lifecycle/content convergence, a cutover readiness receipt,
+      `plugins.slots.contextEngine: "clawlore"`, restart, real-channel
+      acceptance, and a later V1-retirement observation window.
 
 ## 2026-07-22 P8 production-GO preflight
 

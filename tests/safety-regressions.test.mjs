@@ -802,6 +802,7 @@ test("manifest declares all owned tools and marks management tools with config a
     assert.equal(writeSignal.mode.path, "agentToolProfile");
     assert.equal(writeSignal.mode.default, "memory-write");
     assert.deepEqual(writeSignal.mode.allowed, [
+      ...(toolName === "memory_store" ? ["v2-write"] : []),
       "memory-write",
       "self-improvement",
       "operator",
@@ -866,6 +867,7 @@ test("manifest declares all owned tools and marks management tools with config a
   assert.equal(manifest.configSchema.properties.agentToolProfile.default, "memory-write");
   assert.deepEqual(manifest.configSchema.properties.agentToolProfile.enum, [
     "read-only",
+    "v2-write",
     "memory-write",
     "self-improvement",
     "operator",

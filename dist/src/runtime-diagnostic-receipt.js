@@ -90,7 +90,7 @@ function parseRuntimeDiagnosticReceipt(value) {
         || leaseDuration < 0
         || leaseDuration > MAX_RUNTIME_DIAGNOSTIC_LEASE_MS
         || !DIGEST_RE.test(String(raw.configDigest ?? ""))
-        || !["disabled", "shadow"].includes(String(requestedMode))
+        || !["disabled", "shadow", "v2-write", "cutover"].includes(String(requestedMode))
         || !["disabled", "blocked", "registered"].includes(String(runtimeStatus))
         || !["not_required", "missing", "blocked", "ready"].includes(String(readinessStatus))
         || typeof readiness.bindingVerified !== "boolean"
@@ -199,8 +199,11 @@ export function resolveRuntimeDiagnosticFile(resolvedDbPath) {
 }
 export function configuredRuntimeMode(pluginConfig) {
     const runtime = pluginConfig?.runtime;
-    return runtime && typeof runtime === "object" && runtime.mode === "shadow"
-        ? "shadow"
+    const mode = runtime && typeof runtime === "object"
+        ? String(runtime.mode ?? "")
+        : "";
+    return ["shadow", "v2-write", "cutover"].includes(mode)
+        ? mode
         : "disabled";
 }
 export function buildRuntimeDiagnosticReceipt(input) {

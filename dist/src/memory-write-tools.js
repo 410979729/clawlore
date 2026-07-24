@@ -187,6 +187,38 @@ export function registerMemoryStoreTool(api, context) {
                             suppressed_until_turn: 0,
                         }), sanitizedText)),
                     });
+                    let v2Mirror;
+                    if (runtimeContext.v2RuntimeMirror) {
+                        if (access.boundary.kind !== "private" || !access.boundary.principalKey) {
+                            await runtimeContext.store.delete(entry.id, [targetScope]);
+                            throw new Error("V2 runtime writes require an exact private principal boundary");
+                        }
+                        try {
+                            v2Mirror = runtimeContext.v2RuntimeMirror.mirror({
+                                legacyId: entry.id,
+                                content: sanitizedText,
+                                category: category,
+                                address: {
+                                    schemaVersion: 2,
+                                    tenantId: "local",
+                                    principalId: access.boundary.principalKey,
+                                    agentId,
+                                    platform: access.boundary.platform,
+                                    accountId: access.boundary.accountId,
+                                    visibility: "private",
+                                    retention: deriveManualMemoryLayer(category),
+                                },
+                                observedAt: new Date(entry.timestamp).toISOString(),
+                                actor: `agent:${agentId}`,
+                            });
+                        }
+                        catch (error) {
+                            const compensated = await runtimeContext.store.delete(entry.id, [targetScope]);
+                            if (!compensated)
+                                throw new Error("V2 mirror failed and V1 compensation failed", { cause: error });
+                            throw error;
+                        }
+                    }
                     let conflictReview;
                     try {
                         conflictReview = await recordConflictReviewRelations(runtimeContext.store, entry, [targetScope]);
@@ -213,6 +245,7 @@ export function registerMemoryStoreTool(api, context) {
                             importance: entry.importance,
                             dedupSkipped,
                             conflictReview,
+                            v2Mirror,
                         },
                     };
                 }

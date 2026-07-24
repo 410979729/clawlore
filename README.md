@@ -108,6 +108,33 @@ requires non-empty active lifecycle data and minimum real shadow sample,
 overlap, rank, latency, forbidden-scope, and prompt-budget thresholds. A
 zero-active or zero-parity dataset cannot produce a cutover-ready receipt.
 
+The runtime transition is intentionally staged:
+
+- `disabled`: no V2 runtime activity.
+- `shadow`: V1 remains authoritative while V2 is observed without writes or
+  prompt mutation.
+- `v2-write`: manual V1 writes are transactionally mirrored into V2 while V1
+  remains the fallback read lane. This mode requires
+  `agentToolProfile: "v2-write"` and disables legacy update/forget tools;
+  automatic legacy writers must remain off.
+- `cutover`: the native V2 ContextEngine becomes the recall authority. OpenClaw
+  must select the plugin with `plugins.slots.contextEngine: "clawlore"` and the
+  plugin must request `runtime.contextEngine: "native-opt-in"`. The store-only
+  dual-write path remains active through the rollback observation window.
+
+Run the final read-only data gate before requesting cutover:
+
+```bash
+npm run preflight:clawlore-v2-cutover -- /absolute/path/memory.sqlite3
+```
+
+`cutoverReady` allows the native V2 recall transition. The stricter
+`v1RetirementReady` additionally proves that V1 has no unmapped truth, content
+divergence, unresolved ownership, undisposed candidates, projection drift, or
+pending outbox work. V1 is not a permanent peer: after a bounded rollback
+window and a green retirement receipt, it becomes an offline migration/archive
+format and leaves the normal runtime.
+
 ## Operator CLI
 
 The OpenClaw operator CLI includes the 1.0.26 partial adoption of Yuheng 1.6.0 maintenance concepts in OpenClaw-native terms:

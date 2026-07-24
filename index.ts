@@ -70,6 +70,7 @@ import {
   resolveCliPluginConfig,
 } from "./src/core-memory-runtime.js";
 import { registerClawLoreShadowRuntime } from "./src/runtime-shadow-registration.js";
+import { runtimeV2MirrorToolContext } from "./src/v2/storage/runtime-v1-v2-mirror.js";
 import { resolveRuntimeDiagnosticFile } from "./src/runtime-diagnostic-receipt.js";
 import { ReflectionRuntimeState } from "./src/reflection-runtime-state.js";
 import { registerAutoRecallHooks } from "./src/auto-recall-hooks.js";
@@ -405,9 +406,11 @@ const clawLorePlugin = {
         mdMirror,
         workspaceBoundary: config.workspaceBoundary,
         principalIsolation: config.principalIsolation,
+        ...runtimeV2MirrorToolContext(join(resolvedDbPath, "memory.sqlite3"), runtimeDiagnostic.v2WritesEnabled),
       },
       {
         allowAgentMemoryWriteTools: agentTools.memoryWrites,
+        allowAgentMemoryLifecycleTools: agentTools.memoryLifecycleWrites,
         enableManagementTools: agentTools.operator,
         enableSelfImprovementTools: agentTools.selfImprovement,
         secretIndexToolsEnabled: agentTools.secretIndex,
