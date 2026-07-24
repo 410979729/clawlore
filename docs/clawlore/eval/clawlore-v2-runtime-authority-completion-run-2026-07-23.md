@@ -3,6 +3,7 @@
 - Date: 2026-07-23
 - Candidate: `fix/clawlore-v2-cutover-20260723`
 - Base: `aa95b9be6a954dd62b092c6cdce664df555700ad`
+- Verified candidate commit: `780b6674b2a77ca9f496099d5a06768e7a86ae91`
 - Candidate version: 1.2.3
 - Scope: source, tests, package, and operator contract only
 - Live/config/service/GitHub mutation: none
@@ -46,7 +47,23 @@ PATH=/usr/bin:$PATH npm test
 
 PATH=/usr/bin:$PATH npm pack --dry-run --json
 clawlore-1.2.3.tgz; 303 files; required V2 runtime/preflight files present
+
+PATH=/usr/bin:$PATH npm run release:prepush
+PASS (non-authorizing)
 ```
+
+The complete pre-push gate reports:
+
+- release input: 870 files,
+  `f2007ad0e86ab2f4a19c2751c7ae7774f1b7cb248c7ece6c955e771ba2ff9da5`;
+- runtime digest:
+  `bc071f8c389b7329d99580dc90e93c2e8e1551d7f65582f9c73e280b7758abd4`;
+- package lock:
+  `aee57492e4f54a54156b0a4d8f2ff2a70225ccd63bc3bbfc8188e1b4333b004f`;
+- 303 packaged files and all packed runtime/LanceDB/legacy/OpenClaw CLI
+  smokes passing;
+- 44-component CycloneDX SBOM and zero supply-chain vulnerabilities;
+- `publicationVerified: false`, as required before an authorized push/release.
 
 The real-store canary regression writes the SILVER-ORBIT fixture and proves
 immediate exact lexical visibility. The runtime mirror regression proves the
@@ -71,5 +88,5 @@ access is explicit migration/archive tooling.
 - Historical Phase 9 `no_cutover` evidence remains historical truth for the
   earlier dataset; it is not rewritten to manufacture a current GO.
 
-Final release-gate and commit identities are appended after the clean candidate
-is committed.
+The candidate is clean and committed locally. External publication and live
+activation remain separate authorized operations.
