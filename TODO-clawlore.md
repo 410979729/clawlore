@@ -27,11 +27,20 @@ Updated: 2026-07-23
       release boundary, include the cutover preflight in the package, and pass
       typecheck, build, 649 tests (647 pass, 0 fail, 2 platform skips), and a
       303-file package inventory.
+- [x] Correct the archived-row FTS preflight contract and rerun the complete
+      release gate against final source commit
+      `0f37ad1915403669398b2d309f5e28743f266707`. The final runtime digest is
+      `c7a939a88afab2bf142612d9edee70136739dd5a4174a40d7c2b63147ba30317`;
+      live read-only inspection reports FTS 991/991 with integrity and foreign
+      keys clean.
 - [ ] Production V2 activation remains a separate high-impact rollout. It
       requires controlled authorization, fresh encrypted snapshots, exact live
       principal/lifecycle/content convergence, a cutover readiness receipt,
       `plugins.slots.contextEngine: "clawlore"`, restart, real-channel
-      acceptance, and a later V1-retirement observation window.
+      acceptance, and a later V1-retirement observation window. The controlled
+      verifier remains absent as of the final 2026-07-23 check; live blockers
+      are 87 unmirrored V1 rows, 991 unresolved principals, zero active verified
+      rows, 45 content divergences, and 566 undisposed candidates.
 
 ## 2026-07-22 P8 production-GO preflight
 

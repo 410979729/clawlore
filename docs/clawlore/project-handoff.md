@@ -24,10 +24,19 @@ Validation before the final release gate: Node 24.15.0 typecheck/build pass;
 inventory contains 303 files including the cutover CLI and all new runtime
 modules. The detailed run is
 `docs/clawlore/eval/clawlore-v2-runtime-authority-completion-run-2026-07-23.md`.
+The archived-FTS correction is final source commit
+`0f37ad1915403669398b2d309f5e28743f266707`; the complete gate remains green
+with runtime digest
+`c7a939a88afab2bf142612d9edee70136739dd5a4174a40d7c2b63147ba30317`.
 
 This is source engineering completion, not a live cutover claim. Live data,
 configuration, service restart, external Tag/Release publication, and V1
-retirement were not changed by this source task.
+retirement were not changed by this source task. The final live read-only
+preflight reports FTS 991/991, integrity/FK clean, and five remaining
+production blockers: 87 unmirrored V1 rows, 991 unresolved principals, zero
+active verified V2 rows, 45 content divergences, and 566 undisposed
+candidates. The controlled secondary verifier remains unconfigured, so no
+production mutation is authorized from the current private chat.
 
 Current through Phase 9, H1-H5 production hardening, the R1 canonical identity
 transition, R2 brand/architecture bundle 5, the 2026-07-19 live rollout, and
