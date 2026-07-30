@@ -32,7 +32,7 @@ import { resolveRejectedAuditFilePath, } from "./src/admission-control.js";
 import { ensureExperienceSchema } from "./src/experience-store.js";
 import { registerMarkdownCompatibility } from "./src/markdown-compat.js";
 import { createMdMirrorWriter } from "./src/markdown-mirror.js";
-import { createConfiguredLlmRuntime, createCoreMemoryRuntime, getDefaultWorkspaceDir, resolveCliPluginConfig, } from "./src/core-memory-runtime.js";
+import { createCoreMemoryRuntime, getDefaultWorkspaceDir, resolveCliPluginConfig, } from "./src/core-memory-runtime.js";
 import { registerClawLoreShadowRuntime } from "./src/runtime-shadow-registration.js";
 import { runtimeV2MirrorToolContext } from "./src/v2/storage/runtime-v1-v2-mirror.js";
 import { resolveRuntimeDiagnosticFile } from "./src/runtime-diagnostic-receipt.js";
@@ -43,6 +43,7 @@ import { registerTaskExperienceHooks } from "./src/task-experience-hooks.js";
 import { registerSelfImprovementHooks } from "./src/self-improvement-hooks.js";
 import { registerReflectionHooks } from "./src/reflection-hooks.js";
 import { effectiveAgentToolCapabilities } from "./src/agent-tool-profile.js";
+import { initializeBackgroundLlmRuntime } from "./src/background-llm-runtime.js";
 // ============================================================================
 // Default Configuration
 // ============================================================================
@@ -170,16 +171,15 @@ const clawLorePlugin = {
         });
         // Initialize smart extraction
         let smartExtractor = null;
-        let llmClientForExtraction = null;
-        if (config.smartExtraction === true) {
+        const logReg = isCliRegistrationMode(api) ? api.logger.debug : api.logger.info;
+        const backgroundLlmRuntime = initializeBackgroundLlmRuntime({ api, config, logRegistration: logReg });
+        if (config.smartExtraction === true && backgroundLlmRuntime) {
             try {
-                const { client: llmClient, model: llmModel, timeoutMs: llmTimeoutMs } = createConfiguredLlmRuntime(api, config);
-                llmClientForExtraction = llmClient;
                 // Initialize embedding-based noise prototype bank (async, non-blocking)
                 const noiseBank = new NoisePrototypeBank((msg) => api.logger.debug(msg));
                 noiseBank.init(embedder).catch((err) => api.logger.debug(`clawlore: noise bank init: ${diagnosticErrorSummary(err)}`));
                 const admissionRejectionAuditWriter = createAdmissionRejectionAuditWriter(config, resolvedDbPath, api);
-                smartExtractor = new SmartExtractor(store, embedder, llmClient, {
+                smartExtractor = new SmartExtractor(store, embedder, backgroundLlmRuntime.client, {
                     user: "User",
                     extractMinMessages: config.extractMinMessages ?? 4,
                     extractMaxChars: config.extractMaxChars ?? 8000,
@@ -192,9 +192,9 @@ const clawLorePlugin = {
                     noiseBank,
                 });
                 (isCliRegistrationMode(api) ? api.logger.debug : api.logger.info)("clawlore: smart extraction enabled (LLM model: "
-                    + llmModel
+                    + backgroundLlmRuntime.model
                     + ", timeoutMs: "
-                    + llmTimeoutMs
+                    + backgroundLlmRuntime.timeoutMs
                     + ", noise bank: ON)");
             }
             catch (err) {
@@ -240,7 +240,6 @@ const clawLorePlugin = {
                 }),
             };
         };
-        const logReg = isCliRegistrationMode(api) ? api.logger.debug : api.logger.info;
         logReg(`clawlore@${pluginVersion}: plugin registered (db: ${resolvedDbPath}, model: ${embeddingModel}, vectorBackend: ${config.vectorBackend || "lancedb"}, smartExtraction: ${smartExtractor ? 'ON' : 'OFF'})`);
         logReg(`clawlore: diagnostic build tag loaded (${diagnosticBuildTag})`);
         api.on("message_received", (event, ctx) => {
@@ -354,7 +353,7 @@ const clawLorePlugin = {
             resolveWorkspaceDir: resolveWorkspaceDirFromContext,
         });
         registerTaskExperienceHooks({
-            api, config, store, embedder, scopeManager, llmClient: llmClientForExtraction, mdMirror,
+            api, config, store, embedder, scopeManager, llmClient: backgroundLlmRuntime?.client ?? null, mdMirror,
             resolveRuntimeAccess: runtimeMemoryAccessFor, isInternalSession: isInternalReflectionSessionKey,
             logRegistration: logReg,
         });

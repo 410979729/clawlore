@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- Made write-capable runtime readiness durable without weakening the initial
+  cutover gate. The first activation and every code/configuration change still
+  require a fresh receipt bound to the exact SQL truth snapshot; later
+  restarts may tolerate only normal truth writes and receipt expiry through a
+  release/config/test-bound authority marker stored in the same SQLite truth
+  database. Missing, malformed, or changed receipt/authority data fails closed.
+- Corrected runtime diagnostics for disabled, shadow, V2-write, cutover, and
+  resolved-auto modes, including durable-authority reporting and live process
+  leases.
+- Delegated native ContextEngine compaction back to OpenClaw, decoupled Task
+  Experience review from smart extraction, and extended exact transcript
+  digest input to current `session_windows` stores.
+- Hardened Windows startup and release lanes with a five-minute refreshed
+  private-file lock, real DACL checks for transcript SQLite companions, and
+  private user-profile test and release-gate roots.
+- Made packed-runtime release smoke discover OpenClaw from both sibling
+  `state`/`app` and nested `home/state` layouts, while explicit targets remain
+  authoritative and ambiguous installations fail closed.
+
 ## 2.0.0 - 2026-07-24
 
 - Made fresh installations V2-native by default. A genuinely empty store gets

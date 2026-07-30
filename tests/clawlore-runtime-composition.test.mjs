@@ -149,6 +149,23 @@ test("runtime config accepts the deprecated alias but rejects ambiguous dual inp
 
 test("native cutover engine injects only policy-eligible active private V2 memory", async () => {
   let boundary;
+  let delegatedCompaction;
+  const compactInput = {
+    sessionId: "session-1",
+    sessionKey: "agent:main:telegram:default:direct:8176453077",
+    agentId: "main",
+    tokenBudget: 128,
+    force: true,
+  };
+  const compactResult = {
+    ok: true,
+    compacted: true,
+    result: {
+      summary: "delegated summary",
+      tokensBefore: 512,
+      tokensAfter: 96,
+    },
+  };
   const engine = createClawLoreNativeContextEngineV1({
     version: "1.2.3",
     tenantId: "local",
@@ -187,6 +204,10 @@ test("native cutover engine injects only policy-eligible active private V2 memor
         },
       ];
     },
+    compactionDelegate: async (input) => {
+      delegatedCompaction = input;
+      return compactResult;
+    },
   });
   assert.equal(engine.info.id, "clawlore");
 
@@ -206,11 +227,8 @@ test("native cutover engine injects only policy-eligible active private V2 memor
     sessionId: "session-1",
     message: { role: "user", content: "do not persist transcript implicitly" },
   }), { ingested: false });
-  assert.deepEqual(await engine.compact(), {
-    ok: true,
-    compacted: false,
-    reason: "host_owned_compaction",
-  });
+  assert.deepEqual(await engine.compact(compactInput), compactResult);
+  assert.deepEqual(delegatedCompaction, compactInput);
 });
 
 test("native cutover engine fails closed for group and unresolved sessions", async () => {

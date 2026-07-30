@@ -1,6 +1,49 @@
 # ClawLore v1 TODO
 
-Updated: 2026-07-23
+Updated: 2026-07-30
+
+## 2026-07-30 runtime closure and Windows release lane
+
+- [x] Replace the shadow-only runtime diagnostic assumptions with explicit
+      disabled, shadow, v2-write, cutover, and auto-resolution contracts.
+      Healthy cutover receipts no longer fail doctor merely because writes,
+      prompt mutation, and the native Context Engine are intentionally active.
+- [x] Delegate native Context Engine compaction to OpenClaw's stock runtime
+      bridge. The engine remains non-owning, but manual and overflow-triggered
+      compaction can no longer return a successful no-op.
+- [x] Decouple Task Experience review from `smartExtraction`. Both features
+      share one configured background LLM transport while retaining independent
+      switches and diagnostics.
+- [x] Raise the Windows private-file-lock stale interval to five minutes with a
+      30-second refresh, covering the observed near-150-second native startup
+      stall. A two-process regression proves the old 10-second takeover window
+      no longer steals a healthy lock.
+- [x] Make the Windows test lane use a per-run private user-profile temp root,
+      discover Git for Windows when a service shell omits it from PATH, and
+      mark the two POSIX-only permission suites as platform skips. The complete
+      suite passes: 683 tests, 664 pass, 0 fail, 19 conditional/platform skips.
+- [x] Resolve the real OpenClaw host package in both sibling Windows
+      `state`/`app` and nested Linux `home/state` layouts before the expensive
+      gate begins; explicit targets win and multiple inferred installs fail
+      closed.
+- [x] Make readiness generation follow the final configured runtime mode
+      instead of hard-coding shadow. Auto mode now requires an explicit safe
+      resolution; write-mode evidence fails closed; prior quality evidence is
+      reusable only across the same unexpired mode, config digest, and SQL
+      truth snapshot.
+- [x] Restore the safe nightly-digest input path against current OpenClaw
+      agent SQLite. The exact-session reader now supports `session_windows`
+      as well as legacy `sessions`, and Windows database/WAL/SHM privacy checks
+      verify the real DACL instead of treating mode bits as sufficient.
+- [x] Replace the expiring mutable-snapshot restart trap with a durable
+      write-runtime release authority. First activation and every release or
+      config change still require a fresh exact truth-bound receipt; later
+      restarts tolerate only normal truth drift and expiry while receipt,
+      runtime, package, lockfile, config, and test bindings stay unchanged.
+- [ ] Publish the clean source commit, bind new release provenance/readiness to
+      that reachable commit, take fresh encrypted live snapshots, deploy with a
+      reversible backup, restart once, and complete live doctor/recall/write,
+      backup-maintenance, ACL, and real-channel acceptance checks.
 
 ## 2026-07-23 V2 runtime authority completion
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 import test from "node:test";
@@ -21,6 +21,7 @@ const {
 const { createRuntimeDiagnosticLeaseController } = jiti("../src/runtime-shadow-registration.ts");
 
 const configDigest = artifactBinding().configDigest;
+const privateFixtureParent = process.platform === "win32" ? homedir() : tmpdir();
 
 function readiness(expiresAt = "2026-07-21T00:00:00.000Z") {
   const provenance = { ...releaseProvenance(), expiresAt };
@@ -51,8 +52,37 @@ function registeredRuntime() {
   };
 }
 
+function registeredRuntimeForMode(mode) {
+  const contracts = {
+    shadow: {
+      registeredHooks: ["message_received"],
+      writeEnabled: false,
+      promptMutationEnabled: false,
+      contextEngineRegistered: false,
+    },
+    "v2-write": {
+      registeredHooks: [],
+      writeEnabled: true,
+      promptMutationEnabled: false,
+      contextEngineRegistered: false,
+    },
+    cutover: {
+      registeredHooks: [],
+      writeEnabled: true,
+      promptMutationEnabled: true,
+      contextEngineRegistered: true,
+    },
+  };
+  return {
+    status: "registered",
+    requestedMode: mode,
+    ...contracts[mode],
+    blockingReasons: [],
+  };
+}
+
 test("matching shadow runtime receipt proves one read-only registered hook", async () => {
-  const root = await mkdtemp(join(tmpdir(), "clawlore-runtime-diagnostic-"));
+  const root = await mkdtemp(join(privateFixtureParent, "clawlore-runtime-diagnostic-"));
   try {
     const file = join(root, "runtime.json");
     const receipt = buildRuntimeDiagnosticReceipt({
@@ -82,8 +112,86 @@ test("matching shadow runtime receipt proves one read-only registered hook", asy
   }
 });
 
+test("v2-write and cutover receipts are assessed against their effective contracts", async () => {
+  const root = await mkdtemp(join(privateFixtureParent, "clawlore-runtime-diagnostic-"));
+  try {
+    const file = join(root, "runtime.json");
+    for (const mode of ["v2-write", "cutover"]) {
+      await writeRuntimeDiagnosticReceipt(file, buildRuntimeDiagnosticReceipt({
+        configDigest,
+        binding: artifactBinding(),
+        readiness: readiness(),
+        readinessErrors: [],
+        runtime: registeredRuntimeForMode(mode),
+        now: () => new Date("2026-07-19T00:01:00.000Z"),
+      }));
+      const report = await assessRuntimeDiagnostic({
+        file,
+        configuredMode: mode,
+        configDigest,
+        now: () => new Date("2026-07-19T00:01:20.000Z"),
+        processIdentityProbe: () => "match",
+      });
+      assert.equal(report.ok, true, `${mode}: ${report.issues.join(",")}`);
+      assert.equal(report.status, "registered");
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("auto mode accepts its resolved disabled or cutover receipt", async () => {
+  const root = await mkdtemp(join(privateFixtureParent, "clawlore-runtime-diagnostic-"));
+  try {
+    const file = join(root, "runtime.json");
+    await writeRuntimeDiagnosticReceipt(file, buildRuntimeDiagnosticReceipt({
+      configDigest,
+      binding: artifactBinding(),
+      readiness: readiness(),
+      readinessErrors: [],
+      runtime: registeredRuntimeForMode("cutover"),
+      now: () => new Date("2026-07-19T00:01:00.000Z"),
+    }));
+    const cutover = await assessRuntimeDiagnostic({
+      file,
+      configuredMode: "auto",
+      configDigest,
+      now: () => new Date("2026-07-19T00:01:20.000Z"),
+      processIdentityProbe: () => "match",
+    });
+    assert.equal(cutover.ok, true, cutover.issues.join(","));
+    assert.equal(cutover.status, "registered");
+
+    await writeRuntimeDiagnosticReceipt(file, buildRuntimeDiagnosticReceipt({
+      configDigest,
+      readinessErrors: [],
+      runtime: {
+        status: "disabled",
+        requestedMode: "disabled",
+        registeredHooks: [],
+        writeEnabled: false,
+        promptMutationEnabled: false,
+        contextEngineRegistered: false,
+        blockingReasons: [],
+      },
+      now: () => new Date("2026-07-19T00:01:00.000Z"),
+    }));
+    const disabled = await assessRuntimeDiagnostic({
+      file,
+      configuredMode: "auto",
+      configDigest,
+      now: () => new Date("2026-07-19T00:10:00.000Z"),
+      processIdentityProbe: () => "dead",
+    });
+    assert.equal(disabled.ok, true, disabled.issues.join(","));
+    assert.equal(disabled.status, "disabled");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("expired or config-mismatched shadow receipts fail closed", async () => {
-  const root = await mkdtemp(join(tmpdir(), "clawlore-runtime-diagnostic-"));
+  const root = await mkdtemp(join(privateFixtureParent, "clawlore-runtime-diagnostic-"));
   try {
     const file = join(root, "runtime.json");
     await writeRuntimeDiagnosticReceipt(file, buildRuntimeDiagnosticReceipt({
@@ -109,8 +217,55 @@ test("expired or config-mismatched shadow receipts fail closed", async () => {
   }
 });
 
+test("durable release verification tolerates receipt expiry only for write modes", async () => {
+  const root = await mkdtemp(join(privateFixtureParent, "clawlore-runtime-diagnostic-"));
+  try {
+    const file = join(root, "runtime.json");
+    await writeRuntimeDiagnosticReceipt(file, buildRuntimeDiagnosticReceipt({
+      configDigest,
+      binding: artifactBinding(),
+      readiness: readiness("2026-07-19T00:01:10.000Z"),
+      readinessVerification: "durable-release",
+      readinessErrors: [],
+      runtime: registeredRuntimeForMode("cutover"),
+      now: () => new Date("2026-07-19T00:01:00.000Z"),
+    }));
+    const cutover = await assessRuntimeDiagnostic({
+      file,
+      configuredMode: "cutover",
+      configDigest,
+      now: () => new Date("2026-07-19T00:01:20.000Z"),
+      processIdentityProbe: () => "match",
+    });
+    assert.equal(cutover.ok, true, cutover.issues.join(","));
+    assert.equal(cutover.receipt.readiness.verification, "durable-release");
+    assert.equal(cutover.issues.includes("runtime_diagnostic_readiness_expired"), false);
+
+    await writeRuntimeDiagnosticReceipt(file, buildRuntimeDiagnosticReceipt({
+      configDigest,
+      binding: artifactBinding(),
+      readiness: readiness("2026-07-19T00:01:10.000Z"),
+      readinessVerification: "durable-release",
+      readinessErrors: [],
+      runtime: registeredRuntime(),
+      now: () => new Date("2026-07-19T00:01:00.000Z"),
+    }));
+    const shadow = await assessRuntimeDiagnostic({
+      file,
+      configuredMode: "shadow",
+      configDigest,
+      now: () => new Date("2026-07-19T00:01:20.000Z"),
+      processIdentityProbe: () => "match",
+    });
+    assert.equal(shadow.ok, false);
+    assert.ok(shadow.issues.includes("runtime_diagnostic_durable_authority_mode_invalid"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("dead, reused, or unverifiable Gateway process identities fail closed", async () => {
-  const root = await mkdtemp(join(tmpdir(), "clawlore-runtime-diagnostic-"));
+  const root = await mkdtemp(join(privateFixtureParent, "clawlore-runtime-diagnostic-"));
   try {
     const file = join(root, "runtime.json");
     const receipt = buildRuntimeDiagnosticReceipt({
@@ -158,7 +313,7 @@ test("dead, reused, or unverifiable Gateway process identities fail closed", asy
 });
 
 test("runtime heartbeat is a short renewable lease and stop invalidates it immediately", async () => {
-  const root = await mkdtemp(join(tmpdir(), "clawlore-runtime-diagnostic-"));
+  const root = await mkdtemp(join(privateFixtureParent, "clawlore-runtime-diagnostic-"));
   try {
     const file = join(root, "runtime.json");
     const instance = createRuntimeInstanceIdentity();
@@ -215,7 +370,7 @@ test("runtime heartbeat is a short renewable lease and stop invalidates it immed
 });
 
 test("one runtime service object can recover through start stop start", async () => {
-  const root = await mkdtemp(join(tmpdir(), "clawlore-runtime-restart-"));
+  const root = await mkdtemp(join(privateFixtureParent, "clawlore-runtime-restart-"));
   const file = join(root, "runtime.json");
   const warnings = [];
   const baseReceipt = buildRuntimeDiagnosticReceipt({
@@ -269,7 +424,7 @@ test("disabled mode is healthy without a runtime receipt", async () => {
 });
 
 test("disabled mode ignores an expired stopped lease but rejects a shadow receipt", async () => {
-  const root = await mkdtemp(join(tmpdir(), "clawlore-runtime-diagnostic-"));
+  const root = await mkdtemp(join(privateFixtureParent, "clawlore-runtime-diagnostic-"));
   try {
     const file = join(root, "runtime.json");
     const disabled = buildRuntimeDiagnosticReceipt({

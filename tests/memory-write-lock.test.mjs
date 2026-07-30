@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { appendFile, mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import test from "node:test";
@@ -55,7 +55,11 @@ if (CHILD_MODE) {
   await runLockChild();
 } else {
   test("memory write lock serializes independent processes and keeps the lock file private", async () => {
-    const root = await mkdtemp(join(tmpdir(), "clawlore-memory-write-lock-"));
+    // Windows temp roots may inherit an ACL that intentionally fails the
+    // plugin's private-path guard. The user profile is the production-like
+    // location for this privacy assertion.
+    const fixtureParent = process.platform === "win32" ? homedir() : tmpdir();
+    const root = await mkdtemp(join(fixtureParent, "clawlore-memory-write-lock-"));
     const dbPath = join(root, "vector");
     const logPath = join(root, "critical-sections.log");
     await mkdir(dbPath, { mode: 0o700 });
@@ -75,8 +79,17 @@ if (CHILD_MODE) {
       assert.equal(lines[3], `exit:${secondId}`);
       assert.notEqual(firstId, secondId);
 
-      const lockInfo = await stat(join(dbPath, ".memory-write.lock"));
-      assert.equal(lockInfo.mode & 0o777, 0o600);
+      const lockPath = join(dbPath, ".memory-write.lock");
+      if (process.platform === "win32") {
+        const require = createRequire(import.meta.url);
+        const { createJiti } = require("jiti");
+        const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: false });
+        const { verifyPrivatePath } = jiti("../src/file-privacy.ts");
+        assert.doesNotThrow(() => verifyPrivatePath(lockPath, { platform: "win32" }));
+      } else {
+        const lockInfo = await stat(lockPath);
+        assert.equal(lockInfo.mode & 0o777, 0o600);
+      }
     } finally {
       await rm(root, { recursive: true, force: true });
     }

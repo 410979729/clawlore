@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 import { chmod, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createJiti } from "jiti";
+import { privateTemporaryParent } from "./private-temporary-environment.mjs";
 
 const jiti = createJiti(import.meta.url);
 const {
@@ -38,7 +38,10 @@ function opaquePath(path) {
 const args = parseArgs(process.argv.slice(2));
 const sourcePath = resolve(args.source);
 const receiptPath = resolve(args.receipt);
-const root = await mkdtemp(join(tmpdir(), "clawlore-live-preflight-"));
+const root = await mkdtemp(join(
+  privateTemporaryParent(),
+  ".clawlore-live-preflight-",
+));
 await chmod(root, 0o700);
 const snapshotPath = join(root, "legacy-snapshot.sqlite3");
 

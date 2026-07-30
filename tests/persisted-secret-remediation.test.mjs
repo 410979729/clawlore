@@ -42,7 +42,11 @@ class PartiallyFailingVectorPort extends FakeVectorPort {
   }
 }
 
-test("persisted-secret remediation is digest-bound, snapshot-gated, and converges across stores", async () => {
+test("persisted-secret remediation is digest-bound, snapshot-gated, and converges across stores", {
+  skip: process.platform === "win32"
+    ? "POSIX permission-mode remediation is intentionally blocked on Windows"
+    : false,
+}, async () => {
   const root = await mkdtemp(join(tmpdir(), "clawlore-secret-remediation-"));
   const memoryDbPath = join(root, "memory.sqlite3");
   const conversationDbPath = join(root, "conversation.sqlite3");

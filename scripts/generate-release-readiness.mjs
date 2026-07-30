@@ -4,6 +4,11 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { createJiti } from "jiti";
 import { assertFinalReadinessPointer } from "./release-readiness-path.mjs";
+import {
+  releaseEvidenceFromEnvironment,
+  resolveReleaseReadinessMode,
+  shadowEvidenceFromPriorReadiness,
+} from "./release-readiness-input.mjs";
 
 const root = process.cwd();
 const jiti = createJiti(import.meta.url);
@@ -97,24 +102,25 @@ mkdirSync(resolve(root, "dist"), { recursive: true });
 writeFileSync(resolve(root, "dist", BUILD_PROVENANCE_FILE), `${JSON.stringify(buildProvenance, null, 2)}\n`, { mode: 0o644 });
 
 const binding = computeRuntimeReleaseBinding({ pluginRoot: root, config, sqlitePath });
-const gatesPassed = process.env.CLAWLORE_RELEASE_GATES_PASSED === "1";
-const evidence = {
-  focusedTests: gatesPassed,
-  fullTests: gatesPassed,
-  typecheck: gatesPassed,
-  build: gatesPassed,
-  moduleBoundaries: gatesPassed,
-  releaseGate: gatesPassed,
-  snapshotVerified: false,
-  migrationDrill: false,
-  rollbackDrill: false,
-  legacyHashUnchanged: false,
-  forbiddenScopeViolations: 0,
-};
+const rolloutMode = resolveReleaseReadinessMode(config.runtime?.mode);
+const evidence = releaseEvidenceFromEnvironment(rolloutMode);
+const tracePath = process.env.CLAWLORE_TRACE?.trim();
+const priorReadinessPath = process.env.CLAWLORE_PRIOR_READINESS?.trim();
+if (tracePath && priorReadinessPath) {
+  throw new Error("CLAWLORE_TRACE and CLAWLORE_PRIOR_READINESS are mutually exclusive");
+}
+const observedShadow = tracePath
+  ? shadowEvidence(tracePath)
+  : priorReadinessPath
+    ? shadowEvidenceFromPriorReadiness(
+        JSON.parse(readFileSync(resolve(priorReadinessPath), "utf8")),
+        { mode: rolloutMode, binding, now: createdAt },
+      )
+    : shadowEvidence();
 const receipt = buildReleaseReadinessReceipt({
   rolloutId: `clawlore-${sourceCommit.slice(0, 12)}-${createdAt.toISOString()}`,
-  requestedMode: "shadow",
-  currentMode: "shadow",
+  requestedMode: rolloutMode,
+  currentMode: rolloutMode,
   evidence,
   compatibilityFailures: [],
   provenance: {
@@ -129,7 +135,7 @@ const receipt = buildReleaseReadinessReceipt({
     createdAt: createdAt.toISOString(),
     expiresAt: new Date(createdAt.getTime() + expiresHours * 60 * 60 * 1000).toISOString(),
     lifecycle: binding.lifecycle,
-    shadow: shadowEvidence(process.env.CLAWLORE_TRACE),
+    shadow: observedShadow,
   },
   now: () => createdAt,
 });

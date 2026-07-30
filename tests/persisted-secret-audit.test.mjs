@@ -7,7 +7,11 @@ import test from "node:test";
 import * as lancedb from "@lancedb/lancedb";
 import { auditPersistedSecrets } from "../scripts/clawlore-persisted-secret-audit.mjs";
 
-test("persisted-secret audit is read-only and emits only counts", async () => {
+test("persisted-secret audit is read-only and emits only counts", {
+  skip: process.platform === "win32"
+    ? "POSIX permission-mode assertions are unavailable on Windows"
+    : false,
+}, async () => {
   const root = await mkdtemp(join(tmpdir(), "clawlore-persisted-secret-audit-"));
   const memoryPath = join(root, "memory.sqlite3");
   const conversationPath = join(root, "conversation.sqlite3");

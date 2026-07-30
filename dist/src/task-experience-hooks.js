@@ -23,7 +23,7 @@ export function registerTaskExperienceHooks(params) {
                 if (access.denied)
                     return;
                 if (!params.llmClient) {
-                    api.logger.debug("task-experience: skipped because smart extraction LLM client is unavailable");
+                    api.logger.debug("task-experience: skipped because the configured review LLM is unavailable");
                     return;
                 }
                 const defaultScope = access.defaultScope ?? (isSystemBypassId(agentId)

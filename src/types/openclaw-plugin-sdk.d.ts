@@ -64,6 +64,46 @@ declare module "openclaw/plugin-sdk/config-types" {
 declare module "openclaw/plugin-sdk/core" {
   import type { SecretRef } from "openclaw/plugin-sdk/config-types";
   export function isSecretRef(value: unknown): value is SecretRef;
+  export function delegateCompactionToRuntime(params: {
+    sessionId: string;
+    sessionKey: string;
+    agentId?: string;
+    sessionTarget?: {
+      agentId?: string;
+      sessionId?: string;
+      sessionKey?: string;
+      storePath?: string;
+      threadId?: string | number;
+    };
+    tokenBudget?: number;
+    force?: boolean;
+    currentTokenCount?: number;
+    compactionTarget?: "budget" | "threshold";
+    customInstructions?: string;
+    runtimeSettings?: Record<string, unknown>;
+    runtimeContext?: Record<string, unknown>;
+    abortSignal?: AbortSignal;
+  }): Promise<{
+    ok: boolean;
+    compacted: boolean;
+    reason?: string;
+    result?: {
+      summary?: string;
+      firstKeptEntryId?: string;
+      tokensBefore: number;
+      tokensAfter?: number;
+      details?: unknown;
+      sessionId?: string;
+      sessionTarget?: {
+        agentId?: string;
+        sessionId?: string;
+        sessionKey?: string;
+        storePath?: string;
+        threadId?: string | number;
+      };
+      sessionFile?: string;
+    };
+  }>;
 }
 
 declare module "openclaw/plugin-sdk/secret-ref-runtime" {

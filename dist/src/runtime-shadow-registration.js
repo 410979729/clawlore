@@ -8,6 +8,7 @@ import { createNativeShadowCandidateRetrieverV1, } from "./adapters/openclaw/nat
 import { createClawLoreNativeContextEngineV1 } from "./adapters/openclaw/native-context-engine.js";
 import { composeClawLoreRuntimeV1, normalizeClawLoreRuntimeConfigV1, } from "./adapters/openclaw/runtime-composition-root.js";
 import { loadRuntimeRolloutControlsV1 } from "./adapters/openclaw/runtime-rollout-control.js";
+import { authorizeRuntimeReleaseV1 } from "./runtime-release-authorization.js";
 import { filterUserMdExclusiveRecallResults } from "./workspace-boundary.js";
 import { runtimeTransitionPolicyBlocksV1 } from "./application/runtime-transition-policy.js";
 import { ensureFreshInstallV2AuthorityV1 } from "./fresh-install-v2-authority.js";
@@ -102,14 +103,27 @@ export function registerClawLoreShadowRuntime(params) {
         }
     }
     const rolloutControls = runtimeConfig.mode !== "disabled" && releaseBinding
-        ? loadRuntimeRolloutControlsV1({
-            readinessFile: config.runtime?.readinessFile
-                ? api.resolvePath(config.runtime.readinessFile)
-                : undefined,
-            expectedBinding: releaseBinding,
-            expectedMode: runtimeConfig.mode,
-        })
-        : { readiness: undefined, errors: bindingErrors };
+        ? ((runtimeConfig.mode === "v2-write" || runtimeConfig.mode === "cutover")
+            && !freshAuthority?.mayActivateWithoutMigrationReceipt
+            ? authorizeRuntimeReleaseV1({
+                sqlitePath: join(resolvedDbPath, "memory.sqlite3"),
+                readinessFile: config.runtime?.readinessFile
+                    ? api.resolvePath(config.runtime.readinessFile)
+                    : undefined,
+                expectedBinding: releaseBinding,
+                expectedMode: runtimeConfig.mode,
+            })
+            : loadRuntimeRolloutControlsV1({
+                readinessFile: config.runtime?.readinessFile
+                    ? api.resolvePath(config.runtime.readinessFile)
+                    : undefined,
+                expectedBinding: releaseBinding,
+                expectedMode: runtimeConfig.mode,
+            }))
+        : { readiness: undefined, verification: undefined, errors: bindingErrors };
+    if ("authorityRecorded" in rolloutControls && rolloutControls.authorityRecorded) {
+        api.logger.info("clawlore: durable runtime release authority recorded");
+    }
     if (rolloutControls.errors.length > 0) {
         api.logger.warn(`clawlore: shadow rollout controls blocked: ${rolloutControls.errors.join(",")}`);
     }
@@ -250,6 +264,7 @@ export function registerClawLoreShadowRuntime(params) {
         configDigest: canonicalDigest(config),
         binding: releaseBinding,
         readiness: rolloutControls.readiness,
+        readinessVerification: rolloutControls.verification,
         readinessErrors: rolloutControls.errors,
         runtime: receipt,
         instance,

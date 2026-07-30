@@ -317,6 +317,18 @@ receipt, set `runtime.mode: "cutover"` and
 `clawlore` engine id because OpenClaw uses the slot value for both plugin
 loading and engine resolution.
 
+On the first successful `v2-write` or `cutover` startup, ClawLore writes
+`clawlore_runtime_release_authority` transactionally into the same
+`memory.sqlite3`. This marker is not a replacement for the readiness file: the
+private receipt must remain present and semantically unchanged. The marker
+allows later restarts to tolerate only normal truth-snapshot drift and the
+original receipt's expiry. Commit, runtime artifact, package, lockfile,
+normalized config, test evidence, mode, and receipt-body changes still block.
+A newly generated receipt may rotate the marker only while it is fresh, ready,
+and exactly bound to the current truth. Never edit, delete, or synthesize this
+table manually; malformed authority is a fail-closed condition. Include the
+table in every SQLite backup and restore.
+
 Do not delete or stop preserving V1 merely because cutover succeeds. Keep the
 verified rollback snapshot and read-only V1 lane for the approved observation
 window. Retire V1 from the normal runtime only when a fresh preflight reports
