@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 import test from "node:test";
@@ -39,7 +39,8 @@ function readiness() {
 }
 
 test("rollout controls require one private readiness file", async () => {
-  const root = await mkdtemp(join(tmpdir(), "clawlore-rollout-control-"));
+  const privateFixtureParent = process.platform === "win32" ? homedir() : tmpdir();
+  const root = await mkdtemp(join(privateFixtureParent, "clawlore-rollout-control-"));
   try {
     const readinessFile = join(root, "readiness.json");
     await writeFile(readinessFile, `${JSON.stringify(readiness())}\n`, { mode: 0o600 });
@@ -48,6 +49,14 @@ test("rollout controls require one private readiness file", async () => {
     assert.deepEqual(loaded.errors, []);
     assert.equal(loaded.readiness?.status, "ready");
     verifyPrivatePath(readinessFile, { kind: "file" });
+
+    const invalidDurableShadow = loadRuntimeRolloutControlsV1({
+      readinessFile,
+      expectedBinding: artifactBinding(),
+      verification: "durable-release",
+    });
+    assert.deepEqual(invalidDurableShadow.errors, ["release_readiness_durable_mode_invalid"]);
+    assert.equal(invalidDurableShadow.readiness, undefined);
 
     const mismatched = loadRuntimeRolloutControlsV1({
       readinessFile,

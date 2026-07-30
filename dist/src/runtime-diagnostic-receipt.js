@@ -19,6 +19,36 @@ const WINDOWS_PROCESS_START_SCRIPT = Buffer.from([
     "$process=Get-Process -Id $pidValue -ErrorAction Stop",
     "[string]$process.StartTime.ToUniversalTime().Ticks",
 ].join(";"), "utf16le").toString("base64");
+const RUNTIME_DIAGNOSTIC_CONTRACTS = {
+    disabled: {
+        status: "disabled",
+        registeredHooks: [],
+        writeEnabled: false,
+        promptMutationEnabled: false,
+        contextEngineRegistered: false,
+    },
+    shadow: {
+        status: "registered",
+        registeredHooks: ["message_received"],
+        writeEnabled: false,
+        promptMutationEnabled: false,
+        contextEngineRegistered: false,
+    },
+    "v2-write": {
+        status: "registered",
+        registeredHooks: [],
+        writeEnabled: true,
+        promptMutationEnabled: false,
+        contextEngineRegistered: false,
+    },
+    cutover: {
+        status: "registered",
+        registeredHooks: [],
+        writeEnabled: true,
+        promptMutationEnabled: true,
+        contextEngineRegistered: true,
+    },
+};
 function record(value) {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
         throw new Error("runtime_diagnostic_not_object");
@@ -82,6 +112,12 @@ function parseRuntimeDiagnosticReceipt(value) {
     const requestedMode = runtime.requestedMode;
     const runtimeStatus = runtime.status;
     const readinessStatus = readiness.status;
+    const readinessVerification = readiness.verification
+        ?? (readinessStatus === "not_required"
+            ? "not_required"
+            : readinessStatus === "ready"
+                ? "full-receipt"
+                : "none");
     const generatedAt = isoTime(raw.generatedAt, "generated_at");
     const heartbeatAt = isoTime(lease.heartbeatAt, "heartbeat_at");
     const leaseExpiresAt = isoTime(lease.expiresAt, "lease_expiry");
@@ -93,6 +129,7 @@ function parseRuntimeDiagnosticReceipt(value) {
         || !["auto", "disabled", "shadow", "v2-write", "cutover"].includes(String(requestedMode))
         || !["disabled", "blocked", "registered"].includes(String(runtimeStatus))
         || !["not_required", "missing", "blocked", "ready"].includes(String(readinessStatus))
+        || !["not_required", "none", "full-receipt", "durable-release"].includes(String(readinessVerification))
         || typeof readiness.bindingVerified !== "boolean"
         || typeof runtime.registeredHookCount !== "number"
         || typeof runtime.writeEnabled !== "boolean"
@@ -117,6 +154,7 @@ function parseRuntimeDiagnosticReceipt(value) {
         readiness: {
             status: readinessStatus,
             bindingVerified: readiness.bindingVerified,
+            verification: readinessVerification,
             ...(readinessExpiresAt === undefined ? {} : { expiresAt: String(readinessExpiresAt) }),
             errors: stringArray(readiness.errors, "readiness_errors"),
         },
@@ -220,6 +258,11 @@ export function buildRuntimeDiagnosticReceipt(input) {
     if (!Number.isFinite(leaseMs) || leaseMs <= 0 || leaseMs > MAX_RUNTIME_DIAGNOSTIC_LEASE_MS) {
         throw new Error("runtime_diagnostic_lease_duration_invalid");
     }
+    const readinessVerification = mode === "disabled"
+        ? "not_required"
+        : input.readiness
+            ? input.readinessVerification ?? "full-receipt"
+            : "none";
     return parseRuntimeDiagnosticReceipt({
         schemaVersion: 2,
         generatedAt: now.toISOString(),
@@ -232,7 +275,10 @@ export function buildRuntimeDiagnosticReceipt(input) {
         binding: input.binding,
         readiness: {
             status: readinessStatus,
-            bindingVerified: mode === "disabled" || Boolean(input.readiness && input.readinessErrors.length === 0),
+            bindingVerified: mode === "disabled" || Boolean(input.readiness
+                && input.readinessErrors.length === 0
+                && readinessVerification !== "none"),
+            verification: readinessVerification,
             expiresAt: input.readiness?.provenance.expiresAt,
             errors: [...new Set(input.readinessErrors)].sort(),
         },
@@ -311,10 +357,18 @@ export async function assessRuntimeDiagnostic(input) {
     const issues = [];
     const now = input.now?.() ?? new Date();
     const nowMs = now.getTime();
-    if (receipt.runtime.requestedMode !== input.configuredMode)
+    const receiptMode = receipt.runtime.requestedMode;
+    const modeMatches = input.configuredMode === "auto"
+        ? receiptMode === "disabled" || receiptMode === "cutover"
+        : receiptMode === input.configuredMode;
+    if (!modeMatches)
         issues.push("runtime_diagnostic_mode_mismatch");
-    if (input.configuredMode === "disabled") {
-        if (receipt.runtime.status !== "disabled")
+    if (receiptMode === "auto")
+        issues.push("runtime_diagnostic_auto_mode_unresolved");
+    const effectiveMode = receiptMode === "auto" ? undefined : receiptMode;
+    if (effectiveMode === "disabled") {
+        const contract = RUNTIME_DIAGNOSTIC_CONTRACTS.disabled;
+        if (receipt.runtime.status !== contract.status)
             issues.push("runtime_diagnostic_disabled_status_mismatch");
         if (receipt.runtime.registeredHookCount !== 0)
             issues.push("runtime_diagnostic_disabled_hooks_present");
@@ -344,25 +398,47 @@ export async function assessRuntimeDiagnostic(input) {
             issues.push("runtime_diagnostic_readiness_not_ready");
         if (!receipt.readiness.bindingVerified)
             issues.push("runtime_diagnostic_binding_unverified");
+        if (receipt.readiness.verification === "none" || receipt.readiness.verification === "not_required") {
+            issues.push("runtime_diagnostic_readiness_verification_missing");
+        }
+        if (receipt.readiness.verification === "durable-release"
+            && effectiveMode !== "v2-write"
+            && effectiveMode !== "cutover") {
+            issues.push("runtime_diagnostic_durable_authority_mode_invalid");
+        }
         if (receipt.readiness.errors.length > 0)
             issues.push(...receipt.readiness.errors);
-        if (!receipt.readiness.expiresAt || Date.parse(receipt.readiness.expiresAt) <= nowMs) {
+        if (receipt.readiness.verification !== "durable-release"
+            && (!receipt.readiness.expiresAt || Date.parse(receipt.readiness.expiresAt) <= nowMs)) {
             issues.push("runtime_diagnostic_readiness_expired");
         }
-        if (receipt.runtime.status !== "registered")
+    }
+    if (effectiveMode) {
+        const contract = RUNTIME_DIAGNOSTIC_CONTRACTS[effectiveMode];
+        if (receipt.runtime.status !== contract.status && effectiveMode !== "disabled") {
             issues.push("runtime_diagnostic_not_registered");
-        if (receipt.runtime.registeredHookCount !== 1
-            || receipt.runtime.registeredHooks[0] !== "message_received") {
+        }
+        if (receipt.runtime.registeredHooks.length !== contract.registeredHooks.length
+            || receipt.runtime.registeredHooks.some((hook, index) => hook !== contract.registeredHooks[index])) {
             issues.push("runtime_diagnostic_hook_contract_mismatch");
         }
+        if (receipt.runtime.writeEnabled !== contract.writeEnabled) {
+            issues.push(contract.writeEnabled
+                ? "runtime_diagnostic_writes_disabled"
+                : "runtime_diagnostic_writes_enabled");
+        }
+        if (receipt.runtime.promptMutationEnabled !== contract.promptMutationEnabled) {
+            issues.push(contract.promptMutationEnabled
+                ? "runtime_diagnostic_prompt_mutation_disabled"
+                : "runtime_diagnostic_prompt_mutation_enabled");
+        }
+        if (receipt.runtime.contextEngineRegistered !== contract.contextEngineRegistered) {
+            issues.push(contract.contextEngineRegistered
+                ? "runtime_diagnostic_context_engine_not_registered"
+                : "runtime_diagnostic_context_engine_registered");
+        }
     }
-    if (receipt.runtime.writeEnabled)
-        issues.push("runtime_diagnostic_writes_enabled");
-    if (receipt.runtime.promptMutationEnabled)
-        issues.push("runtime_diagnostic_prompt_mutation_enabled");
-    if (receipt.runtime.contextEngineRegistered)
-        issues.push("runtime_diagnostic_context_engine_registered");
-    if (input.configuredMode !== "disabled" && receipt.runtime.blockingReasons.length > 0) {
+    if (effectiveMode !== "disabled" && receipt.runtime.blockingReasons.length > 0) {
         issues.push(...receipt.runtime.blockingReasons);
     }
     const uniqueIssues = [...new Set(issues)].sort();
@@ -371,7 +447,7 @@ export async function assessRuntimeDiagnostic(input) {
         ok: uniqueIssues.length === 0,
         status: uniqueIssues.length > 0
             ? "blocked"
-            : input.configuredMode === "disabled"
+            : effectiveMode === "disabled"
                 ? "disabled"
                 : "registered",
         configuredMode: input.configuredMode,

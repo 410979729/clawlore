@@ -28,13 +28,14 @@ function importedSpecifiers(source) {
 const ROOT_MODULES_BY_LAYER = {
   composition: [
     "adapters/openclaw/runtime-composition-root.ts",
-    "auto-capture-hooks.ts", "auto-recall-hooks.ts", "core-memory-runtime.ts", "plugin-config.ts",
+    "auto-capture-hooks.ts", "auto-recall-hooks.ts", "background-llm-runtime.ts", "core-memory-runtime.ts", "plugin-config.ts",
     "reflection-hooks.ts", "reflection-runtime-state.ts", "self-improvement-hooks.ts",
     "task-experience-hooks.ts",
+    "runtime-release-authorization.ts",
     "runtime-shadow-registration.ts",
   ],
   domain: [
-    "agent-tool-profile.ts", "auto-capture-policy.ts", "auto-recall-query.ts", "auto-recall-session-boundary.ts", "bounded-ttl-map.ts", "capture-safety.ts",
+    "agent-tool-profile.ts", "auto-capture-policy.ts", "auto-recall-query.ts", "auto-recall-session-boundary.ts", "background-llm-policy.ts", "bounded-ttl-map.ts", "capture-safety.ts",
     "decay-engine.ts", "experience-models.ts", "experience-persistence-policy.ts", "experience-playbook-successor-policy.ts", "experience-schemas.ts",
     "extraction-prompts.ts", "lifecycle-metadata.ts", "memory-categories.ts", "memory-egress-policy.ts", "memory-entry-write-policy.ts", "memory-merge-policy.ts", "memory-metadata-policy.ts", "noise-filter.ts",
     "manual-recall-confidence.ts", "manual-recall-lexical-evidence.ts", "noise-prototypes.ts", "preference-slots.ts", "product-identity.ts", "self-improvement-content-policy.ts",
@@ -46,6 +47,7 @@ const ROOT_MODULES_BY_LAYER = {
   application: [
     "application/context-composer.ts", "application/context-engine-session-identity.ts", "application/identity-resolver.ts",
     "application/legacy-address-mapper.ts", "application/policy-decision.ts",
+    "application/runtime-release-readiness-validation.ts",
     "application/runtime-transition-policy.ts",
     "application/support-bundle.ts",
     "access-tracker.ts", "adaptive-retrieval.ts", "admission-control.ts",
@@ -78,6 +80,7 @@ const ROOT_MODULES_BY_LAYER = {
   infrastructure: [
     "artifacts.ts", "embedder.ts", "experience-store.ts", "file-privacy.ts",
     "fresh-install-v2-authority.ts",
+    "runtime-release-authority.ts",
     "journal-recovery.ts", "lance-row-scan.ts", "lancedb-loader.ts", "llm-client.ts", "llm-oauth.ts", "memory-write-lock.ts", "outbound-endpoint-policy.ts",
     "oauth-session-storage.ts", "private-file-lock.ts", "private-lock-file.ts", "proper-lockfile.d.ts",
     "reflection-event-store.ts", "reflection-item-store.ts",

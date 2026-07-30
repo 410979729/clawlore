@@ -48,6 +48,9 @@ Public installs default to conservative behavior:
 
 - `autoCapture` is off until an operator explicitly enables it.
 - `smartExtraction` is off until an operator opts in to LLM-based extraction.
+- Task Experience capture is independently opt-in. When enabled it uses the
+  configured review LLM even if `smartExtraction` remains off, and may send a
+  bounded, secret-redacted successful-task transcript to that provider.
 - `autoBackup` is a deprecated no-op retained for configuration compatibility. Keep it `false`; `true` makes `clawlore doctor` report an issue and never creates a backup. Use the encrypted snapshot/export operator flow instead.
 - Hosted embeddings and reranking can send text to configured providers. Use `local-hash`, local endpoints, or disabled reranking for sensitive deployments.
 - `memory_forget` requires `confirm: true` for deletion; query mode returns candidates first.
@@ -134,10 +137,18 @@ never converts existing data. Shadow or transition activation for an existing
 store requires a private `0600` readiness receipt. The loader
 binds that receipt to the exact Git commit, runtime artifact, package and lock
 files, normalized plugin config, SQL truth snapshot, and test log. Receipts
-expire and any mismatch fails closed. V2 write/cutover approval additionally
-requires non-empty active lifecycle data and minimum real shadow sample,
-overlap, rank, latency, forbidden-scope, and prompt-budget thresholds. A
-zero-active or zero-parity dataset cannot produce a cutover-ready receipt.
+expire and any mismatch fails closed on first activation. After an exact
+`v2-write` or `cutover` receipt succeeds, ClawLore records a durable authority
+marker in the same SQLite truth database. Later restarts still require the
+same private, unchanged receipt and exact commit/artifact/package/lock/config/
+test binding, but may tolerate that receipt's expiry and normal SQL-truth
+writes. A new release, configuration change, receipt rewrite, missing or
+malformed marker, or any immutable binding mismatch requires a fresh exact
+receipt and fails closed until it passes. Shadow mode never receives this
+write-runtime authority. V2 write/cutover approval additionally requires
+non-empty active lifecycle data and minimum real shadow sample, overlap, rank,
+latency, forbidden-scope, and prompt-budget thresholds. A zero-active or
+zero-parity dataset cannot produce a cutover-ready receipt.
 
 The runtime transition is intentionally staged:
 
@@ -205,6 +216,8 @@ SQLite transcript intake is exact-session and read-only. The database and any
 existing WAL/SHM companions must be owner-only regular files, the target
 principal or private session identity must be explicit, and a window with no
 eligible user/assistant events fails instead of reporting a false-green run.
+Both the legacy `sessions` catalog and the current OpenClaw `session_windows`
+catalog are accepted; any other or incomplete host schema fails closed.
 Tool arguments, tool-result bodies, thinking, custom events, and raw session
 identifiers are not admitted. Transcript chunks remain raw evidence; only an
 explicit `--apply` can create reviewable digest candidates.
@@ -267,9 +280,28 @@ The equivalent automation inputs are `CLAWLORE_RUNTIME_PRINCIPAL` and
 valid substitutes for a direct user's canonical principal.
 
 After all gates pass on a clean commit, `npm run release:readiness` can create
-the immutable build-provenance sidecar and expiring shadow receipt. The command
-requires explicit paths for the full test log, OpenClaw config, SQL truth DB,
-and receipt output; it does not authorize V2 writes or cutover.
+the immutable build-provenance sidecar and an expiring, mode-matched readiness
+receipt. The command requires explicit paths for the full test log, OpenClaw
+config, SQL truth DB, and receipt output.
+
+The readiness mode comes from the final parsed `runtime.mode`; it is never
+silently rewritten to shadow. An `auto` configuration additionally requires
+`CLAWLORE_RESOLVED_RUNTIME_MODE=disabled|cutover`. For `v2-write` or `cutover`,
+the operator must explicitly set `CLAWLORE_SNAPSHOT_VERIFIED=1`,
+`CLAWLORE_MIGRATION_DRILL_PASSED=1`,
+`CLAWLORE_ROLLBACK_DRILL_PASSED=1`,
+`CLAWLORE_LEGACY_HASH_UNCHANGED=1`, and
+`CLAWLORE_FORBIDDEN_SCOPE_VIOLATIONS=0`. Missing write evidence fails closed.
+`CLAWLORE_PRIOR_READINESS` may carry forward quality observations only when
+the prior ready receipt is unexpired and its mode, normalized config digest,
+and SQL-truth snapshot digest still match; `CLAWLORE_TRACE` and prior-receipt
+reuse are mutually exclusive.
+
+Generating a new receipt is distinct from the runtime's durable authority.
+The first successful write-mode startup records that authority transactionally
+inside `memory.sqlite3`. Do not create, edit, or delete the authority table by
+hand. A later receipt rewrite must itself be fresh and exact before it can
+rotate the marker.
 
 ## Public Release Staging
 

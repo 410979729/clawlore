@@ -3,9 +3,11 @@ import { existsSync, lstatSync, realpathSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { digestSourceIdentifier, requireDigestBoundaryIdentifier, } from "../../digest-boundary-policy.js";
+import { verifyPrivatePath } from "../../file-privacy.js";
 const require = createRequire(import.meta.url);
 const REQUIRED_SESSION_COLUMNS = new Set(["session_id"]);
 const REQUIRED_EVENT_COLUMNS = new Set(["session_id", "seq", "event_json", "created_at"]);
+const SESSION_CATALOG_TABLES = ["sessions", "session_windows"];
 const SAFE_ROLES = new Set(["user", "assistant"]);
 const SAFE_TEXT_TYPES = new Set(["text", "output_text"]);
 const TOOL_CALL_TYPES = new Set(["toolCall", "tool_call"]);
@@ -25,6 +27,18 @@ function requiredColumns(db, table, expected) {
         throw new Error(`unsupported OpenClaw transcript schema: ${table} missing ${missing.join(",")}`);
     }
 }
+function tableExists(db, table) {
+    return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table));
+}
+function resolveSessionCatalogTable(db) {
+    for (const table of SESSION_CATALOG_TABLES) {
+        if (!tableExists(db, table))
+            continue;
+        requiredColumns(db, table, REQUIRED_SESSION_COLUMNS);
+        return table;
+    }
+    throw new Error("unsupported OpenClaw transcript schema: missing sessions or session_windows");
+}
 function enforcePrivateDatabaseFile(path, label) {
     if (!existsSync(path))
         return;
@@ -33,8 +47,11 @@ function enforcePrivateDatabaseFile(path, label) {
     const info = statSync(path);
     if (!info.isFile())
         throw new Error(`${label} must be a regular file`);
-    if (process.platform !== "win32" && (info.mode & 0o077) !== 0) {
-        throw new Error(`${label} must be owner-only`);
+    try {
+        verifyPrivatePath(path, { kind: "file" });
+    }
+    catch (error) {
+        throw new Error(`${label} must be owner-only`, { cause: error });
     }
 }
 function canonicalPrivateDatabasePath(dbPath) {
@@ -142,7 +159,7 @@ export function readOpenClawSqliteTranscript(options) {
     const db = new Sqlite(canonical, { readOnly: true });
     try {
         db.exec("PRAGMA query_only=ON; PRAGMA busy_timeout=5000;");
-        requiredColumns(db, "sessions", REQUIRED_SESSION_COLUMNS);
+        const sessionCatalogTable = resolveSessionCatalogTable(db);
         requiredColumns(db, "transcript_events", REQUIRED_EVENT_COLUMNS);
         const predicates = ["s.session_id = ?"];
         const parameters = [sessionId];
@@ -158,7 +175,7 @@ export function readOpenClawSqliteTranscript(options) {
         const rows = db.prepare(`
       SELECT t.session_id, t.seq, t.event_json, t.created_at
       FROM transcript_events AS t
-      JOIN sessions AS s ON s.session_id = t.session_id
+      JOIN ${sessionCatalogTable} AS s ON s.session_id = t.session_id
       WHERE ${predicates.join(" AND ")}
       ORDER BY t.created_at DESC, t.seq DESC
       LIMIT ?

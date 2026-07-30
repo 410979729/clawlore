@@ -999,7 +999,7 @@
           "enabled": {
             "type": "boolean",
             "default": false,
-            "description": "Capture replayable procedure capsules after successful real tasks. Requires smartExtraction/LLM config."
+            "description": "Capture replayable procedure capsules after successful real tasks. Requires configured LLM credentials but does not require smartExtraction."
           },
           "minMessages": {
             "type": "integer",

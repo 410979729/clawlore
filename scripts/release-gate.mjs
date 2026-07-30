@@ -20,6 +20,12 @@ import {
   assertRepositoryIdentity,
 } from "./repository-identity.mjs";
 import { assertReleaseDoctor } from "./release-operator-contract.mjs";
+import {
+  openClawCliForPackage,
+  resolveOpenClawCliTarget,
+  resolveOpenClawPackageTarget,
+} from "./openclaw-cli-target.mjs";
+import { assertRuntimeDiagnostic } from "./runtime-diagnostic-contract.mjs";
 
 async function exists(path) {
   try {
@@ -90,16 +96,12 @@ function runCapture(command, args, options = {}) {
 }
 
 function runOpenClawCapture(command, args, options = {}) {
-  if (/\.(?:c?js|mjs)$/i.test(command)) {
-    return runCapture(process.execPath, [command, ...args], options);
-  }
-  return runCapture(command, args, options);
+  const target = resolveOpenClawCliTarget(command, args);
+  return runCapture(target.command, target.args, options);
 }
 
 function captureOpenClawReport(command, args, options, label) {
-  const target = /\.(?:c?js|mjs)$/i.test(command)
-    ? { command: process.execPath, args: [command, ...args] }
-    : spawnTarget(command, args);
+  const target = resolveOpenClawCliTarget(command, args);
   const result = spawnSync(target.command, target.args, {
     encoding: "utf8",
     shell: false,
@@ -130,38 +132,6 @@ function doctorArgs() {
   const principal = String(process.env.CLAWLORE_RUNTIME_PRINCIPAL || "").trim();
   if (principal) args.push("--principal", principal);
   return args;
-}
-
-function assertRuntimeDiagnostic(report, expectedRuntimeDigest) {
-  const runtime = report?.runtimeDiagnostic;
-  if (!runtime || runtime.ok !== true) {
-    throw new Error("release gate failed: ClawLore runtime diagnostic did not report ok=true");
-  }
-  if (runtime.configuredMode === "disabled") {
-    if (runtime.status !== "disabled") {
-      throw new Error("release gate failed: disabled ClawLore runtime diagnostic is inconsistent");
-    }
-    return;
-  }
-  const receipt = runtime.receipt;
-  if (
-    runtime.status !== "registered"
-    || receipt?.runtime?.status !== "registered"
-    || receipt?.runtime?.registeredHookCount !== 1
-    || JSON.stringify(receipt?.runtime?.registeredHooks) !== JSON.stringify(["message_received"])
-    || receipt?.runtime?.writeEnabled !== false
-    || receipt?.runtime?.promptMutationEnabled !== false
-    || receipt?.runtime?.contextEngineRegistered !== false
-    || !Array.isArray(receipt?.runtime?.blockingReasons)
-    || receipt.runtime.blockingReasons.length !== 0
-    || receipt?.readiness?.status !== "ready"
-    || receipt?.readiness?.bindingVerified !== true
-    || !Array.isArray(receipt?.readiness?.errors)
-    || receipt.readiness.errors.length !== 0
-    || (expectedRuntimeDigest && receipt?.binding?.runtimeDigest !== expectedRuntimeDigest)
-  ) {
-    throw new Error("release gate failed: ClawLore shadow runtime receipt contract is not satisfied");
-  }
 }
 
 function isDeepSubset(expected, actual) {
@@ -799,6 +769,18 @@ for (const marker of ["openclaw-scope-v1", "scope_filter_mode", "memory_store", 
 }
 
 const stateDir = resolve(process.env.OPENCLAW_STATE_DIR || process.env.OPENCLAW_HOME || resolve(sourceRoot, "../../.."));
+const configuredOpenClawPackage = String(process.env.OPENCLAW_PACKAGE_DIR || "").trim();
+const configuredOpenClawCli = String(process.env.OPENCLAW_CLI || "").trim();
+const openClawPackage = resolveOpenClawPackageTarget({
+  stateDir,
+  configuredPackage: configuredOpenClawPackage,
+  configuredCli: configuredOpenClawCli,
+});
+const inferredOpenClawCli = openClawCliForPackage(openClawPackage);
+const releaseOpenClawCli = configuredOpenClawCli
+  && !["1", "true", "yes"].includes(configuredOpenClawCli.toLowerCase())
+  ? configuredOpenClawCli
+  : inferredOpenClawCli;
 const extensionDir = resolve(
   process.env.CLAWLORE_EXTENSION_DIR ||
   process.env.SCOPE_RECALL_EXTENSION_DIR ||
@@ -850,13 +832,8 @@ console.log(`release gate build identity: commit=${gitCommit} runtime=${candidat
 
 if (!sourceOnly && !enabledByEnvironment("CLAWLORE_SKIP_RUNTIME_SMOKE", "SCOPE_RECALL_SKIP_RUNTIME_SMOKE")) {
   const configPath = resolve(process.env.OPENCLAW_CONFIG_PATH || resolve(stateDir, "openclaw.json"));
-  const inferredCli = resolve(stateDir, "../../app/node_modules/.bin/openclaw");
-  const configuredCli = String(process.env.OPENCLAW_CLI || "").trim();
-  const openclawCli = configuredCli && !["1", "true", "yes"].includes(configuredCli.toLowerCase())
-    ? configuredCli
-    : inferredCli;
-  if (openclawCli.includes("/") && !(await exists(openclawCli))) {
-    throw new Error(`release gate failed: OpenClaw CLI not found for runtime smoke: ${openclawCli}`);
+  if (isAbsolute(releaseOpenClawCli) && !(await exists(releaseOpenClawCli))) {
+    throw new Error(`release gate failed: OpenClaw CLI not found for runtime smoke: ${releaseOpenClawCli}`);
   }
   if (!(await exists(configPath))) {
     throw new Error(`release gate failed: OpenClaw config not found for runtime smoke: ${configPath}`);
@@ -868,7 +845,7 @@ if (!sourceOnly && !enabledByEnvironment("CLAWLORE_SKIP_RUNTIME_SMOKE", "SCOPE_R
     OPENCLAW_CONFIG_PATH: configPath,
   };
   const inspect = parseJsonWithPreamble(
-    runOpenClawCapture(openclawCli, ["plugins", "inspect", "clawlore", "--json"], { env: runtimeEnv }),
+    runOpenClawCapture(releaseOpenClawCli, ["plugins", "inspect", "clawlore", "--json"], { env: runtimeEnv }),
     "OpenClaw plugin inspect",
   );
   if (
@@ -888,7 +865,7 @@ if (!sourceOnly && !enabledByEnvironment("CLAWLORE_SKIP_RUNTIME_SMOKE", "SCOPE_R
     throw new Error("release gate failed: OpenClaw inspect rootDir does not match the verified live extension");
   }
   const doctorResult = captureOpenClawReport(
-    openclawCli,
+    releaseOpenClawCli,
     doctorArgs(),
     { env: runtimeEnv },
     "OpenClaw ClawLore doctor",
@@ -978,13 +955,6 @@ try {
     throw new Error("release gate failed: installed tarball lost the package script publication contract");
   }
 
-  const configuredOpenClawPackage = String(process.env.OPENCLAW_PACKAGE_DIR || "").trim();
-  const openClawPackage = resolve(
-    configuredOpenClawPackage || resolve(stateDir, "../../app/node_modules/openclaw"),
-  );
-  if (!(await exists(openClawPackage))) {
-    throw new Error(`release gate failed: OpenClaw package missing for packed runtime smoke: ${openClawPackage}`);
-  }
   run("node", [
     "scripts/clawlore-agent-tool-profile-host-smoke.mjs",
     openClawPackage,
@@ -1002,10 +972,7 @@ try {
     cwd: installedRoot,
   });
 
-  const configuredOpenClawCli = String(process.env.OPENCLAW_CLI || "").trim();
-  const packedOpenClawCli = configuredOpenClawCli && !["1", "true", "yes"].includes(configuredOpenClawCli.toLowerCase())
-    ? configuredOpenClawCli
-    : resolve(openClawPackage, "../.bin/openclaw");
+  const packedOpenClawCli = releaseOpenClawCli;
   if (!(await exists(packedOpenClawCli))) {
     throw new Error(`release gate failed: OpenClaw CLI missing for installed-tarball smoke: ${packedOpenClawCli}`);
   }

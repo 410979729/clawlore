@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import { composeContextPack, renderCompatibilityContextPack, } from "../../application/context-composer.js";
 import { resolveContextEngineActorAddressV1 } from "../../application/context-engine-session-identity.js";
+async function delegateCompaction(input) {
+    const { delegateCompactionToRuntime } = await import("openclaw/plugin-sdk/core");
+    return delegateCompactionToRuntime(input);
+}
 function estimatedTokens(messages, addition = "") {
     const serialized = messages.map((message) => {
         if (typeof message.content === "string")
@@ -89,8 +93,11 @@ export function createClawLoreNativeContextEngineV1(dependencies) {
                 ...(addition ? { systemPromptAddition: addition } : {}),
             };
         },
-        async compact() {
-            return { ok: true, compacted: false, reason: "host_owned_compaction" };
+        async compact(input) {
+            // This engine does not own the transcript compaction algorithm. It must
+            // still bridge manual and overflow-triggered compaction to OpenClaw;
+            // returning a successful no-op would leave an overflowing turn stuck.
+            return (dependencies.compactionDelegate ?? delegateCompaction)(input);
         },
     };
 }

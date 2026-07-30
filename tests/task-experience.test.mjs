@@ -24,6 +24,22 @@ const {
   shouldAttemptTaskExperienceCapture,
 } = jiti("../src/task-experience.ts");
 const { structuredToolOutcome } = jiti("../src/task-outcome-evidence.ts");
+const { requiresBackgroundLlmRuntime } = jiti("../src/background-llm-policy.ts");
+
+test("task-experience review initializes its LLM independently of smart extraction", () => {
+  assert.equal(requiresBackgroundLlmRuntime({
+    smartExtraction: false,
+    taskExperienceCapture: { enabled: true },
+  }), true);
+  assert.equal(requiresBackgroundLlmRuntime({
+    smartExtraction: true,
+    taskExperienceCapture: { enabled: false },
+  }), true);
+  assert.equal(requiresBackgroundLlmRuntime({
+    smartExtraction: false,
+    taskExperienceCapture: { enabled: false },
+  }), false);
+});
 
 test("agent_end task-experience capture requires explicit structured success", () => {
   assert.equal(agentEndEventAllowsTaskExperience({ messages: [] }), false);

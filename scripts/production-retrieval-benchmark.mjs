@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { readFile, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { MemoryStore } from "../dist/src/store.js";
 import { DEFAULT_RETRIEVAL_CONFIG, MemoryRetriever } from "../dist/src/retriever.js";
+import { privateTemporaryParent } from "./private-temporary-environment.mjs";
 
 const args = process.argv.slice(2);
 const summaryOnly = args.includes("--summary");
@@ -62,7 +62,10 @@ assert.ok(Array.isArray(fixture.cases), "production benchmark cases are required
 assert.ok(fixture.cases.length >= 100 && fixture.cases.length <= 300,
   "production benchmark requires 100-300 annotated cases");
 
-const root = await mkdtemp(join(tmpdir(), "clawlore-production-retrieval-"));
+const root = await mkdtemp(join(
+  privateTemporaryParent(),
+  ".clawlore-production-retrieval-",
+));
 const store = new MemoryStore({
   dbPath: root,
   vectorDim: VECTOR_DIMENSION,

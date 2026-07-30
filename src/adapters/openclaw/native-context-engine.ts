@@ -9,6 +9,12 @@ import { resolveContextEngineActorAddressV1 } from "../../application/context-en
 import type { MemoryAddressV2 } from "../../v2/domain/memory-address.js";
 import type { CompatibilityRetrievalRequestV1 } from "./compatibility-context-adapter.js";
 
+type OpenClawCompactionDelegate = typeof import(
+  "openclaw/plugin-sdk/core"
+).delegateCompactionToRuntime;
+type OpenClawCompactionInput = Parameters<OpenClawCompactionDelegate>[0];
+type OpenClawCompactionResult = Awaited<ReturnType<OpenClawCompactionDelegate>>;
+
 export interface NativeContextEngineMessageV1 {
   role?: string;
   content?: unknown;
@@ -39,7 +45,7 @@ export interface NativeContextEngineV1 {
     promptAuthority: "preassembly_may_overflow";
     systemPromptAddition?: string;
   }>;
-  compact(): Promise<{ ok: true; compacted: false; reason: "host_owned_compaction" }>;
+  compact(input: OpenClawCompactionInput): Promise<OpenClawCompactionResult>;
 }
 
 export interface NativeContextEngineDependenciesV1 {
@@ -50,6 +56,12 @@ export interface NativeContextEngineDependenciesV1 {
   tokenBudget: number;
   maxQueryChars: number;
   retrieveCandidates(request: CompatibilityRetrievalRequestV1): Promise<ContextCandidateV1[]>;
+  compactionDelegate?: OpenClawCompactionDelegate;
+}
+
+async function delegateCompaction(input: OpenClawCompactionInput): Promise<OpenClawCompactionResult> {
+  const { delegateCompactionToRuntime } = await import("openclaw/plugin-sdk/core");
+  return delegateCompactionToRuntime(input);
 }
 
 function estimatedTokens(messages: NativeContextEngineMessageV1[], addition = ""): number {
@@ -151,8 +163,11 @@ export function createClawLoreNativeContextEngineV1(
         ...(addition ? { systemPromptAddition: addition } : {}),
       };
     },
-    async compact() {
-      return { ok: true, compacted: false, reason: "host_owned_compaction" };
+    async compact(input) {
+      // This engine does not own the transcript compaction algorithm. It must
+      // still bridge manual and overflow-triggered compaction to OpenClaw;
+      // returning a successful no-op would leave an overflowing turn stuck.
+      return (dependencies.compactionDelegate ?? delegateCompaction)(input);
     },
   };
 }

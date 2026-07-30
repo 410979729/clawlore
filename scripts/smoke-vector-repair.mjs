@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { privateTemporaryParent } from "./private-temporary-environment.mjs";
 
 const require = createRequire(import.meta.url);
 const { createJiti } = require("jiti");
@@ -18,7 +18,10 @@ function assert(condition, message) {
   }
 }
 
-const dbPath = await mkdtemp(join(tmpdir(), "clawlore-vector-repair-"));
+const dbPath = await mkdtemp(join(
+  privateTemporaryParent(),
+  ".clawlore-vector-repair-",
+));
 let store;
 
 try {

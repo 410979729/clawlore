@@ -64,7 +64,6 @@ import { ensureExperienceSchema } from "./src/experience-store.js";
 import { registerMarkdownCompatibility } from "./src/markdown-compat.js";
 import { createMdMirrorWriter } from "./src/markdown-mirror.js";
 import {
-  createConfiguredLlmRuntime,
   createCoreMemoryRuntime,
   getDefaultWorkspaceDir,
   resolveCliPluginConfig,
@@ -79,6 +78,7 @@ import { registerTaskExperienceHooks } from "./src/task-experience-hooks.js";
 import { registerSelfImprovementHooks } from "./src/self-improvement-hooks.js";
 import { registerReflectionHooks } from "./src/reflection-hooks.js";
 import { effectiveAgentToolCapabilities } from "./src/agent-tool-profile.js";
+import { initializeBackgroundLlmRuntime } from "./src/background-llm-runtime.js";
 
 // ============================================================================
 // Default Configuration
@@ -249,13 +249,11 @@ const clawLorePlugin = {
 
     // Initialize smart extraction
     let smartExtractor: SmartExtractor | null = null;
-    let llmClientForExtraction: ReturnType<typeof createConfiguredLlmRuntime>["client"] | null = null;
-    if (config.smartExtraction === true) {
-      try {
-        const { client: llmClient, model: llmModel, timeoutMs: llmTimeoutMs } =
-          createConfiguredLlmRuntime(api, config);
-        llmClientForExtraction = llmClient;
+    const logReg = isCliRegistrationMode(api) ? api.logger.debug : api.logger.info;
+    const backgroundLlmRuntime = initializeBackgroundLlmRuntime({ api, config, logRegistration: logReg });
 
+    if (config.smartExtraction === true && backgroundLlmRuntime) {
+      try {
         // Initialize embedding-based noise prototype bank (async, non-blocking)
         const noiseBank = new NoisePrototypeBank(
           (msg: string) => api.logger.debug(msg),
@@ -270,7 +268,7 @@ const clawLorePlugin = {
           api,
         );
 
-        smartExtractor = new SmartExtractor(store, embedder, llmClient, {
+        smartExtractor = new SmartExtractor(store, embedder, backgroundLlmRuntime.client, {
           user: "User",
           extractMinMessages: config.extractMinMessages ?? 4,
           extractMaxChars: config.extractMaxChars ?? 8000,
@@ -285,9 +283,9 @@ const clawLorePlugin = {
 
         (isCliRegistrationMode(api) ? api.logger.debug : api.logger.info)(
           "clawlore: smart extraction enabled (LLM model: "
-          + llmModel
+          + backgroundLlmRuntime.model
           + ", timeoutMs: "
-          + llmTimeoutMs
+          + backgroundLlmRuntime.timeoutMs
           + ", noise bank: ON)",
         );
       } catch (err) {
@@ -339,7 +337,6 @@ const clawLorePlugin = {
       };
     };
 
-    const logReg = isCliRegistrationMode(api) ? api.logger.debug : api.logger.info;
     logReg(
       `clawlore@${pluginVersion}: plugin registered (db: ${resolvedDbPath}, model: ${embeddingModel}, vectorBackend: ${config.vectorBackend || "lancedb"}, smartExtraction: ${smartExtractor ? 'ON' : 'OFF'})`
     );
@@ -492,7 +489,7 @@ const clawLorePlugin = {
     });
 
     registerTaskExperienceHooks({
-      api, config, store, embedder, scopeManager, llmClient: llmClientForExtraction, mdMirror,
+      api, config, store, embedder, scopeManager, llmClient: backgroundLlmRuntime?.client ?? null, mdMirror,
       resolveRuntimeAccess: runtimeMemoryAccessFor, isInternalSession: isInternalReflectionSessionKey,
       logRegistration: logReg,
     });

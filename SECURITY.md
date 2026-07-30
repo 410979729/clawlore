@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-The active beta line is `1.2.x`. Security fixes should target the latest beta unless a maintainer explicitly opens a backport branch.
+The active beta line is `2.0.x`. Security fixes should target the latest beta unless a maintainer explicitly opens a backport branch.
 
 ## Reporting A Vulnerability
 
@@ -26,8 +26,13 @@ legacy agent-scope reads for untrusted principals.
 
 Release readiness receipts are not self-attestation booleans. They must be
 private `0600` files bound to an exact commit, runtime artifact, config, data
-snapshot, and test log, with a finite expiry. Any mismatch must block shadow
-registration or cutover.
+snapshot, and test log, with a finite expiry. Shadow always requires a current
+exact receipt. A successful V2-write/cutover activation records a durable
+release authority in the same private SQLite truth database; it permits only
+subsequent truth-snapshot drift and receipt expiry while the receipt body,
+commit, runtime/package/lock artifacts, config, and test evidence remain
+unchanged. Missing, malformed, or rewritten receipt/authority data and every
+immutable mismatch must block registration until a fresh exact receipt passes.
 
 Public defaults keep automatic capture, LLM extraction, and plaintext JSONL backups disabled. Enabling hosted extraction, embeddings, reranking, OAuth, reflection storage, rejected-candidate audits, or backups can persist or transmit conversation-derived data; do that only with an explicit operator decision.
 

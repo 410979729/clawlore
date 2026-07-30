@@ -2,7 +2,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { chmod, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { performance } from "node:perf_hooks";
@@ -15,6 +14,7 @@ import {
 } from "../dist/src/manual-recall-confidence.js";
 import { MemoryStore } from "../dist/src/store.js";
 import { DEFAULT_RETRIEVAL_CONFIG, MemoryRetriever } from "../dist/src/retriever.js";
+import { privateTemporaryParent } from "./private-temporary-environment.mjs";
 
 // A wider deterministic vector keeps the offline replay stable without the
 // collision rate of the old 96-bucket diagnostic embedding.
@@ -219,7 +219,10 @@ async function loadFixture(fixturePath, workspaceRoot) {
 export async function evaluateRealCorpusShadow(input) {
   const loaded = await loadFixture(input.fixturePath, input.workspaceRoot);
   const fixture = loaded.fixture;
-  const root = await mkdtemp(join(tmpdir(), "clawlore-real-corpus-shadow-"));
+  const root = await mkdtemp(join(
+    privateTemporaryParent(),
+    ".clawlore-real-corpus-shadow-",
+  ));
   const embedPassage = input.embedding?.embedPassage ?? (async (text) => deterministicEmbedding(text));
   const embedQuery = input.embedding?.embedQuery ?? (async (text) => deterministicEmbedding(text));
   const embeddingLabel = input.embedding?.label ?? "deterministic-hashed-token-v1";

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { artifactBinding, releaseProvenance } from "./fixtures/release-provenance.mjs";
@@ -53,7 +53,8 @@ test("runtime diagnostic mode preserves an explicit disabled CLI lane", () => {
 });
 
 test("doctor reports the persisted runtime registration truth", async () => {
-  const root = await mkdtemp(join(tmpdir(), "clawlore-doctor-runtime-"));
+  const privateFixtureParent = process.platform === "win32" ? homedir() : tmpdir();
+  const root = await mkdtemp(join(privateFixtureParent, "clawlore-doctor-runtime-"));
   const db = experienceDb();
   const previousExitCode = process.exitCode;
   const previousWrite = process.stdout.write;

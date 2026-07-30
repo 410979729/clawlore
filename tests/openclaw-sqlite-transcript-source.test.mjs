@@ -22,22 +22,30 @@ const {
   readOpenClawSqliteTranscript,
 } = jiti("../src/v2/storage/openclaw-sqlite-transcript-source.ts");
 const {
+  enforcePrivatePath,
+} = jiti("../src/file-privacy.ts");
+const {
   collectDigestChunks,
   runDigestPipeline,
 } = jiti("../src/digest-pipeline.ts");
 
-function createTranscriptFixture(path) {
+function createTranscriptFixture(path, options = {}) {
+  const sessionCatalog = options.sessionCatalog ?? "sessions";
   const db = new DatabaseSync(path);
   try {
-    db.exec(`
-      CREATE TABLE sessions (
+    db.exec(`${sessionCatalog === "session_windows" ? `
+      CREATE TABLE session_windows (
         session_id TEXT PRIMARY KEY,
-        session_key TEXT NOT NULL,
-        session_scope TEXT NOT NULL,
-        chat_type TEXT,
-        channel TEXT,
-        primary_conversation_id TEXT
-      );
+        session_key TEXT NOT NULL
+      );` : `
+      CREATE TABLE sessions (
+          session_id TEXT PRIMARY KEY,
+          session_key TEXT NOT NULL,
+          session_scope TEXT NOT NULL,
+          chat_type TEXT,
+          channel TEXT,
+          primary_conversation_id TEXT
+      );`}
       CREATE TABLE transcript_events (
         session_id TEXT NOT NULL,
         seq INTEGER NOT NULL,
@@ -46,22 +54,29 @@ function createTranscriptFixture(path) {
         PRIMARY KEY (session_id, seq)
       );
     `);
-    db.prepare("INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?)").run(
-      "session-1",
-      "agent:main:telegram:direct:synthetic",
-      "conversation",
-      "direct",
-      "telegram",
-      "conversation-1",
-    );
-    db.prepare("INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?)").run(
-      "session-2",
-      "agent:main:telegram:direct:other",
-      "conversation",
-      "direct",
-      "telegram",
-      "conversation-2",
-    );
+    if (sessionCatalog === "session_windows") {
+      const insertSession = db.prepare("INSERT INTO session_windows VALUES (?, ?)");
+      insertSession.run("session-1", "agent:main:telegram:direct:synthetic");
+      insertSession.run("session-2", "agent:main:telegram:direct:other");
+    } else {
+      const insertSession = db.prepare("INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?)");
+      insertSession.run(
+        "session-1",
+        "agent:main:telegram:direct:synthetic",
+        "conversation",
+        "direct",
+        "telegram",
+        "conversation-1",
+      );
+      insertSession.run(
+        "session-2",
+        "agent:main:telegram:direct:other",
+        "conversation",
+        "direct",
+        "telegram",
+        "conversation-2",
+      );
+    }
     const secret = "fixture-secret-must-not-escape";
     const events = [
       [1, {
@@ -99,7 +114,7 @@ function createTranscriptFixture(path) {
   } finally {
     db.close();
   }
-  chmodSync(path, 0o600);
+  enforcePrivatePath(path, { kind: "file" });
 }
 
 function createMemoryTruthDb() {
@@ -172,6 +187,25 @@ test("SQLite transcript source is exact-session, content-minimal, and physically
   }
 });
 
+test("SQLite transcript source accepts the current OpenClaw session_windows catalog", () => {
+  const root = mkdtempSync(join(tmpdir(), "clawlore-transcript-current-schema-"));
+  try {
+    const dbPath = join(root, "openclaw-agent.sqlite");
+    createTranscriptFixture(dbPath, { sessionCatalog: "session_windows" });
+    const result = readOpenClawSqliteTranscript({
+      dbPath,
+      sessionId: "session-1",
+      scope: "principal:telegram:default:joy",
+      maxEvents: 10,
+    });
+    assert.equal(result.inspection.exactSession, true);
+    assert.equal(result.inspection.eligibleEvents, 3);
+    assert.ok(result.chunks.every((chunk) => chunk.scope === "principal:telegram:default:joy"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("SQLite transcript source fails closed on empty windows, unsafe files, and unsupported schema", () => {
   const root = mkdtempSync(join(tmpdir(), "clawlore-transcript-fail-closed-"));
   try {
@@ -222,7 +256,7 @@ test("SQLite transcript source fails closed on empty windows, unsafe files, and 
     const invalid = new DatabaseSync(invalidPath);
     invalid.exec("CREATE TABLE sessions(session_id TEXT PRIMARY KEY)");
     invalid.close();
-    chmodSync(invalidPath, 0o600);
+    enforcePrivatePath(invalidPath, { kind: "file" });
     assert.throws(() => readOpenClawSqliteTranscript({
       dbPath: invalidPath,
       sessionId: "session-1",

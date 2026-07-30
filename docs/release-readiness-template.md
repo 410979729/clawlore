@@ -34,6 +34,7 @@ Use this template for each release candidate.
 - Dashboard status:
 - Digest status:
 - Experience status:
+- Durable release authority status:
 - Safe recall probe:
 
 ## Decision
